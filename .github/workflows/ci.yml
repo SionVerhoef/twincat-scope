@@ -53,4 +53,8 @@ jobs:
           # the absolute-path check above covers.
 
       - name: no real AMS NetId committed in a template
-        run: ! grep -rnE '<AmsNetId>[1-9]' templates/ || exit 1
+        # Must be a block scalar. In `run: ! grep ...` YAML reads the leading `!`
+        # as a tag indicator and strips it, which silently inverts the check:
+        # it then fails when the templates are clean and passes when they are not.
+        run: |
+          ! grep -rnE '<AmsNetId>[1-9]' templates/ || exit 1
