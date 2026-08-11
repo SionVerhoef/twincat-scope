@@ -17,3 +17,13 @@ tests/fixtures/ground_truth.json
 
 # Local tool discovery
 config.json
+
+# Local issue-tracker and agent scaffolding, if the maintainer's tooling creates
+# it here. It is private workflow state, not part of the skill, and an auto-
+# generated AGENTS.md in particular carries instructions meant for one person's
+# setup rather than for anyone installing this.
+.beads/
+.dolt/
+*.db
+.beads-credential-key
+/AGENTS.md
