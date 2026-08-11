@@ -1,0 +1,19 @@
+# Recorded data never belongs in git: it is large, it does not diff, and it carries
+# real machine behaviour. See examples/README.md before committing anything from a
+# real installation.
+*.svdx
+*.svd
+*.parquet
+*.tdms
+
+# Derived artefacts
+*.png
+.cache/
+__pycache__/
+
+# Generated fixtures - tests/make_fixture.py recreates them on demand.
+tests/fixtures/*.csv
+tests/fixtures/ground_truth.json
+
+# Local tool discovery
+config.json

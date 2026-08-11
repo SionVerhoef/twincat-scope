@@ -1,0 +1,8 @@
+# TwinCAT measurement files are UTF-8-with-BOM + CRLF and must round-trip byte-exact.
+# -text disables all line-ending conversion regardless of core.autocrlf, on any platform.
+*.tcscopex  -text
+*.tcmproj   -text
+*.svdx      -text -diff
+
+# Fixtures deliberately carry CRLF, because that is what the export tool writes.
+tests/fixtures/*.csv  -text

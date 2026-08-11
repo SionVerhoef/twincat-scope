@@ -1,0 +1,56 @@
+name: tests
+
+# Runs only once this folder is the root of its own repository. Nested inside a
+# parent repo it never fires, because GitHub reads workflows from the root
+# .github/ only - so until then, run the same steps by hand.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: doctor runs with no dependencies installed
+        # The lazy-import contract: the acquisition half must work on a machine
+        # that has never seen uv. Ignore the exit code - doctor exits non-zero
+        # when optional pieces are missing, which is expected here.
+        run: python3 scripts/tcscope.py doctor || true
+
+      - name: acquisition verbs need no third-party packages
+        run: |
+          python3 scripts/tcscope.py checkscope templates/axis-diagnosis.tcscopex
+          python3 scripts/tcscope.py newscope templates/minimal-single-channel.tcscopex \
+            -o /tmp/generated.tcscopex --channels "MAIN.fbTest.Value" --netid 1.2.3.4.1.1
+          python3 scripts/tcscope.py checkscope /tmp/generated.tcscopex
+
+      - name: generate fixtures
+        run: python3 tests/make_fixture.py
+
+      - name: end-to-end verb tests
+        run: python3 tests/test_verbs.py
+
+      - name: standalone contract
+        # No reference may point outside this repository, and no business
+        # branding may leak into it. The bracket around the first letter keeps
+        # each pattern from matching this file, which would fail the check
+        # against its own source.
+        run: |
+          ! grep -rn '\.\./\.\.' --include='*.md' --include='*.py' . || exit 1
+          ! grep -rniE '[s]olvera|certified [b]eckhoff' . || exit 1
+          ! grep -rnE '/[h]ome/|/[p]rojects/|[C]:\\Users' \
+              --include='*.md' --include='*.py' --include='*.yml' . || exit 1
+          # The twincat-st guard that used to sit here is gone on purpose: that
+          # companion is published now, so the README's link to it is accurate.
+          # What must still never appear is a path into a sibling checkout, which
+          # the absolute-path check above covers.
+
+      - name: no real AMS NetId committed in a template
+        run: ! grep -rnE '<AmsNetId>[1-9]' templates/ || exit 1
