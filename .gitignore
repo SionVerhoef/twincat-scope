@@ -17,6 +17,13 @@ tests/fixtures/*.csv
 tests/fixtures/ground_truth.json
 tests/fixtures/real/
 
+# Eval fixtures are generated too, and eval runs hold one agent answer per
+# cell - transcripts of a measurement, not part of the skill.
+evals/fixtures/
+evals/ground_truth.json
+evals/runs/
+evals/summary.json
+
 # Local tool discovery
 config.json
 
