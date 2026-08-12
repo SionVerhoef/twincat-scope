@@ -102,21 +102,26 @@ twincat-scope/
 
 ## Status
 
-**Nothing here has been opened in TwinCAT.** No Beckhoff toolchain existed in the environment
-this was built in. Specifically:
+**No `.tcscopex` written here has been opened in TwinCAT.** No Beckhoff toolchain existed in
+the environment this was built in. Specifically:
 
 - The `.tcscopex` schema was derived by reading real Beckhoff sample projects, and the
-  templates validate against it — but no file has been loaded into Scope View.
-- The CSV reader has **not** been run against genuine `TC3ScopeExportTool.exe` output. It
-  sniffs delimiter and decimal separator and reports what it found.
-- The analysis verbs are tested against synthetic fixtures with planted defects — a step, a
-  3-sample spike, a flatline, a clipped channel. That is exactly as much as it proves.
+  templates validate against it — but no file has been loaded into Scope View. `checkscope`
+  has been run against 7 real Beckhoff-authored projects.
+- The CSV reader **was** measured against 19 genuine `TC3ScopeExportTool.exe` exports from a
+  Beckhoff CX/AX8000 machine (TwinCAT 3.1, EU locale), covering both the TAB and `,`
+  dialects and all three sample-rate alignment states. Those recordings carry customer
+  machine behaviour and are not in this repo; `tests/make_real_fixtures.py` regenerates
+  structural copies of all five layouts instead.
+- The analysis verbs are tested against those structural fixtures and against synthetic ones
+  with planted defects — a step, a 3-sample spike, a flatline, a clipped channel. No `.svdx`
+  has been converted by the real export tool here.
 
 `SKILL.md` rule 3 tells the agent never to claim something is verified when it is not. The
 same honesty applies to the skill itself.
 
-**The most useful contribution is one real exported CSV.** Redact the values freely — only
-the header structure matters — and drop it in `tests/fixtures/`.
+**The most useful contribution now is a `.tcscopex` opened in real Scope View**, and a
+confirmation that `.svdx` export behaves as documented.
 
 ## Tests
 

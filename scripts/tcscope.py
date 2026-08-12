@@ -28,9 +28,16 @@ Subcommands, analysis side (needs numpy; run under `uv run`):
 Every subcommand prints JSON on stdout. Errors print JSON too, with a "fix"
 field, and exit non-zero.
 
-Status: the .tcscopex writer is modelled on real Beckhoff sample files but has
-not been opened in TwinCAT. The CSV reader has not been run against genuine
-TC3ScopeExportTool.exe output. Both say so rather than implying otherwise.
+Times: a Scope export states time in milliseconds. This tool converts on read
+and reports seconds everywhere - `manifest` says so via "time_unit": "ms" and
+"times_reported_in": "s".
+
+Status: the CSV reader was measured against 19 genuine TC3ScopeExportTool.exe
+exports from a Beckhoff CX/AX8000 machine (TwinCAT 3.1, EU locale) covering
+both the TAB and ',' dialects, and is tested against structural copies of all
+five layouts those files use. The .tcscopex writer is still modelled on real
+Beckhoff sample files but has never been opened in TwinCAT. Both say so rather
+than implying otherwise.
 """
 
 import argparse
@@ -51,8 +58,11 @@ XML_DECL = '<?xml version="1.0" encoding="utf-8"?>'
 TICKS_PER_MS = 10_000
 
 # Above this, a recording starts to compete with the machine it is diagnosing.
-# Directional, not a benchmark - see references/recording-load.md.
-LOAD_WARN_SAMPLES_PER_S = 100_000
+# Directional, not a benchmark - see references/recording-load.md. Set from
+# practice rather than theory: the densest of seven real Beckhoff-authored
+# projects measured 16 250 samples/s, so 100 000 never once fired and warned
+# about nothing. This line means "denser than anything anyone here has shipped".
+LOAD_WARN_SAMPLES_PER_S = 20_000
 
 
 # --------------------------------------------------------------------------
@@ -91,11 +101,42 @@ def need(module):
 # --------------------------------------------------------------------------
 # CSV sniffing
 #
-# TC3ScopeExportTool.exe writes a preamble of name/value pairs, then a header
-# row, then data. On a Dutch or German Windows the delimiter is ';' and the
-# decimal separator is ',' - a reader that assumes ',' and '.' turns a European
-# export into one garbage column, or silently reads 1,5 as 15.
+# A Scope CSV is not `time,ch1,ch2,...`. TC3ScopeExportTool.exe writes a
+# horizontal concatenation of independent acquisition groups - typically one ADS
+# port and one sample rate each - and every group carries its own time column:
+#
+#     <t0> <a0> <a1> | <t1> <b0> <b1> <b2> | <t2> <c0>
+#     ^ group 0      ^ group 1             ^ group 2
+#
+# So a physical row is not one instant in time. Treating it as one puts every
+# channel on group 0's clock, which on these files is wrong by one PLC cycle at
+# best and by half the recording at worst.
+#
+# Two dialects: TAB with European decimal commas and 17 metadata rows, and ','
+# with '.' decimals and a Name row only. ';' appeared in none of the 19 real
+# files but the synthetic EU fixture uses it, so it stays supported.
 # --------------------------------------------------------------------------
+
+# A metadata row repeats its key at every group start, so these double as the
+# group-boundary markers. Taken from the TAB dialect, which writes all 17.
+METADATA_KEYS = frozenset({
+    "Name", "SymbolName", "SymbolComment", "NetId", "Port", "IndexGroup",
+    "IndexOffset", "Data-Type", "SampleTime[ms]", "SymbolBased", "VariableSize",
+    "Offset", "ScaleFactor", "BitMask", "Unit", "StartTime", "EndTime",
+})
+
+# Preference order: the qualified path identifies a signal, the short name does
+# not. The ',' dialect only ever has Name.
+GROUP_KEYS = ("SymbolName", "Name")
+
+# Scope exports milliseconds. Everything this tool reports is seconds.
+MS_PER_S = 1000.0
+
+# Beyond this multiple of the fastest sample time, groups are not skewed, the
+# export is broken: the slow groups were never repeat-padded and run off their
+# own wall clock. Cross-group timing on such a file means nothing.
+BROKEN_SKEW_MULTIPLE = 10
+
 
 def _looks_numeric(field, decimal):
     field = field.strip()
@@ -110,8 +151,170 @@ def _looks_numeric(field, decimal):
         return False
 
 
+def _probe_delimiter(lines, nonblank):
+    """Elect the delimiter, trying ';' then TAB then ',' and keeping the first
+    on a tie.
+
+    The order is the fix, not an accident. On a European TAB export every row
+    holds exactly as many ',' as it holds TABs - the decimal comma is precisely
+    as consistent as the real delimiter - so a vote decided on consistency alone
+    elects ',' for a TAB file, ncols collapses from 120 to 26, no row ever
+    matches it and the file reports no numeric rows at all. Both re-orderings of
+    this tuple were tried against the real corpus and each broke a dialect.
+    """
+    best = None
+    for delim in (";", "\t", ","):
+        counts = [lines[i].count(delim) for i in nonblank[-20:]]
+        if not counts or max(counts) == 0:
+            continue
+        modal = max(set(counts), key=counts.count)
+        if modal == 0:
+            continue
+        consistency = counts.count(modal) / len(counts)
+        if best is None or consistency > best[1]:
+            best = (delim, consistency, modal + 1)
+    return best
+
+
+def _probe_decimal(candidate_rows, delim):
+    """Score both separators over candidate data rows.
+
+    Inferring the decimal from the delimiter is what produced silently wrong
+    numbers: the TAB dialect is a European export with decimal commas, and
+    nothing about a TAB says so.
+    """
+    if delim == ",":
+        return "."  # a comma cannot be the delimiter and the decimal at once
+    scores = {}
+    for candidate in (".", ","):
+        total = ok = 0
+        for fields in candidate_rows:
+            for field in fields:
+                if field.strip():
+                    total += 1
+                    ok += _looks_numeric(field, candidate)
+        scores[candidate] = ok / total if total else 0.0
+    return "," if scores[","] > scores["."] else "."
+
+
+def _find_data_row(lines, nonblank, delim, decimal, ncols):
+    """The first row that is entirely data.
+
+    Every non-empty field must be numeric. A metadata row is key/value pairs
+    (Offset<D>0<D>Offset<D>0...) and so is exactly 50% numeric, which the older
+    'at least half' rule accepted as data - the run appeared to start 14 rows
+    early and the time axis began with NaN. The old rule survives as a fallback
+    for files that match nothing.
+    """
+    fallback = None
+    for i in nonblank:
+        fields = lines[i].split(delim)
+        if len(fields) != ncols:
+            continue
+        filled = [f for f in fields if f.strip()]
+        if not filled:
+            continue
+        numeric = sum(_looks_numeric(f, decimal) for f in filled)
+        if numeric == len(filled):
+            return i
+        if fallback is None and numeric >= max(1, len(fields) // 2):
+            fallback = i
+    return fallback
+
+
+def _metadata_rows(lines, nonblank, delim, ncols, data_row):
+    """Key -> fields, for rows that are ncols wide and start with a known key.
+
+    Found by field count and key token, never by line number: a SymbolComment
+    holding a multi-line Structured Text comment breaks one logical row across
+    seventeen physical lines, none of them ncols wide.
+    """
+    found = {}
+    for i in nonblank:
+        if i >= data_row:
+            break
+        fields = [f.strip().strip('"') for f in lines[i].split(delim)]
+        if len(fields) == ncols and fields[0] in METADATA_KEYS and fields[0] not in found:
+            found[fields[0]] = fields
+    return found
+
+
+def _parse_groups(meta, ncols, decimal):
+    """Split the columns into acquisition groups, or None if this is not a
+    grouped export.
+
+    Every column holding the key token starts a group; the columns up to the
+    next one are that group's channels. A group's first column is its time
+    column, not a channel - reporting it as data is how a 0-to-20280 time ramp
+    ends up in a correlation matrix, correlated with everything that trends.
+    """
+    key = next((k for k in GROUP_KEYS if k in meta), None)
+    if key is None:
+        return None
+    fields = meta[key]
+    starts = [i for i, f in enumerate(fields) if f == key]
+    if not starts or starts[0] != 0:
+        return None
+
+    names, symbols = meta.get("Name"), meta.get("SymbolName")
+
+    def cell(row_key, col):
+        row = meta.get(row_key)
+        return (row[col].strip() if row else "") or None
+
+    groups = []
+    for index, start in enumerate(starts):
+        end = starts[index + 1] if index + 1 < len(starts) else ncols
+        channels = []
+        for col in range(start + 1, end):
+            short = (names[col].strip() if names else fields[col].strip())
+            qualified = (symbols[col].strip() if symbols else "")
+            if not short:
+                short = qualified or f"col{col}"
+            declared = cell("SampleTime[ms]", col)
+            port = cell("Port", col)
+            channels.append({
+                "name": short,
+                "symbol_name": qualified or short,
+                "column": col,
+                "group": index,
+                "unit": cell("Unit", col),
+                "data_type": cell("Data-Type", col),
+                "port": int(port) if port and port.isdigit() else None,
+                "sample_time_ms": _parse_float(declared, decimal) if declared else None,
+            })
+        groups.append({"id": index, "time_column": start, "channels": channels})
+    return groups
+
+
+def _flat_group(lines, data_row, delim, decimal, ncols):
+    """Fallback for an export with no group metadata: column 0 is time.
+
+    Names come from the nearest non-numeric row above the data, but never from a
+    metadata row - in the TAB dialect the nearest such row is
+    `Unit<D>Offset<D>0<D>...`, which is how every channel ended up named '0'.
+    """
+    names = []
+    for i in range(data_row - 1, -1, -1):
+        if not lines[i].strip():
+            continue
+        fields = [f.strip().strip('"') for f in lines[i].split(delim)]
+        if len(fields) != ncols or fields[0] in METADATA_KEYS:
+            continue
+        if any(f and not _looks_numeric(f, decimal) for f in fields):
+            names = fields
+            break
+    if not names:
+        names = [f"col{i}" for i in range(ncols)]
+    channels = [{"name": names[col] or f"col{col}", "symbol_name": names[col] or f"col{col}",
+                 "column": col, "group": 0, "unit": None, "data_type": None,
+                 "port": None, "sample_time_ms": None}
+                for col in range(1, ncols)]
+    return [{"id": 0, "time_column": 0, "channels": channels}]
+
+
 def sniff_csv(path, sample_bytes=200_000):
-    """Work out delimiter, decimal separator, header row and channel names."""
+    """Work out delimiter, decimal separator, data start and group layout."""
     with open(path, "rb") as fh:
         text = fh.read(sample_bytes).decode("utf-8-sig", errors="replace")
     # Indices below are into the raw line list, blanks included, because
@@ -122,17 +325,7 @@ def sniff_csv(path, sample_bytes=200_000):
     if not nonblank:
         fail(f"{path} is empty")
 
-    best = None
-    for delim in (";", ",", "\t"):
-        counts = [lines[i].count(delim) for i in nonblank[-20:]]
-        if not counts or max(counts) == 0:
-            continue
-        modal = max(set(counts), key=counts.count)
-        if modal == 0:
-            continue
-        consistency = counts.count(modal) / len(counts)
-        if best is None or consistency > best[1]:
-            best = (delim, consistency, modal + 1)
+    best = _probe_delimiter(lines, nonblank)
     if best is None:
         fail(
             f"could not find a delimiter in {path}",
@@ -140,43 +333,28 @@ def sniff_csv(path, sample_bytes=200_000):
         )
     delim, _, ncols = best
 
-    # A ';' file almost always means the European decimal comma.
-    decimal = "," if delim == ";" else "."
+    tail = [lines[i].split(delim) for i in nonblank[-20:]]
+    decimal = _probe_decimal([f for f in tail if len(f) == ncols], delim)
 
-    data_start = None
-    for i in nonblank:
-        fields = lines[i].split(delim)
-        if len(fields) != ncols:
-            continue
-        numeric = sum(_looks_numeric(f, decimal) for f in fields)
-        if numeric >= max(1, len(fields) // 2):
-            data_start = i
-            break
+    data_start = _find_data_row(lines, nonblank, delim, decimal, ncols)
     if data_start is None:
         fail(
             f"found no numeric rows in {path}",
             "Check this really is a Scope export: tcscope.py manifest <file> --dump-header",
         )
 
-    header_idx, names = None, []
-    for i in range(data_start - 1, -1, -1):
-        if not lines[i].strip():
-            continue
-        fields = [f.strip().strip('"') for f in lines[i].split(delim)]
-        if len(fields) == ncols and any(f and not _looks_numeric(f, decimal) for f in fields):
-            header_idx, names = i, fields
-            break
-    if not names:
-        names = [f"col{i}" for i in range(ncols)]
+    meta = _metadata_rows(lines, nonblank, delim, ncols, data_start)
+    groups = _parse_groups(meta, ncols, decimal)
+    if groups is None:
+        groups = _flat_group(lines, data_start, delim, decimal, ncols)
 
     return {
         "delimiter": delim,
         "decimal": decimal,
         "columns": ncols,
-        "header_row": header_idx,
         "data_row": data_start,
-        "names": names,
-        "preamble": [lines[i] for i in range(header_idx)] if header_idx else [],
+        "metadata_keys": sorted(meta),
+        "groups": groups,
     }
 
 
@@ -192,11 +370,118 @@ def _parse_float(field, decimal):
         return float("nan")
 
 
+class Recording:
+    """A Scope export: acquisition groups, each on its own time axis.
+
+    There is deliberately no single `time` vector. Handing one out is what let
+    every verb apply group 0's clock to every channel.
+    """
+
+    def __init__(self, groups, info):
+        self.groups = groups
+        self.info = info
+
+    @property
+    def channels(self):
+        return [ch for group in self.groups for ch in group["channels"]]
+
+    def time_of(self, channel):
+        return self.groups[channel["group"]]["time"]
+
+    def samples(self, channel):
+        """(t, v) for one channel, one point per distinct time instant.
+
+        Repeat-padding prints a slow group's sample again on the next row, so
+        the raw column has runs of identical values whose diffs are zero. Left
+        in, they read as flatlines and they halve every measured rate.
+        """
+        group = self.groups[channel["group"]]
+        keep = group["instants"]
+        return group["time"][keep], channel["values"][keep]
+
+    def max_skew_ms(self):
+        """Largest row-wise disagreement between any two group time columns."""
+        np = need("numpy")
+        if len(self.groups) < 2:
+            return 0.0
+        stack = np.column_stack([g["raw_ms"] for g in self.groups])
+        usable = np.all(np.isfinite(stack), axis=1)
+        if not usable.any():
+            return float("nan")
+        spans = stack[usable].max(axis=1) - stack[usable].min(axis=1)
+        return float(spans.max())
+
+    def fastest_sample_time_ms(self):
+        rates = [g["sample_time_ms_measured"] for g in self.groups
+                 if g["sample_time_ms_measured"] and g["sample_time_ms_measured"] > 0]
+        return min(rates) if rates else None
+
+    def timing(self):
+        """How far the file can be trusted across groups."""
+        skew = self.max_skew_ms()
+        fastest = self.fastest_sample_time_ms()
+        limit = (fastest or 0) * BROKEN_SKEW_MULTIPLE
+        broken = bool(fastest and skew == skew and skew > limit)
+        out = {
+            "row_is_one_instant": bool(skew == 0.0),
+            "max_skew_ms": skew,
+            "fastest_sample_time_ms": fastest,
+            "cross_group_timing_valid": not broken,
+        }
+        if broken:
+            out["note"] = (
+                f"This export is broken, not merely skewed: the groups disagree by "
+                f"{skew:.0f} ms against a {fastest:.0f} ms fastest sample time. The "
+                "slow groups were never repeat-padded, so they run off their own wall "
+                "clock and are stretched over a different span. Any conclusion about "
+                "the relative timing of channels in different groups is invalid. "
+                "Re-export with all groups on one sample rate."
+            )
+        elif skew > 0:
+            out["note"] = (
+                f"Groups are repeat-padded and disagree by up to {skew:.0f} ms. Each "
+                "channel is timestamped from its own group, so single-channel results "
+                "are exact; cross-group ordering is only meaningful beyond that skew."
+            )
+        return out
+
+
+def _finalise_group(np, group, raw):
+    """Attach the timing numbers one group needs, from its time column in ms."""
+    finite = np.isfinite(raw)
+    group["raw_ms"] = raw
+    group["time"] = raw / MS_PER_S
+    group["time_nan_count"] = int((~finite).sum())
+
+    # First row of each distinct timestamp, non-finite times dropped: a blank
+    # cell in a time column otherwise poisons every median taken over np.diff.
+    changed = np.ones(raw.size, dtype=bool)
+    changed[1:] = raw[1:] != raw[:-1]
+    group["instants"] = np.flatnonzero(finite & changed)
+
+    stamps = raw[group["instants"]]
+    steps = np.diff(stamps)
+    steps = steps[steps > 0]
+    measured = float(np.median(steps)) if steps.size else float("nan")
+    group["sample_time_ms_measured"] = measured
+    group["n_samples"] = int(stamps.size)
+    group["t_first"] = float(stamps[0] / MS_PER_S) if stamps.size else float("nan")
+    group["t_last"] = float(stamps[-1] / MS_PER_S) if stamps.size else float("nan")
+    group["gaps"] = int(np.sum(steps > 3 * measured)) if steps.size and measured > 0 else 0
+
+    rows_seen = int(finite.sum())
+    group["repeat_factor"] = max(1, round(rows_seen / stamps.size)) if stamps.size else 1
+
+    declared = [ch["sample_time_ms"] for ch in group["channels"] if ch["sample_time_ms"]]
+    group["sample_time_ms_declared"] = declared[0] if declared else None
+    return group
+
+
 def load_csv(path):
-    """Read a Scope CSV export into (names, 2-D float array)."""
+    """Read a Scope CSV export into a Recording."""
     np = need("numpy")
     info = sniff_csv(path)
-    delim, decimal = info["delimiter"], info["decimal"]
+    delim, decimal, ncols = info["delimiter"], info["decimal"], info["columns"]
 
     rows = []
     with open(path, "rb") as fh:
@@ -205,22 +490,103 @@ def load_csv(path):
         if not ln.strip():
             continue
         fields = ln.split(delim)
-        if len(fields) != info["columns"]:
+        if len(fields) != ncols:
             continue
         rows.append([_parse_float(f, decimal) for f in fields])
     if not rows:
         fail(f"no parsable data rows in {path}")
-    return info["names"], np.asarray(rows, dtype=float), info
+
+    data = np.asarray(rows, dtype=float)
+    groups = []
+    for group in info["groups"]:
+        for channel in group["channels"]:
+            channel["values"] = data[:, channel["column"]]
+        groups.append(_finalise_group(np, group, data[:, group["time_column"]]))
+    info["rows"] = int(data.shape[0])
+    return Recording(groups, info)
+
+
+PARQUET_META_KEY = b"tcscope"
+
+
+def _unique(name, used):
+    """Parquet column names must be unique; channel names are not.
+
+    Keying a table off channel names silently dropped a column whenever two
+    channels shared one - which the ',' dialect makes routine, and which
+    reporting short names as the selector makes routine everywhere.
+    """
+    if name not in used:
+        used[name] = 1
+        return name
+    used[name] += 1
+    return f"{name}#{used[name]}"
+
+
+def parquet_payload(rec):
+    """(columns, layout) for writing a Recording losslessly to Parquet."""
+    columns, used = {}, {}
+    layout = {"time_unit": "s", "groups": []}
+    for group in rec.groups:
+        time_col = _unique(f"g{group['id']}.time", used)
+        columns[time_col] = group["time"]
+        entry = {"id": group["id"], "time_column": time_col,
+                 "sample_time_ms_declared": group["sample_time_ms_declared"],
+                 "channels": []}
+        for channel in group["channels"]:
+            name = _unique(f"g{group['id']}.{channel['name']}", used)
+            columns[name] = channel["values"]
+            entry["channels"].append({
+                "column": name, "name": channel["name"],
+                "symbol_name": channel["symbol_name"], "unit": channel["unit"],
+                "data_type": channel["data_type"], "port": channel["port"],
+                "sample_time_ms": channel["sample_time_ms"],
+            })
+        layout["groups"].append(entry)
+    return columns, layout
 
 
 def load_parquet(path):
+    """Read back a recording ingested earlier, group model included.
+
+    The layout travels in the schema metadata because it cannot be recovered
+    from column names: without it every group's time axis collapses back into
+    one, which is exactly the defect ingest used to reintroduce silently.
+    """
     need("pyarrow")
     np = need("numpy")
     from pyarrow import parquet as pq
     table = pq.read_table(path)
-    names = list(table.column_names)
-    data = np.column_stack([table.column(n).to_numpy(zero_copy_only=False) for n in names])
-    return names, data.astype(float), {"source": "parquet"}
+    blob = (table.schema.metadata or {}).get(PARQUET_META_KEY)
+    if not blob:
+        fail(
+            f"{path} carries no group layout - it was written by an older ingest",
+            "Re-run: tcscope.py ingest <original.csv> -o " + str(path),
+        )
+    layout = json.loads(blob.decode())
+
+    def column(name):
+        return table.column(name).to_numpy(zero_copy_only=False).astype(float)
+
+    groups = []
+    for entry in layout["groups"]:
+        seconds = column(entry["time_column"])
+        group = {"id": entry["id"], "time_column": entry["time_column"],
+                 "sample_time_ms_declared": entry.get("sample_time_ms_declared"),
+                 "channels": []}
+        for spec in entry["channels"]:
+            group["channels"].append({
+                "name": spec["name"], "symbol_name": spec["symbol_name"],
+                "column": spec["column"], "group": entry["id"],
+                "unit": spec.get("unit"), "data_type": spec.get("data_type"),
+                "port": spec.get("port"), "sample_time_ms": spec.get("sample_time_ms"),
+                "values": column(spec["column"]),
+            })
+        groups.append(_finalise_group(np, group, seconds * MS_PER_S))
+
+    rows = int(groups[0]["time"].size) if groups else 0
+    return Recording(groups, {"source": "parquet", "rows": rows,
+                              "columns": len(table.column_names)})
 
 
 def load(path):
@@ -229,27 +595,12 @@ def load(path):
         fail(f"{path} does not exist")
     if path.suffix.lower() == ".parquet":
         return load_parquet(path)
-    if path.suffix.lower() in (".csv", ".txt"):
-        return load_csv(path)
     if path.suffix.lower() == ".svdx":
         fail(
             f"{path} is a raw Scope recording",
             "Convert it first: tcscope.py ingest <file.svdx> -o rec.parquet",
         )
     return load_csv(path)
-
-
-def split_time(names, data):
-    """Return (time, channel_names, channel_data). Column 0 is time by convention."""
-    lowered = [n.lower() for n in names]
-    idx = 0
-    for i, n in enumerate(lowered):
-        if "time" in n or n in ("t", "sample"):
-            idx = i
-            break
-    t = data[:, idx]
-    keep = [i for i in range(data.shape[1]) if i != idx]
-    return t, [names[i] for i in keep], data[:, keep]
 
 
 # --------------------------------------------------------------------------
@@ -373,16 +724,20 @@ def cmd_ingest(args):
                  f"Try running it by hand: {' '.join(cmd)}")
         src = csv_out
 
-    names, data, info = load_csv(src)
+    rec = load_csv(src)
     out = Path(args.output)
     pa = need("pyarrow")
     from pyarrow import parquet as pq
-    table = pa.table({n: data[:, i] for i, n in enumerate(names)})
+    columns, layout = parquet_payload(rec)
+    table = pa.table(columns).replace_schema_metadata(
+        {PARQUET_META_KEY: json.dumps(layout).encode()})
     pq.write_table(table, out)
     emit({"ok": True, "input": str(args.input), "output": str(out),
-          "rows": int(data.shape[0]), "columns": names,
-          "delimiter": info.get("delimiter"), "decimal": info.get("decimal"),
-          "note": "CSV layout was sniffed, not verified against a real export."})
+          "rows": rec.info.get("rows"), "groups": len(rec.groups),
+          "channels": len(rec.channels), "columns": list(columns),
+          "delimiter": rec.info.get("delimiter"), "decimal": rec.info.get("decimal"),
+          "note": "Group layout is stored in the Parquet schema metadata, so the "
+                  "per-group time axes survive the round trip."})
     return 0
 
 
@@ -393,31 +748,57 @@ def cmd_manifest(args):
         emit({"ok": True, "raw_head": head.splitlines()[:40]})
         return 0
 
-    names, data, info = load(args.input)
     np = need("numpy")
-    t, chans, values = split_time(names, data)
+    rec = load(args.input)
+    timing = rec.timing()
+    total = len(rec.groups)
 
-    dt = np.diff(t)
-    dt = dt[np.isfinite(dt)]
-    median_dt = float(np.median(dt)) if dt.size else float("nan")
-    gaps = int(np.sum(dt > 3 * median_dt)) if dt.size and median_dt > 0 else 0
+    groups = []
+    for group in rec.groups:
+        measured = group["sample_time_ms_measured"]
+        groups.append({
+            "group": group["id"],
+            "channels": len(group["channels"]),
+            "sample_time_ms_declared": group["sample_time_ms_declared"],
+            "sample_time_ms_measured": measured,
+            "repeat_factor": group["repeat_factor"],
+            "estimated_rate_hz": (MS_PER_S / measured) if measured and measured > 0 else None,
+            "n_samples": group["n_samples"],
+            "t_first": group["t_first"],
+            "t_last": group["t_last"],
+            "duration": group["t_last"] - group["t_first"],
+            "time_nan_count": group["time_nan_count"],
+            "gaps": group["gaps"],
+            "port": next((ch["port"] for ch in group["channels"] if ch["port"]), None),
+        })
+
+    # The fastest group stands for the file in the flat fields below, which
+    # exist so a single-group export reads the way it always did.
+    lead = min(groups, key=lambda g: g["sample_time_ms_measured"]
+               if g["sample_time_ms_measured"] == g["sample_time_ms_measured"] else 1e18)
 
     emit({
         "ok": True,
         "file": str(args.input),
-        "rows": int(data.shape[0]),
-        "duration": float(t[-1] - t[0]) if t.size > 1 else 0.0,
-        "median_sample_interval": median_dt,
-        "estimated_rate_hz": (1.0 / median_dt) if median_dt and median_dt > 0 else None,
-        "gaps": gaps,
+        "rows": rec.info.get("rows"),
+        "ncols": rec.info.get("columns"),
+        "time_unit": "ms",
+        "times_reported_in": "s",
+        "duration": lead["duration"],
+        "median_sample_interval": (lead["sample_time_ms_measured"] or 0) / MS_PER_S,
+        "estimated_rate_hz": lead["estimated_rate_hz"],
+        "gaps": sum(g["gaps"] for g in groups),
+        "timing": timing,
+        "groups": groups,
         "channels": [
-            {"name": n,
-             "nan_fraction": float(np.mean(~np.isfinite(values[:, i]))),
-             "constant": bool(np.nanmax(values[:, i]) == np.nanmin(values[:, i]))}
-            for i, n in enumerate(chans)
+            dict(channel_label(ch, total),
+                 unit=ch["unit"], data_type=ch["data_type"],
+                 nan_fraction=float(np.mean(~np.isfinite(ch["values"]))),
+                 constant=bool(np.nanmax(ch["values"]) == np.nanmin(ch["values"])))
+            for ch in rec.channels
         ],
-        "delimiter": info.get("delimiter"),
-        "decimal": info.get("decimal"),
+        "delimiter": rec.info.get("delimiter"),
+        "decimal": rec.info.get("decimal"),
     })
     return 0
 
@@ -426,33 +807,52 @@ def cmd_manifest(args):
 # stats / events / correlate / window
 # --------------------------------------------------------------------------
 
-def select(chans, values, wanted):
+def select(rec, wanted):
+    """Channels matching a comma-separated selector, by short or qualified name.
+
+    Both forms match because short names are not unique - two groups routinely
+    carry the same ActTorque - and the qualified path is the only way to say
+    which one you meant.
+    """
+    channels = rec.channels
     if not wanted:
-        return chans, values
-    want = [w.strip() for w in wanted.split(",")]
-    idx = [i for i, n in enumerate(chans) if n in want]
-    if not idx:
-        fail(f"no channel matched {wanted}", f"Available: {', '.join(chans)}")
-    return [chans[i] for i in idx], values[:, idx]
+        return channels
+    want = {w.strip() for w in wanted.split(",")}
+    hits = [ch for ch in channels if ch["name"] in want or ch["symbol_name"] in want]
+    if not hits:
+        available = ", ".join(sorted({ch["name"] for ch in channels})[:40])
+        fail(f"no channel matched {wanted}", f"Available: {available}")
+    return hits
+
+
+def channel_label(channel, groups_total):
+    """How a channel is named back to the caller."""
+    out = {"name": channel["name"], "symbol_name": channel["symbol_name"]}
+    if groups_total > 1:
+        out["group"] = channel["group"]
+    return out
 
 
 def cmd_stats(args):
     np = need("numpy")
-    names, data, _ = load(args.input)
-    _, chans, values = split_time(names, data)
-    chans, values = select(chans, values, args.channels)
+    rec = load(args.input)
+    total = len(rec.groups)
 
     out = []
-    for i, name in enumerate(chans):
-        col = values[:, i]
+    for channel in select(rec, args.channels):
+        label = channel_label(channel, total)
+        # One point per distinct instant: a repeat-padded group otherwise reads
+        # as half real samples and half frozen ones.
+        _, col = rec.samples(channel)
         finite = col[np.isfinite(col)]
         if finite.size == 0:
-            out.append({"name": name, "error": "all values are NaN"})
+            out.append(dict(label, error="all values are NaN"))
             continue
         lo, hi = float(np.min(finite)), float(np.max(finite))
         diffs = np.abs(np.diff(np.unique(finite)))
-        out.append({
-            "name": name,
+        out.append(dict(
+            label,
+            **{
             "min": lo, "max": hi,
             "mean": float(np.mean(finite)),
             "std": float(np.std(finite)),
@@ -464,26 +864,43 @@ def cmd_stats(args):
             "pct_at_min": float(np.mean(finite == lo) * 100),
             "pct_flat": float(np.mean(np.abs(np.diff(finite)) == 0) * 100) if finite.size > 1 else 0.0,
             "quantisation_step": float(np.min(diffs)) if diffs.size else 0.0,
-        })
+            }))
     emit({"ok": True, "channels": out})
     return 0
 
 
 def cmd_events(args):
     np = need("numpy")
-    names, data, _ = load(args.input)
-    t, chans, values = split_time(names, data)
-    chans, values = select(chans, values, args.channels)
+    rec = load(args.input)
+    total = len(rec.groups)
 
     found = []
-    for i, name in enumerate(chans):
-        col = values[:, i]
+    for channel in select(rec, args.channels):
+        name = channel["name"]
+
+        def event(kind, **rest):
+            row = {"channel": name, "symbol_name": channel["symbol_name"], "kind": kind}
+            if total > 1:
+                row["group"] = channel["group"]
+            row.update(rest)
+            return row
+
+        # Each channel is timestamped from its own group's clock. Using group
+        # 0's was wrong by one PLC cycle on a padded export and by half the
+        # recording on an unpadded one.
+        t, col = rec.samples(channel)
         ok = np.isfinite(col)
         if ok.sum() < 8:
             continue
+        # NaN diffs stay NaN. Substituting 0.0 turned a blank cell into a real
+        # reading of zero - a fake step on a torque channel - and turned a run
+        # of blanks into a flatline, reporting missing data as a frozen signal.
         d = np.diff(col)
-        d = np.where(np.isfinite(d), d, 0.0)
-        mad = float(np.median(np.abs(d - np.median(d)))) or float(np.std(d)) or 0.0
+        finite_d = d[np.isfinite(d)]
+        mad = (float(np.median(np.abs(finite_d - np.median(finite_d))))
+               if finite_d.size else 0.0)
+        if not mad:
+            mad = float(np.std(finite_d)) if finite_d.size else 0.0
 
         if mad > 0:
             # A step goes and stays; a spike comes back. The return edge can be
@@ -503,23 +920,22 @@ def cmd_events(args):
                         break
                 if partner is not None:
                     reported.update(range(j, partner + 1))
-                found.append({
-                    "channel": name,
-                    "kind": "spike" if partner is not None else "step",
-                    "time": float(t[min(j + 1, t.size - 1)]),
-                    "index": int(j + 1),
-                    "delta": float(d[j]),
+                found.append(event(
+                    "spike" if partner is not None else "step",
+                    time=float(t[min(j + 1, t.size - 1)]),
+                    index=int(j + 1),
+                    delta=float(d[j]),
                     **({"width_samples": int(partner - j)} if partner is not None else {}),
-                })
+                ))
 
         lo, hi = float(np.nanmin(col)), float(np.nanmax(col))
         for edge, value in (("max", hi), ("min", lo)):
             frac = float(np.mean(col[ok] == value))
             if frac > args.clip_fraction:
-                found.append({"channel": name, "kind": "clipping",
-                              "edge": edge, "value": value,
-                              "fraction": frac})
+                found.append(event("clipping", edge=edge, value=value, fraction=frac))
 
+        # NaN == 0 is False, so a gap in the data breaks a flat run instead of
+        # extending it.
         flat = np.abs(d) == 0
         run, start = 0, 0
         for k, is_flat in enumerate(flat):
@@ -528,19 +944,16 @@ def cmd_events(args):
                 start = k - run + 1
             else:
                 if run >= args.flat_samples:
-                    found.append({"channel": name, "kind": "flatline",
-                                  "time": float(t[start]),
-                                  "samples": int(run)})
+                    found.append(event("flatline", time=float(t[start]), samples=int(run)))
                 run = 0
         if run >= args.flat_samples:
-            found.append({"channel": name, "kind": "flatline",
-                          "time": float(t[start]), "samples": int(run)})
+            found.append(event("flatline", time=float(t[start]), samples=int(run)))
 
         if args.threshold is not None:
             crossings = np.flatnonzero(np.diff((col > args.threshold).astype(int)) != 0)
             for j in crossings[:args.max_events]:
-                found.append({"channel": name, "kind": "crossing",
-                              "time": float(t[j + 1]), "threshold": args.threshold})
+                found.append(event("crossing", time=float(t[j + 1]),
+                                   threshold=args.threshold))
 
     found.sort(key=lambda e: e.get("time", 0.0))
     emit({"ok": True, "count": len(found), "events": found[:args.max_events],
@@ -548,63 +961,164 @@ def cmd_events(args):
     return 0
 
 
+def _unit_vector(np, values):
+    """Mean-centred and scaled to unit norm, so cross-correlation is bounded.
+
+    Without this the raw correlation is dominated by amplitude: a torque channel
+    swinging hundreds of Nm outranks the position signal that actually caused
+    it, whatever the shapes look like.
+    """
+    centred = values - values.mean()
+    norm = float(np.linalg.norm(centred))
+    return centred / norm if norm else centred
+
+
+def _lag_of(np, x, y, max_lag):
+    """(lag_samples, correlation_at_that_lag) for two aligned unit vectors.
+
+    Sign convention: a NEGATIVE lag means `a` leads `b` - a's features appear
+    earlier in time. `np.correlate(x, y, "full")[k]` sums x[n+k]·y[n], so if
+    y is x delayed by D samples the peak sits at k = -D.
+    """
+    full = np.correlate(x, y, mode="full")
+    zero = x.size - 1
+    lo, hi = max(0, zero - max_lag), min(full.size, zero + max_lag + 1)
+    window = full[lo:hi]
+    peak = int(np.argmax(np.abs(window))) + lo
+    return peak - zero, float(full[peak])
+
+
 def cmd_correlate(args):
     np = need("numpy")
-    names, data, _ = load(args.input)
-    t, chans, values = split_time(names, data)
-    chans, values = select(chans, values, args.channels)
-    if len(chans) < 2:
+    rec = load(args.input)
+    total = len(rec.groups)
+    chosen = select(rec, args.channels)
+    if len(chosen) < 2:
         fail("correlate needs at least two channels")
 
-    clean = np.where(np.isfinite(values), values, 0.0)
-    corr = np.corrcoef(clean, rowvar=False)
+    timing = rec.timing()
+    if not timing["cross_group_timing_valid"] and total > 1:
+        fail(
+            "this export cannot support any cross-channel timing claim",
+            timing.get("note", "Re-export with all groups on one sample rate."),
+        )
 
-    dt = float(np.median(np.diff(t))) if t.size > 1 else 1.0
-    pairs = []
-    for a in range(len(chans)):
-        for b in range(a + 1, len(chans)):
-            x = clean[:, a] - clean[:, a].mean()
-            y = clean[:, b] - clean[:, b].mean()
-            n = min(x.size, args.max_lag_samples)
-            xc = np.correlate(x[:n], y[:n], mode="same")
-            lag = int(np.argmax(xc) - n // 2)
-            pairs.append({
-                "a": chans[a], "b": chans[b],
-                "correlation": float(corr[a, b]),
+    pairs, refused = [], []
+    for i in range(len(chosen)):
+        for j in range(i + 1, len(chosen)):
+            ca, cb = chosen[i], chosen[j]
+            same_group = ca["group"] == cb["group"]
+            if not same_group and not args.allow_cross_group:
+                refused.append({
+                    "a": ca["name"], "b": cb["name"],
+                    "groups": [ca["group"], cb["group"]],
+                    "reason": "channels are in different acquisition groups, so "
+                              "they are not sampled on the same clock",
+                })
+                continue
+
+            ta, xa = rec.samples(ca)
+            tb, xb = rec.samples(cb)
+            resampled = False
+            if same_group:
+                keep = np.isfinite(xa) & np.isfinite(xb)
+                x, y, axis = xa[keep], xb[keep], ta[keep]
+            else:
+                # Put b on a's axis. Honest only because the caller asked for it
+                # and the file's skew is inside one sample of the fast group.
+                good_a, good_b = np.isfinite(xa), np.isfinite(xb)
+                axis = ta[good_a]
+                x = xa[good_a]
+                y = np.interp(axis, tb[good_b], xb[good_b])
+                resampled = True
+            if x.size < 2:
+                continue
+
+            dt = float(np.median(np.diff(axis))) if axis.size > 1 else 1.0
+            xn, yn = _unit_vector(np, x), _unit_vector(np, y)
+            lag, peak = _lag_of(np, xn, yn, max(1, args.max_lag_samples))
+            row = {
+                "a": ca["name"], "b": cb["name"],
+                "a_symbol": ca["symbol_name"], "b_symbol": cb["symbol_name"],
+                "correlation": float(np.dot(xn, yn)),
+                "correlation_at_lag": peak,
                 "lag_samples": lag,
                 "lag_seconds": lag * dt,
-                "leads": chans[a] if lag < 0 else (chans[b] if lag > 0 else "simultaneous"),
-            })
+                "leads": ca["name"] if lag < 0 else (cb["name"] if lag > 0 else "simultaneous"),
+            }
+            if total > 1:
+                row["groups"] = [ca["group"], cb["group"]]
+            if resampled:
+                row["resampled"] = (
+                    f"b was linearly resampled from its own {cb['group']} axis onto "
+                    f"a's, because the two groups do not share a clock")
+            pairs.append(row)
+
     pairs.sort(key=lambda p: -abs(p["correlation"]))
-    emit({"ok": True, "pairs": pairs})
+    out = {"ok": True, "pairs": pairs,
+           "lag_sign": "negative lag_seconds means 'a' leads 'b'",
+           "timing": timing}
+    if refused:
+        out["refused_pairs"] = refused
+        out["fix"] = "Pass --allow-cross-group to compare across groups anyway."
+    emit(out)
     return 0
 
 
 def cmd_window(args):
-    np = need("numpy")
-    names, data, _ = load(args.input)
-    t, chans, values = split_time(names, data)
-    chans, values = select(chans, values, args.channels)
+    """Real rows, grouped by acquisition group.
 
-    mask = (t >= args.start) & (t <= args.end)
-    idx = np.flatnonzero(mask)
-    if idx.size == 0:
+    Rows are never merged across groups. A physical row of a Scope export holds
+    one sample from each group, taken at times that differ by up to a full slow
+    cycle, so presenting them under one timestamp would be a quiet lie.
+    """
+    np = need("numpy")
+    rec = load(args.input)
+    chosen = select(rec, args.channels)
+
+    wanted = {}
+    for channel in chosen:
+        wanted.setdefault(channel["group"], []).append(channel)
+
+    blocks, total_rows = [], 0
+    for gid in sorted(wanted):
+        group = rec.groups[gid]
+        t = group["time"]
+        idx = np.flatnonzero((t >= args.start) & (t <= args.end) & np.isfinite(t))
+        total_rows += idx.size
+        blocks.append((gid, group, wanted[gid], idx))
+
+    if total_rows == 0:
+        spans = "; ".join(f"group {g['id']}: {g['t_first']} to {g['t_last']}"
+                          for g in rec.groups)
         fail(f"no samples between {args.start} and {args.end}",
-             f"The recording spans {float(t[0])} to {float(t[-1])}.")
-    if idx.size > args.max_rows:
+             f"The recording spans {spans}.")
+    if total_rows > args.max_rows:
         fail(
-            f"that window holds {idx.size} rows, over the {args.max_rows} cap",
+            f"that window holds {total_rows} rows, over the {args.max_rows} cap",
             "Narrow the range, or raise --max-rows deliberately. This cap exists "
             "so a wide window cannot flood the context window.",
         )
-    emit({
-        "ok": True,
-        "channels": chans,
-        "rows": [
-            {"time": float(t[i]), **{c: float(values[i, j]) for j, c in enumerate(chans)}}
-            for i in idx
-        ],
-    })
+
+    groups = []
+    for gid, group, channels, idx in blocks:
+        groups.append({
+            "group": gid,
+            "sample_time_ms": group["sample_time_ms_measured"],
+            "channels": [ch["name"] for ch in channels],
+            "rows": [
+                {"time": float(group["time"][i]),
+                 **{ch["name"]: float(ch["values"][i]) for ch in channels}}
+                for i in idx
+            ],
+        })
+
+    out = {"ok": True, "time_unit": "s", "groups": groups}
+    if len(groups) == 1:
+        # One group means one clock, so a flat row list is unambiguous.
+        out["channels"] = groups[0]["channels"]
+        out["rows"] = groups[0]["rows"]
+    emit(out)
     return 0
 
 
@@ -619,15 +1133,19 @@ def cmd_plot(args):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    names, data, _ = load(args.input)
-    t, chans, values = split_time(names, data)
-    chans, values = select(chans, values, args.channels)
+    rec = load(args.input)
+    chosen = select(rec, args.channels)
+    total = len(rec.groups)
 
     buckets = max(64, args.width)
-    fig, axes = plt.subplots(len(chans), 1, figsize=(args.width / 100, 2.2 * len(chans)),
-                             sharex=True, squeeze=False)
-    for i, name in enumerate(chans):
-        col = values[:, i]
+    # Groups with different clocks do not share an x-axis; forcing one would
+    # draw a 4 ms trace against a 2 ms ruler.
+    shared = len({rec.groups[ch["group"]]["sample_time_ms_measured"] for ch in chosen}) == 1
+    fig, axes = plt.subplots(len(chosen), 1, figsize=(args.width / 100, 2.2 * len(chosen)),
+                             sharex=shared, squeeze=False)
+    for i, channel in enumerate(chosen):
+        t, col = rec.samples(channel)
+        name = channel["name"]
         ax = axes[i][0]
         if col.size <= buckets:
             ax.plot(t, col, linewidth=0.8)
@@ -643,15 +1161,28 @@ def cmd_plot(args):
             mid = t[np.clip((edges[:-1] + edges[1:]) // 2, 0, t.size - 1)]
             ax.fill_between(mid, lo, hi, linewidth=0)
             ax.plot(mid, (lo + hi) / 2, linewidth=0.5)
-        ax.set_ylabel(name, fontsize=8)
+        # The short name on the axis, the qualified path in the corner: full
+        # symbol paths as y-labels overlap into an unreadable stack by about six
+        # channels, and the path is what identifies the signal.
+        ax.set_ylabel(name, fontsize=9)
+        if channel["symbol_name"] != name or total > 1:
+            caption = channel["symbol_name"]
+            if total > 1:
+                caption += f"   [group {channel['group']}]"
+            ax.set_title(caption, fontsize=7, loc="left", pad=2)
+        if not shared:
+            ax.set_xlabel("time [s]", fontsize=8)
         ax.grid(alpha=0.3)
-    axes[-1][0].set_xlabel("time")
+    if shared:
+        axes[-1][0].set_xlabel("time [s]")
     fig.tight_layout()
     fig.savefig(args.output, dpi=100)
     plt.close(fig)
 
-    emit({"ok": True, "output": str(args.output), "channels": chans,
-          "samples": int(values.shape[0]), "buckets": buckets,
+    emit({"ok": True, "output": str(args.output),
+          "channels": [ch["name"] for ch in chosen],
+          "samples": int(rec.samples(chosen[0])[1].size) if chosen else 0,
+          "buckets": buckets, "shared_x_axis": shared,
           "method": "min/max envelope per pixel bucket"})
     return 0
 
@@ -803,8 +1334,12 @@ def cmd_checkscope(args):
     root = read_tcscopex(args.input)
     problems, warnings = [], []
 
-    guids = [g.text for g in root.iter("Guid")]
-    dupes = {g for g in guids if guids.count(g) > 1}
+    # The null GUID is a legitimate "unset" marker and refresh_guids leaves it
+    # alone, so several may appear. Counting it as a duplicate condemns a file
+    # that is perfectly valid.
+    guids = [(g.text or "").strip() for g in root.iter("Guid")]
+    real = [g for g in guids if g and g != NULL_GUID]
+    dupes = {g for g in real if real.count(g) > 1}
     if dupes:
         problems.append(f"duplicate GUIDs, which breaks the project: {sorted(dupes)}")
 
@@ -815,6 +1350,7 @@ def cmd_checkscope(args):
     total_rate = 0.0
     channels = []
     acq_guids = set()
+    unrated = 0
     for node in acquisitions:
         symbol = (node.findtext("SymbolName") or "").strip()
         netid = (node.findtext("AmsNetId") or "").strip()
@@ -825,6 +1361,11 @@ def cmd_checkscope(args):
         if ticks and ticks.isdigit() and int(ticks) > 0:
             rate = 1000.0 / (int(ticks) / TICKS_PER_MS)
             total_rate += rate
+        else:
+            # An acquisition on the task's own sample time declares no
+            # BaseSampleTime, so it contributes nothing to the total below. Say
+            # so, or the load figure reads as complete when it is not.
+            unrated += 1
         if not symbol or symbol.upper().startswith("PLACEHOLDER"):
             problems.append(f"channel has an unfilled symbol name: {symbol or '(empty)'}")
         if netid in ("", "0.0.0.0.0.0"):
@@ -835,6 +1376,7 @@ def cmd_checkscope(args):
     # reference dangles, the project opens perfectly and plots nothing - the
     # failure mode that looks like a working file until someone hits Record.
     plotted = 0
+    wired_to = {}
     for chan in root.findall(".//Channel"):
         ref = chan.find(".//AcquisitionGUID")
         name = (chan.findtext("Name") or "?").strip()
@@ -849,8 +1391,37 @@ def cmd_checkscope(args):
             )
         else:
             plotted += 1
+            wired_to.setdefault(target, []).append(name)
     if acquisitions and plotted == 0:
         warnings.append("no display channel is wired to any acquisition")
+
+    # An acquisition with no display channel still costs target bandwidth and
+    # still lands in the export; it just never appears on a chart. One real
+    # project recorded sixteen and plotted six.
+    unwired = len(acq_guids) - len(wired_to)
+    if unwired > 0:
+        warnings.append(
+            f"{unwired} of {len(acq_guids)} acquisitions are not wired to any "
+            "display channel. They consume target bandwidth and are recorded, "
+            "but nothing plots them."
+        )
+
+    # Two display channels may legitimately share one acquisition, which is why
+    # 'wired' can exceed the acquisition count. Report it rather than let the
+    # number read as more sources than exist.
+    shared = {guid: names for guid, names in wired_to.items() if len(names) > 1}
+    if shared:
+        warnings.append(
+            f"{len(shared)} acquisition(s) feed more than one display channel, so "
+            f"{plotted} wired channels come from {len(wired_to)} sources."
+        )
+
+    if unrated:
+        warnings.append(
+            f"{unrated} of {len(acquisitions)} acquisitions declare no "
+            "BaseSampleTime - they run at the task rate, so the load figure "
+            "below counts only the rest."
+        )
 
     if total_rate > LOAD_WARN_SAMPLES_PER_S:
         warnings.append(
@@ -861,7 +1432,11 @@ def cmd_checkscope(args):
 
     emit({"ok": not problems, "file": str(args.input),
           "channels": channels, "display_channels_wired": plotted,
+          "acquisitions": len(acq_guids), "acquisitions_plotted": len(wired_to),
+          "acquisitions_without_display_channel": max(0, unwired),
+          "acquisitions_without_declared_rate": unrated,
           "total_samples_per_second": total_rate,
+          "load_warn_samples_per_second": LOAD_WARN_SAMPLES_PER_S,
           "problems": problems, "warnings": warnings})
     return 0 if not problems else 1
 
@@ -924,7 +1499,12 @@ def build_parser():
     q = sub.add_parser("correlate", help="cross-channel correlation and lag")
     q.add_argument("input")
     q.add_argument("--channels")
-    q.add_argument("--max-lag-samples", type=int, default=20000)
+    q.add_argument("--max-lag-samples", type=int, default=20000,
+                   help="widest lag searched, in samples. It bounds the search, "
+                        "not the data: every sample is still correlated.")
+    q.add_argument("--allow-cross-group", action="store_true",
+                   help="compare channels from different acquisition groups by "
+                        "resampling onto a common axis. They do not share a clock.")
     q.set_defaults(func=cmd_correlate)
 
     q = sub.add_parser("newscope", help="write a .tcscopex from a template")
