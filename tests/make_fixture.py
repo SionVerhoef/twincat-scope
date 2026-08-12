@@ -61,6 +61,10 @@ def build():
 
 HEADER = ["Time", "Axis1.ActPos", "Axis1.ActVelo", "Axis1.ActTorque", "Axis1.PosDiff"]
 
+# A Scope export states time in milliseconds. The tool converts on read and
+# reports seconds, so the ground truth below stays in seconds.
+MS_PER_S = 1000.0
+
 
 def write(path, rows, delimiter, decimal):
     def fmt(value):
@@ -75,7 +79,10 @@ def write(path, rows, delimiter, decimal):
         "",
         delimiter.join(HEADER),
     ]
-    lines.extend(delimiter.join(fmt(v) for v in row) for row in rows)
+    lines.extend(
+        delimiter.join(fmt(v * MS_PER_S if i == 0 else v) for i, v in enumerate(row))
+        for row in rows
+    )
     path.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
 
 

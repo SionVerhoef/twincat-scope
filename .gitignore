@@ -11,9 +11,11 @@
 .cache/
 __pycache__/
 
-# Generated fixtures - tests/make_fixture.py recreates them on demand.
+# Generated fixtures - tests/make_fixture.py and tests/make_real_fixtures.py
+# recreate them on demand.
 tests/fixtures/*.csv
 tests/fixtures/ground_truth.json
+tests/fixtures/real/
 
 # Local tool discovery
 config.json
