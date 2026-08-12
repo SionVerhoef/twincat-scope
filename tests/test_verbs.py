@@ -316,6 +316,35 @@ def main():
             check("checkscope passes its own generated file", chk.get("ok") is True,
                   str(chk.get("problems")))
 
+            # Capture strategy, not wiring. The templates record a fixed 60 s
+            # window with an empty TriggerModule, which is a lottery ticket for
+            # the intermittent faults a scope is usually reached for. It is a
+            # warning, never a problem: a file can be perfectly built and still
+            # be the wrong plan.
+            check("checkscope reads RecordTime as seconds",
+                  near(chk.get("record_seconds") or 0, 60.0, tol=0.001),
+                  f"record_seconds={chk.get('record_seconds')}")
+            check("checkscope sees the empty TriggerModule as no trigger",
+                  chk.get("trigger_configured") is False)
+            check("a fixed window with no trigger warns but does not fail the file",
+                  chk.get("ok") is True
+                  and any("no trigger configured" in w for w in chk.get("warnings", [])),
+                  str(chk.get("warnings")))
+
+            # The negative case, or the check above is just a string that is
+            # always present. Re-arming after each window is a different plan
+            # and must not draw the same warning.
+            c = Path(tmp) / "c.tcscopex"
+            c.write_bytes(a.read_bytes().replace(
+                b"<AutoRestartRecord>false</AutoRestartRecord>",
+                b"<AutoRestartRecord>true</AutoRestartRecord>"))
+            chk_restart = run("checkscope", c)
+            check("a re-arming recording draws no fixed-window warning",
+                  chk_restart.get("auto_restart_record") is True
+                  and not any("no trigger configured" in w
+                              for w in chk_restart.get("warnings", [])),
+                  str(chk_restart.get("warnings")))
+
     real_fixture_checks()
 
     print()
