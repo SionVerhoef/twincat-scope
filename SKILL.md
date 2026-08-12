@@ -69,6 +69,27 @@ and then reasoning about frequencies is a good way to be confidently wrong.
 If the CSV looks mangled, `manifest --dump-header` shows the raw first lines. The reader
 sniffs the delimiter and decimal separator, which is not the same as knowing them.
 
+**Read the `timing` block before you compare any two channels.** A Scope CSV is not one
+table — it is several acquisition groups laid side by side, each with its own time column
+and often its own sample rate, so *a physical row is not one instant in time*:
+
+```
+<t0> <a0> <a1> | <t1> <b0> <b1> <b2> | <t2> <c0>
+^ group 0      ^ group 1             ^ group 2
+```
+
+Every channel is timestamped from its own group. `manifest` reports per group: declared and
+measured `sample_time_ms`, `repeat_factor`, `t_first`, `t_last`, `n_samples`. Then:
+
+| Field | Means |
+|---|---|
+| `row_is_one_instant: true` | all groups agree exactly; the file behaves like one table |
+| `max_skew_ms` | worst row-wise disagreement between any two group clocks |
+| `cross_group_timing_valid: false` | **the export is broken.** Slow groups were never repeat-padded, so they run off their own wall clock. No cross-group timing claim from this file means anything — say so and re-export. |
+
+Times in a Scope export are milliseconds. This tool converts on read and reports **seconds**
+everywhere (`time_unit: "ms"`, `times_reported_in: "s"`).
+
 ### 2. Convert once
 
 ```bash
@@ -90,7 +111,17 @@ Everything downstream is faster against Parquet, and `.svdx` needs the export to
 
 `window` is last on purpose and refuses ranges wider than its row cap. If you find yourself
 wanting to widen it, you skipped a step — go back to `events` or `plot` and narrow the
-question instead.
+question instead. It returns one block per acquisition group; a flat `rows` list appears
+only when your selection lives in a single group, because rows from different groups do not
+share a timestamp.
+
+`correlate` refuses pairs from different groups unless you pass `--allow-cross-group`, which
+resamples onto a common axis and says so in the output. A **negative** `lag_seconds` means
+`a` leads `b`.
+
+Channels carry both a short `name` (the selector) and the qualified `symbol_name` path.
+`--channels` matches either, which matters because two groups routinely hold the same short
+name. Quote the qualified path when you need to be exact.
 
 ### 4. Report
 
@@ -133,11 +164,18 @@ Then stop. Opening it in Scope View and pressing Record is the human's move — 
 
 The `.tcscopex` schema here was derived by reading real Beckhoff sample projects, and the
 templates are validated against that schema. **Nothing has been opened in TwinCAT**, because
-no Beckhoff toolchain exists in the environment this was built in. The CSV reader has not
-been run against genuine `TC3ScopeExportTool.exe` output either; it sniffs the format
-defensively and says what it detected. Rule 3 applies to this skill's own claims — the
-analysis verbs are tested against synthetic fixtures with planted defects, and that is
-exactly as much as it proves.
+no Beckhoff toolchain exists in the environment this was built in.
 
-The highest-value contribution is a real exported CSV: drop one in `tests/fixtures/` and the
-reader stops guessing.
+Rule 3 applies to this skill's own claims, so precisely: the CSV reader **was** measured
+against 19 genuine `TC3ScopeExportTool.exe` exports from a Beckhoff CX/AX8000 machine
+(TwinCAT 3.1, EU locale) covering both the TAB and `,` dialects, all three
+sample-rate alignment states, and multi-line `SymbolComment` values. Those recordings carry
+customer machine behaviour and are not in this repo. What is here is
+`tests/make_real_fixtures.py`, which regenerates structural copies of all five layouts —
+same group boundaries, metadata keys, delimiters, decimal separators and time-column
+behaviour, shrunk to 200 rows with synthetic signal. The verbs are tested against those and
+against synthetic fixtures with planted defects. `checkscope` was run against 7 real
+Beckhoff-authored `.tcscopex` files.
+
+What that does **not** prove: no `.svdx` has been converted by the real export tool in this
+environment, and no generated `.tcscopex` has been opened in TwinCAT.
