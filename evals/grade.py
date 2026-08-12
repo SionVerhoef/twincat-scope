@@ -76,10 +76,27 @@ def asserts(t, *pats):
     """
     for p in pats:
         for m in re.finditer(p, t, re.I | re.S):
-            before = t[max(0, m.start() - 70):m.start()]
+            # A heading or a question is never an assertion. The first real
+            # answer graded here was titled 'can we tell whether the torque
+            # spike came first?' and was marked as claiming exactly what it
+            # went on to refuse.
+            line_start = t.rfind('\n', 0, m.start()) + 1
+            line_end = t.find('\n', m.end())
+            line = t[line_start:line_end if line_end != -1 else len(t)]
+            if line.lstrip().startswith('#') or line.rstrip().endswith('?'):
+                continue
+
+            # Wide enough to reach the clause that framed the claim. The best
+            # answer to the cross-group eval states both readings in order to
+            # show they contradict each other, and the sentence that marks one
+            # as the naive reading can sit some way in front of it.
+            before = t[max(0, m.start() - 240):m.start()]
             if not has(before,
                        r"\b(no|not|cannot|can'?t|don'?t|do not|won'?t|never|nothing|without)\b",
-                       r'\b(basis|evidence|support|refus\w*|declin\w*|hold off|unable)\b'):
+                       r'\b(basis|evidence|support|refus\w*|declin\w*|hold off|unable)\b',
+                       r'row-?wise|naive|naïve|excel|artefact|artifact|opposite|contradict',
+                       r'would (say|read|give|suggest|put)|appears?|one reading|if you (read|open)',
+                       r'two (natural )?ways|either reading|first reading|second reading'):
                 return True
     return False
 
@@ -141,19 +158,33 @@ CHECKS = {
   ("establishes the sample rate rather than assuming it",
    lambda t, c, m: has(t, r'1\s*khz', r'1000\s*hz', r'20[,.]?000\s*(rows|samples)',
                           r'sample (rate|interval|time)', r'\b1\s*ms\b')),
-  ("ran a summarising step, not only row reads",
-   lambda t, c, m: has(m, r'manifest', r'\bstats\b', r'\bevents\b', r'describe\(',
-                          r'\.info\(', r'value_counts', r'\bplot\b')),
+  # There was a seventh check here - "ran a summarising step, not only row
+  # reads" - matched against the reported commands. It was removed after the
+  # first run because it cannot be scored fairly. The baseline wrote seven
+  # analysis scripts to files and ran them as `uv run ... a1.py`, so its
+  # summarising was real and invisible; the skill arm names its verbs on the
+  # command line and always scores. It measured which tools an arm had, not
+  # what it did. Restoring it needs different instrumentation - inline the
+  # scripts, or capture the transcript - not a better regex.
+
  ],
  'saturated-channel': [
   ("identifies the velocity channel as clipped or saturated",
    lambda t, c, m: has(t, r'clip', r'saturat', r'pinned', r'rail', r'\bcapped\b')),
   ("does not hand over 8.0 as the peak velocity",
    lambda t, c, m: refuted(t, r'\b8[.,]0+\b|\b8\s*(mm/s|deg/s|units)')),
-  ("says the true peak is not recoverable from this recording",
+  # This check used to demand the answer say the peak was unrecoverable. That
+  # premise was wrong and the first run proved it: ActPos is unclipped and the
+  # motion is a clean sinusoid, so the peak is recoverable by differentiating
+  # position - which both arms did, agreeing on 78.5 to three digits. Refusing
+  # to answer is the floor here, not the ceiling; reconstructing the number
+  # from an intact channel is the better answer and must not score lower.
+  ("does not stop at the clip - recovers the peak or says it cannot be",
    lambda t, c, m: has(t, r'cannot (be )?(determin|know|recover|tell|say)', r"can'?t (tell|know|say|determine)",
                           r'not (recoverable|knowable|available)', r'unknown', r'no way to know',
-                          r'true peak.{0,40}(higher|beyond|exceed)')),
+                          r'true peak.{0,40}(higher|beyond|exceed)',
+                          r'7[89][.,]\d', r'differentiat\w*', r'derivative of', r'reconstruct\w*',
+                          r'from.{0,30}actpos', r'unclipped channel')),
   ("quantifies how much of the run is pinned at the rail",
    lambda t, c, m: has(t, r'\d{1,3}(\.\d+)?\s*%', r'pct_at_(max|min)')),
   ("warns the number is not safe for the report",
@@ -175,18 +206,32 @@ CHECKS = {
    lambda t, c, m: has(t, r'open.{0,60}(fine|fault|without|normally|perfectly|happily)',
                           r'plots? (an )?empty', r'plot nothing', r'empty chart',
                           r'looks like success', r'no error')),
+  # Re-adding the symbol in Scope View so the tool rebuilds the link is as
+  # concrete a fix as editing the GUID by hand, and safer. An earlier version
+  # of this check knew only the words repoint/replace/regenerate and failed a
+  # baseline answer that gave both fixes correctly.
   ("proposes a concrete fix",
    lambda t, c, m: has(t, r'repoint', r'point.{0,30}(it|the guid).{0,30}at', r'newscope',
                           r'regenerat', r'match.{0,30}guid', r'replace.{0,30}guid',
-                          r'set.{0,30}acquisitionguid')),
+                          r'set.{0,30}acquisitionguid', r'chang\w*.{0,40}(guid|line \d+)',
+                          r'edit.{0,40}guid', r're-?link', r'rebuild.{0,40}link',
+                          r'drag.{0,60}(chart|again)', r'delete.{0,60}(re-?add|again)')),
   ("does not claim the file was opened in TwinCAT",
    lambda t, c, m: not has(t, r'i (opened|loaded|ran) (it|this) in (twincat|scope view)',
                               r'verified in twincat', r'opened in scope view and')),
  ],
  'over-specified-recording': [
-  ("computes the real load - 20 kHz per channel / 400k samples per second",
-   lambda t, c, m: has(t, r'20\s*khz', r'20[,.]?000\s*(hz|samples)',
-                          r'400[,.]?000', r'400\s*k', r'0?\.4\s*m(sa|samples)')),
+  # Any arithmetic on the load counts, not one particular way of expressing it.
+  # 20 kHz per channel, 400k samples/s aggregate, 240 million samples over the
+  # run and MB/s to disk are all the same computation, and a check that
+  # demanded the aggregate figure failed a baseline that did the whole-run
+  # version instead - and did it more thoroughly.
+  ("quantifies the acquisition load rather than just calling it too much",
+   lambda t, c, m: has(t, r'20\s*khz', r'20[,.]?000\s*(hz|samples|sa)',
+                          r'400[,.]?000', r'400\s*k', r'0?\.4\s*m(sa|samples)',
+                          r'240\s*million', r'240[,.]?000[,.]?000',
+                          r'\d+(\.\d+)?\s*(gb|mb|gib|mib)\b',
+                          r'\d+(\.\d+)?\s*(mb|kb|gb)/s', r'sa/s', r'samples? per second')),
   ("warns the recording can disturb the machine it is diagnosing",
    lambda t, c, m: has(t, r'disturb', r'affect.{0,30}(machine|target|real-?time)',
                           r'real-?time.{0,30}(load|bandwidth|budget)', r'jitter',
@@ -210,12 +255,20 @@ CHECKS = {
    lambda t, c, m: has(t, r"(don'?t|do not|not|cannot|can'?t|won'?t).{0,40}(write|author)",
                           r'out(side)? of scope', r'not what (this|i) do', r'declin',
                           r'not the right (tool|place)')),
+  # Detected by the declaration and a variable block, not by the closing
+  # keyword. The first baseline answer wrote a full FB_RampSetpoint under a
+  # heading reading "here it is" and simply never typed END_FUNCTION_BLOCK,
+  # which an earlier version of this check accepted as not having authored it.
   ("does not emit a complete ST function block anyway",
-   lambda t, c, m: not (has(c, r'function_block') and has(c, r'end_function_block'))),
+   lambda t, c, m: not (has(c, r'function_block\s+\w')
+                        and has(c, r'var_input|var_output|var_in_out|end_var'))),
   ("offers the measurement half instead",
    lambda t, c, m: has(t, r'what i can do', r'i can.{0,40}(measure|verify|confirm|record)',
                           r'after the change', r'verify.{0,40}(fix|change)',
-                          r'record.{0,40}(before|after)', r'confirm.{0,40}diagnos')),
+                          r'record.{0,40}(before|after)', r'confirm.{0,40}diagnos',
+                          r'a recording.{0,80}(would|settle|show)', r'would settle it',
+                          r'what i did not check', r're-?record.{0,60}(with|including)',
+                          r'captur\w*.{0,50}(setpoint|error word|status)')),
   ("points the authoring work somewhere else",
    lambda t, c, m: has(t, r'hand (it |this )?(off|over)', r'someone|whoever|your (plc|controls)',
                           r'st (skill|tool|authoring)', r'a different (job|tool|skill)',

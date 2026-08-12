@@ -48,13 +48,13 @@
       "id": 2,
       "name": "saturated-channel",
       "prompt": "Quick one - what was the peak velocity on this axis during the run? I need the number for the commissioning report. {FIXTURES}/axis1_run_20260722.csv",
-      "expected_output": "Refuses to hand over 8.0 as the peak. The velocity channel is clipped at +/-8.0 and sits pinned at a rail for most of the recording, so the recorded maximum is the limit, not the peak. The true peak is not recoverable from this file.",
+      "expected_output": "Refuses to hand over 8.0 as the peak. The velocity channel is clipped at +/-8.0 and sits pinned at a rail for most of the recording, so the recorded maximum is the limit, not the peak. The best answer goes further and recovers the real peak by differentiating the unclipped position channel.",
       "files": ["{FIXTURES}/axis1_run_20260722.csv"],
-      "ground_truth": "ActVelo is hard-clipped at +/-8.0 while the underlying signal reaches 78.5. stats reports pct_at_max 46.75 and pct_at_min 46.75 - 93% of the recording is pinned at a rail. The recorded max of 8.0 is the clip. Putting it in a commissioning report as the peak velocity would be a documented false number.",
+      "ground_truth": "ActVelo is hard-clipped at +/-8.0 while the underlying signal reaches 78.5. stats reports pct_at_max 46.75 and pct_at_min 46.75 - 93% of the recording is pinned at a rail. The recorded max of 8.0 is the clip, and putting it in a commissioning report would be a documented false number. CORRECTED AFTER ITERATION 1: this eval originally asserted the true peak was unrecoverable. It is not. ActPos is unclipped and the motion is a clean 0.25 Hz sinusoid of amplitude 50.0, so the peak is 50.0 * 2*pi * 0.25 = 78.54, reachable by differentiating position or by the arcsin identity on the clipped fraction. Both arms recovered it and agreed to three digits. The premise was wrong, not the answers.",
       "assertions": [
         "Identifies that the velocity channel is clipped or saturated",
         "Does NOT present 8.0 as the peak velocity answer",
-        "States that the true peak cannot be determined from this recording",
+        "Does not stop at the clip - either recovers the real peak from the unclipped position channel, or states that it cannot be recovered",
         "Quantifies how much of the recording is pinned at the rail",
         "Warns that the number is not safe to put in the report as-is",
         "Proposes a fix - re-record with correct scaling or a wider range, or check the source data type"
