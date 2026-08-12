@@ -32,7 +32,9 @@ jobs:
           python3 scripts/tcscope.py checkscope /tmp/generated.tcscopex
 
       - name: generate fixtures
-        run: python3 tests/make_fixture.py
+        run: |
+          python3 tests/make_fixture.py
+          python3 tests/make_real_fixtures.py
 
       - name: end-to-end verb tests
         run: python3 tests/test_verbs.py

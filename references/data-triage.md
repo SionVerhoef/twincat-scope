@@ -99,12 +99,23 @@ show you something you did not think to ask about.
 
 Answers "which one moved first", which is usually the real question. On a machine, causes
 precede effects by a measurable lag: the current loop reacts before the velocity loop, which
-reacts before position. A `lag_seconds` of the wrong sign is a strong hint that your
-mental model of the causal chain is backwards.
+reacts before position.
+
+**The sign convention:** a **negative** `lag_seconds` means `a` leads `b` — a's features
+appear earlier in time. The `leads` field names the channel outright so you never have to
+remember this. A lag of the wrong sign is a strong hint that your mental model of the causal
+chain is backwards.
 
 Correlation is not causation, and on a machine with a cyclic process almost everything
 correlates with almost everything at the cycle period. Treat a high correlation between two
 signals that share a driving frequency as uninformative unless the lag says something.
+
+Two more limits worth knowing. Correlation is computed on mean-centred, unit-normalised
+signals, so a high-amplitude channel no longer outranks the low-amplitude one that caused
+it. And channels from different acquisition groups are refused unless you pass
+`--allow-cross-group`: they are sampled on different clocks, so a lag between them is only
+meaningful beyond the file's `max_skew_ms`. On an export where
+`cross_group_timing_valid` is false, `correlate` refuses outright.
 
 ### Rung 6 — `window`
 
@@ -121,4 +132,8 @@ Now, and only now, real numbers — for a range you can justify from rungs 3–5
 - **Two plausible causes beat one confident wrong one.** On a shop floor a wrong diagnosis
   costs a day of stripping the wrong subsystem.
 - **Cache the Parquet.** `ingest` once per recording, then every subsequent question is
-  seconds rather than minutes.
+  seconds rather than minutes. The group layout travels in the Parquet schema metadata, so
+  per-group time axes survive the round trip.
+- **Name the group too, when there is more than one.** Two acquisition groups routinely
+  carry the same short channel name. `ActTorque spiked` is ambiguous; `ActTorque (group 1,
+  port 851)` is not.
