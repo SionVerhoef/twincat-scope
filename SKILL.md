@@ -144,6 +144,11 @@ Always `checkscope` before handing a file over. It catches the failure that look
 success: a display channel whose `AcquisitionGUID` points at nothing still opens perfectly
 and plots an empty chart.
 
+It also reads the capture strategy, which is a separate way to waste a trip to the machine.
+A correctly wired project that records a fixed window with no trigger is a lottery ticket for
+an intermittent fault — the templates ship with a 60 s window — so `checkscope` warns and
+leaves the judgement to you. Wiring and plan fail independently.
+
 Then stop. Opening it in Scope View and pressing Record is the human's move — see rule 4.
 
 ## Task routing

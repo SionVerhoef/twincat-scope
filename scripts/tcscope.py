@@ -1430,6 +1430,32 @@ def cmd_checkscope(args):
             "machine it is diagnosing. Narrow it, or accept the risk knowingly."
         )
 
+    # Wiring is only half of whether a scope catches anything. A fixed window
+    # that starts when someone presses Record is fine for a fault you can
+    # reproduce on demand and a lottery for one you cannot - and "intermittent"
+    # is the usual reason for reaching for a scope at all. This cannot know
+    # which case it is looking at, so it states the window and the arithmetic
+    # and leaves the judgement where it belongs.
+    trigger_node = root.find(".//TriggerModule")
+    trigger_sub = trigger_node.find("SubMember") if trigger_node is not None else None
+    has_trigger = trigger_sub is not None and len(trigger_sub) > 0
+
+    record_ticks = (root.findtext(".//RecordTime") or "").strip()
+    record_seconds = None
+    if record_ticks.isdigit() and int(record_ticks) > 0:
+        record_seconds = int(record_ticks) / TICKS_PER_MS / 1000.0
+
+    auto_restart = (root.findtext(".//AutoRestartRecord") or "").strip().lower() == "true"
+
+    if record_seconds and not has_trigger and not auto_restart:
+        warnings.append(
+            f"records a fixed {record_seconds:g} s window with no trigger configured. "
+            "For a fault you can reproduce on demand that is fine. For an intermittent "
+            "one the chance of catching it is roughly the window divided by the mean "
+            "time between occurrences - a 60 s window on an hourly fault is under 2%. "
+            "A trigger with a pre-trigger keeps the seconds before the event instead."
+        )
+
     emit({"ok": not problems, "file": str(args.input),
           "channels": channels, "display_channels_wired": plotted,
           "acquisitions": len(acq_guids), "acquisitions_plotted": len(wired_to),
@@ -1437,6 +1463,9 @@ def cmd_checkscope(args):
           "acquisitions_without_declared_rate": unrated,
           "total_samples_per_second": total_rate,
           "load_warn_samples_per_second": LOAD_WARN_SAMPLES_PER_S,
+          "record_seconds": record_seconds,
+          "trigger_configured": has_trigger,
+          "auto_restart_record": auto_restart,
           "problems": problems, "warnings": warnings})
     return 0 if not problems else 1
 
