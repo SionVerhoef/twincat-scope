@@ -1,0 +1,81 @@
+{
+  "skill_name": "twincat-scope",
+  "notes": "Does the description fire when it should and stay quiet when it shouldn't. This is a different measurement from the behaviour evals and much cheaper: one short answer per case, no fixtures, no tool use. Present the candidate descriptions to an agent that has not seen this file, ask which skill (if any) applies to the prompt, and check the name it gives. Run it with distractor skills present - a description tested alone has nothing to lose against and passes trivially.\n\nThe near-miss cases are the ones worth the tokens. Anything that names TwinCAT Scope outright will fire; the question is whether the description reaches a machine problem that never says 'TwinCAT', and whether it lets go of an authoring request now that the sibling ST skill is no longer named in it.",
+  "distractors": [
+    "A skill for writing and reviewing IEC 61131-3 Structured Text for PLCs",
+    "A skill for general CSV and dataframe analysis in Python",
+    "A skill for Siemens TIA Portal and S7 controllers"
+  ],
+  "cases": [
+    {
+      "id": 0,
+      "name": "explicit-scope-file",
+      "prompt": "Can you open this .svdx and tell me what's in it?",
+      "should_fire": true,
+      "why": "Names the file extension directly. If this misses, nothing works."
+    },
+    {
+      "id": 1,
+      "name": "axis-fault-no-vendor",
+      "prompt": "Why did the axis fault at 12 seconds?",
+      "should_fire": true,
+      "why": "The prompt from the bead. No vendor, no file, no format - the description has to reach it through the diagnosis clause alone."
+    },
+    {
+      "id": 2,
+      "name": "directory-of-recordings",
+      "prompt": "What's in this folder? [directory listing: run_01.svdx, run_02.svdx, AxisDiagnosis.tcscopex]",
+      "should_fire": true,
+      "why": "The description claims it fires on a directory containing these files even when the user does not say TwinCAT. Tests that claim."
+    },
+    {
+      "id": 3,
+      "name": "export-scope-data",
+      "prompt": "I need to export scope data to CSV.",
+      "should_fire": true,
+      "why": "Third of the three prompts named in the bead."
+    },
+    {
+      "id": 4,
+      "name": "symptom-only",
+      "prompt": "The machine made a horrible noise on the last cycle and the part came out oversized. I've got a recording from the run - can you work out what happened?",
+      "should_fire": true,
+      "why": "Near miss. Pure symptom language plus the word 'recording'. This is how the request actually arrives on a shop floor."
+    },
+    {
+      "id": 5,
+      "name": "oscillation-tuning",
+      "prompt": "Our robot cell has started oscillating on the Z axis and nobody can work out why. Can you help?",
+      "should_fire": true,
+      "why": "Near miss. 'axis oscillation' and 'drive tuning' are both in the description, but nothing here names a file or a vendor."
+    },
+    {
+      "id": 6,
+      "name": "st-authoring",
+      "prompt": "Write me a TwinCAT function block in ST that ramps a setpoint over a configurable time.",
+      "should_fire": false,
+      "why": "The decline case that matters most. The description used to point at a sibling ST skill by name; that cross-reference was removed so the skill ships alone, so the refusal now rests on the 'Do NOT use for WRITING' wording by itself. Note the prompt says TwinCAT, which pulls the other way."
+    },
+    {
+      "id": 7,
+      "name": "st-review",
+      "prompt": "Can you review this POU for bugs? It's behaving oddly on the machine.",
+      "should_fire": false,
+      "why": "Reviewing PLC code, explicitly excluded. 'Behaving oddly on the machine' pulls toward diagnosis, which is the trap."
+    },
+    {
+      "id": 8,
+      "name": "other-vendor",
+      "prompt": "Set up a trace on our Siemens S7-1500 so we can see the analog input while it faults.",
+      "should_fire": false,
+      "why": "Same shape of task, wrong vendor. Explicitly excluded in the last line of the description."
+    },
+    {
+      "id": 9,
+      "name": "generic-csv",
+      "prompt": "Convert this CSV to Parquet and tell me the column means.",
+      "should_fire": false,
+      "why": "Near miss in the other direction. The skill does convert CSV to Parquet and does report per-channel statistics, but nothing here is a machine measurement. Firing on this would mean it fires on every CSV."
+    }
+  ]
+}
