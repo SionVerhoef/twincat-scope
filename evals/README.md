@@ -1,0 +1,122 @@
+# Evals — does the skill change the answer?
+
+`tests/` measures the tool. This measures the *skill*: whether it fires on the right prompts,
+and whether an agent reading `SKILL.md` reaches a different conclusion than one that never saw
+it.
+
+Two halves, different costs:
+
+| Half | File | Asks | Cost |
+|---|---|---|---|
+| Behaviour | `evals.json` | Does the skill change the answer? | ~1 agent pair per eval, minutes each |
+| Triggering | `triggers.json` | Does the description fire on the right prompts? | one short answer per case |
+
+## The selection rule
+
+An eval earns its place only if a capable model **without** the skill is plausibly, confidently
+**wrong** — not merely less polished.
+
+This is not a style preference. The sibling `twincat-st` harness ran five evals and two of them
+scored full marks in *both* arms: the baseline already reviewed PLC code well and already
+declined to author E-stop logic. Those two evals consumed a third of the budget and measured
+nothing. So there is deliberately no "declines to author safety logic" eval here, however
+reassuring it would be to see it pass.
+
+Each eval below is built around a specific wrong answer that is easy to reach and hard to doubt.
+
+| Eval | The trap |
+|---|---|
+| `broken-cross-group` | Read as one table, the export says torque spiked *before* the following error. Its own clock says *after*. Neither is defensible — the export is broken. The naive read inverts cause and effect. |
+| `needle-in-the-haystack` | The glitch is 3 samples in 20,000. Any decimation that makes the file plottable steps over it. |
+| `saturated-channel` | The velocity channel's maximum is 8.0. The real peak is 78.5. The recorded max is the clip. |
+| `unwired-acquisition` | The project opens perfectly and records nothing. The defect is one level of indirection away from anything visible. |
+| `over-specified-recording` | 20 channels at 50 µs is 400,000 samples/s taken from the target's real-time budget — the scope disturbs the machine it is diagnosing. |
+| `out-of-scope-authoring` | The diagnosis is done and the fix is obviously a few lines of ST. Writing it is the natural next move and the wrong one. |
+
+## Running the behaviour half
+
+**1. Build the fixtures.**
+
+```bash
+python3 evals/make_eval_fixture.py          # writes evals/fixtures/
+```
+
+Regenerable and gitignored, like every other fixture in this repo. Ground truth is written to
+`evals/ground_truth.json` — one directory *up* from the data, never beside it.
+
+**2. Stage them somewhere neutral.** Copy `evals/fixtures/*` into a scratch directory outside the
+repo and point the prompts at that. Two reasons: the file names in `tests/fixtures/` announce
+themselves (`planted.csv` sitting next to `ground_truth.json` is not a measurement), and an agent
+working inside the repo can read the answer key. The fixture names here are already neutral —
+`clamp_station_export.csv`, not `skewed_export.csv` — but staging outside the repo is what makes
+the baseline arm honest.
+
+**3. Run each eval twice**, substituting `{FIXTURES}` with the staging directory:
+
+- **with_skill** — the agent is told to read `SKILL.md` and follow it.
+- **without_skill** — the agent answers from its own knowledge, with the skill withheld. It still
+  gets the fixture and a shell.
+
+Both arms get one extra instruction, identically worded:
+
+> End your answer with a `## Commands` section listing verbatim every shell command you ran, in
+> order.
+
+That section is not decoration. Whether an agent oriented before reading rows is invisible in
+prose, and it is one of the behaviours being measured. It is self-reported, which is a real
+limitation — but both arms are asked for it the same way, so any inflation is symmetric.
+
+Write each answer to `<run-dir>/<eval-name>/<arm>/answer.md`.
+
+**4. Grade.**
+
+```bash
+python3 evals/grade.py evals/runs/iteration-1
+```
+
+Checks that both arms pass are flagged `<- does not discriminate`. Read those flags: they are the
+early warning for the failure that wasted two evals in the sibling repo.
+
+**5. Run each cell three times.** Iteration 1 of the sibling harness was n=1, which makes a
+single-point delta indistinguishable from noise. Three runs per cell is the floor for saying
+anything about a difference of one or two checks.
+
+## Running the trigger half
+
+`triggers.json` carries ten prompts, four of which must *not* fire. Present the skill's
+description alongside the distractor descriptions in that file to an agent that has not seen the
+skill, ask which one applies, and record the name it gives. Testing a description on its own is
+close to meaningless — with nothing to lose against, almost anything fires.
+
+The near-miss cases (`symptom-only`, `oscillation-tuning`, `st-authoring`, `generic-csv`) are the
+ones worth paying for. `st-authoring` is the sharpest: the description used to name a sibling ST
+skill to hand off to, that cross-reference was removed so the skill could ship alone, and the
+refusal now rests on its own wording.
+
+## Checking the grader
+
+```bash
+python3 evals/test_grader.py
+```
+
+Two answers per eval — one that follows the skill, one that falls into the trap — and the grader
+has to separate them. It catches regex typos, checks that can never pass, and checks that pass
+for everyone.
+
+It does **not** prove the checks measure the right thing: the answers and the regexes were
+written by the same hand, so agreement between them is weak evidence. It is a floor. A human
+still reads the real answers.
+
+One check is expected to show `no signal`: *does not claim the file was opened in TwinCAT*. It is
+a guard against a specific dishonesty (rule 3) rather than a discriminator, and it should fire
+rarely or never. It adds a constant to both arms; that is the price of keeping it.
+
+## What the checks are and are not
+
+Keyword proxies for behaviour, not judgement. They confirm a topic was addressed, not that the
+advice was good. The negative checks — *did not assert 0.4 s*, *did not hand over 8.0* — are the
+fragile ones, because a good answer often names the wrong number in order to reject it. Each of
+those passes when the number is absent **or** appears next to a refutation, which is a heuristic
+and will eventually be wrong about something.
+
+Read the answers. The score is a summary of the reading, not a substitute for it.
