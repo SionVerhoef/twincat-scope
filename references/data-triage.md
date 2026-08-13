@@ -47,7 +47,9 @@ Read these four together, not individually:
 
 - **`pct_at_max` / `pct_at_min`** — time spent pinned at a rail. Above a few percent means
   saturation, and a saturated signal is *lying to you*: its true value went further than the
-  recording shows. Diagnose the saturation before anything downstream of it.
+  recording shows. Diagnose the saturation before anything downstream of it, and see
+  *Recovering a clipped channel* below — refusing to give a number is the floor here, not the
+  ceiling.
 - **`pct_flat`** — a signal that stops changing. Either the machine stopped, or the symbol
   stopped updating. Those are very different problems.
 - **`quantisation_step`** — the smallest gap between distinct values. If this is large
@@ -55,6 +57,30 @@ Read these four together, not individually:
   a coarse approximation. Do not read fine structure out of a coarse channel.
 - **`std` vs `p99 - p01`** — a large gap between them means outliers dominate the standard
   deviation, so thresholds based on σ will be wrong.
+
+#### Recovering a clipped channel
+
+"The channel is clipped, so I cannot tell you the peak" is a correct answer and usually not the
+best one. The information is gone *from that channel*. It is often still in the recording,
+because machine signals are related to each other by physics:
+
+- **A clipped velocity, with position intact.** Velocity is the derivative of position.
+  Differentiate `ActPos` over a smoothing window and you have the peak the velocity channel
+  could not show. Same for a clipped acceleration against an intact velocity.
+- **A clipped signal with a known shape.** For a sinusoidal move, fit the sine to the samples
+  that are *not* pinned — the ones near each reversal — and read the amplitude off the fit.
+- **The pinned fraction itself is a measurement.** For a sine of amplitude `A` clipped at level
+  `C`, the fraction of time spent at the rail is `1 − (2/π)·arcsin(C/A)`. Observe the fraction,
+  solve for `A`. It needs no time axis at all, which makes it a good independent check on the
+  other two.
+
+Do all three when you can and say whether they agree — three routes landing on the same number
+is what separates a reconstruction from a guess. Then say plainly that the figure is
+reconstructed rather than measured, and what would replace it: a re-record with the range or
+the scaling fixed.
+
+Worth knowing *why* it clipped before re-recording. A rail at a round number is usually a
+scaled integer type or a fixed scope range, not the machine.
 
 ### Rung 3 — `events`
 

@@ -85,6 +85,35 @@ shape: it failed outright on the TAB dialect and was silently wrong on most of t
 - Four hard rules in `SKILL.md`: no safety logic, no writes to a live machine, no unverified
   claims, and — specific to measurement — a recording is not free.
 
+### Measured against a no-skill baseline
+
+`evals/` runs each prompt twice — once by an agent following this skill, once by an agent with
+it withheld — and grades both mechanically. Iteration 1 found four of six evals scoring
+identically in both arms, and three places where the *baseline* gave better guidance than this
+skill's own references. Those three are now folded in:
+
+- `checkscope` reads `RecordTime`, `TriggerModule` and `AutoRestartRecord`, and warns when a
+  project records a fixed window with no trigger — correct wiring and the wrong plan. The
+  templates ship exactly this way: a 60 s window, which for an hourly intermittent fault
+  catches it under 2% of the time. It is a warning, never a problem; a file can be perfectly
+  built and still be a lottery ticket.
+- `references/recording-load.md` names the cycle that actually sets the floor. Axis data off
+  the NC interface updates once per NC SAF cycle (typically 1–2 ms), so a request for 50 µs on
+  those channels buys 20–40 identical samples per real update at 20–40× the bandwidth. Adds
+  the drive-internal route (an AX8000 samples its own current loop at ~62.5 µs) for questions
+  genuinely shorter than one fieldbus cycle, which no scope on the target can see.
+- `references/data-triage.md` gains *Recovering a clipped channel*. Refusing to give a number
+  for a saturated signal is the floor, not the ceiling: velocity clipped with position intact
+  is recoverable by differentiating position, a clipped sine can be fitted from its unpinned
+  samples, and the pinned fraction itself gives the amplitude via
+  `1 − (2/π)·arcsin(C/A)`. Three routes agreeing is what makes it a reconstruction rather than
+  a guess — and it must still be reported as reconstructed.
+
+The evals' own headline is not that the skill scored 33/33 against 28/33. It is that the
+fixtures are too small to test this skill's central claim: `needle-in-the-haystack` runs
+against 20,000 rows, which pandas holds whole, while `SKILL.md` exists because twelve million
+samples cannot be. See `evals/results-iteration-1.md`.
+
 ### Known gaps
 
 - **Nothing has been opened in TwinCAT.** The `.tcscopex` schema is derived from real Beckhoff
