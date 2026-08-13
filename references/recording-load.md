@@ -47,9 +47,20 @@ Practical shape of a well-sized recording:
   once per 1 ms task does not become higher-resolution at 10 kHz — you get ten copies of each
   value, ten times the load, and a signal that looks smoother than the machine really is.
   `UseTaskSampleTime` exists for this; prefer it unless you have a reason.
-- **Genuine sub-cycle resolution needs oversampling terminals**, not a faster scope. If the
-  question is about something shorter than one PLC cycle, the answer is EL3xxx/EL7xxx
-  oversampling hardware, and that is a different conversation.
+- **Know which task feeds the variable, and treat its cycle as the floor.** Axis data off the
+  NC interface (`NcToPlc.ActPos`, `ActVelo`, `ActTorque`) updates once per **NC SAF cycle** —
+  typically 2 ms, 1 ms on a tuned system — not once per PLC cycle and not on demand. So a
+  request for 50 µs on axis channels is asking for 20–40 identical samples per real update. It
+  is a staircase, not resolution, and it costs 20–40× the bandwidth to record. When someone
+  asks for microseconds on NC data, the useful reply is which task writes it, not a faster
+  sample time.
+- **Genuine sub-cycle resolution needs different hardware, not a faster scope.** For an analog
+  signal that is EL3xxx/EL7xxx oversampling terminals. For something internal to a drive —
+  current-loop or torque behaviour shorter than one fieldbus cycle — the scope on the target
+  cannot see it at all, because the value only reaches the controller once per EtherCAT cycle.
+  An AX8000 samples its own current loop internally at roughly 62.5 µs and Drive Manager can
+  upload that trace; that is the instrument for the question, and it is a different
+  conversation from this one.
 - **Record the shortest window that contains the event.** A trigger and thirty seconds beats
   ten minutes of hoping.
 - **Add channels for a reason.** "Everything on the axis" is how a recording becomes both
