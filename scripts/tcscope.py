@@ -959,7 +959,7 @@ def _excursions(np, col, d, thresh, gap):
     return merged
 
 
-def _detection_threshold(np, d, finite_d, span, args):
+def _detection_threshold(np, finite_d, span, args):
     """Smallest first-difference that counts as a real change on this channel.
 
     MAD alone is what made this verb unusable on real machine data. An axis is
@@ -1020,7 +1020,7 @@ def cmd_events(args):
         # of blanks into a flatline, reporting missing data as a frozen signal.
         d = np.diff(col)
         finite_d = d[np.isfinite(d)]
-        thresh = _detection_threshold(np, d, finite_d, span, args)
+        thresh = _detection_threshold(np, finite_d, span, args)
 
         if thresh > 0:
             # A sustained change is ONE event. Reporting each over-threshold
