@@ -1027,19 +1027,30 @@ def cmd_events(args):
             # sample separately turned a single 2.4 s move into 1199 "steps" and
             # buried every real fault under them. NaN compares False, so a gap
             # in the data ends an excursion rather than bridging it.
-            for s, e in _excursions(np, col, d, thresh, args.spike_width):
+            excursions = _excursions(np, col, d, thresh, args.spike_width)
+            index, consumed = 0, -1
+            while index < len(excursions):
+                s, e = excursions[index]
+                index += 1
+                # The return edge of a spike is its own excursion. Left to be
+                # classified on its own it comes back as a second event - the
+                # planted 3-sample spike at 11.999 s reported again as a step of
+                # -4.0 at 12.002 s, which is the "every spike reported twice"
+                # failure the width test exists to prevent.
+                if s <= consumed:
+                    continue
                 # d[s] and d[e-1] are finite by construction, so both endpoints
                 # of the excursion are real readings.
                 base, net = float(col[s]), float(col[e] - col[s])
                 # A spike comes back; a step goes and stays. Test the level the
                 # signal returns to, not the sign of the next difference - the
-                # return edge of a 3-sample spike is its own excursion, several
-                # samples away.
+                # return edge of a 3-sample spike is several samples away.
                 horizon = min(e + args.spike_width + 1, col.size)
                 back = np.flatnonzero(np.abs(col[e:horizon] - base) <= 0.5 * abs(net))
                 width = e - s
                 if back.size:
                     kind, width = "spike", int(width + back[0])
+                    consumed = e + int(back[0])
                 elif digital:
                     kind = "transition"
                 elif width > args.ramp_samples:
