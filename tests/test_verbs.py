@@ -386,6 +386,15 @@ def main():
           f"at {(flat or {}).get('time')}")
     check("finds the planted clipping", clip is not None)
 
+    # A spike's return edge is its own excursion, and classified on its own it
+    # comes back as a second event at the far side of the spike. Checking that
+    # the spike is *found* does not catch that; counting does.
+    diffs = [e for e in events if e["channel"] == "Axis1.PosDiff"
+             and e["kind"] in ("step", "spike", "ramp")]
+    check("the planted spike is reported once, not as a spike and a step",
+          len(diffs) == 1 and diffs[0]["kind"] == "spike",
+          str([(e["kind"], round(e["time"], 3)) for e in diffs]))
+
     # --- stats -----------------------------------------------------------
     st = run("stats", FIXTURES / "planted.csv", "--channels", "Axis1.ActVelo")
     velo = (st.get("channels") or [{}])[0]
