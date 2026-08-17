@@ -7,6 +7,11 @@ behaviour and never belongs in git. What survives is their *structure*: row
 order, metadata keys, delimiters, decimal separators, group layout and
 time-column behaviour, shrunk to 200 rows and filled with synthetic signal.
 
+Every name below is invented. Symbol paths, net IDs and hardware tags are
+generic stand-ins chosen to keep the *shape* that matters - the spaces, dots,
+brackets and the unbalanced parenthesis - without carrying anything that
+identifies the machine they were measured on.
+
 A Scope CSV is not `time,ch1,ch2,...`. It is a horizontal concatenation of
 independent acquisition groups, each carrying its own time column:
 
@@ -209,14 +214,15 @@ def tab_symbol(gid, spec, ch):
     """A qualified symbol path, with the spaces, dots and parentheses that make
     splitting on '.' the wrong way to derive a short name.
 
+    Names are invented; the *shape* is copied, and the shape is the whole point.
     Every NC symbol here is truncated mid-parenthesis, because that is what
-    Beckhoff's own exporter writes: in the real files each symbol under
-    `Axes.Linear Axis2 (DRV_101_ChB` lost its closing bracket, identically.
-    The reader is being faithful, so nothing here should ever balance it.
+    Beckhoff's own exporter writes - in the measured files every symbol under
+    one axis had lost its closing bracket, identically. The reader is being
+    faithful, so nothing here should ever balance it.
     """
     short = TAB_SHORT[ch % len(TAB_SHORT)]
     if spec["port"] == 501:
-        return f"Axes.Linear Axis{ch + 1} (DRV_1{ch + 1:02d}U2_ChA.{short}"
+        return f"Axes.Linear Axis {ch + 1} (DRV_1{ch + 1:02d}_ChA.{short}"
     return f"gPlc.emTransport.fbCtrl[{ch}].{short}"
 
 
@@ -319,7 +325,7 @@ DISTURBANCE_DELTA = 40.0            # Nm
 
 
 def at_rest_columns():
-    """A Transport axis doing one move, plus a planted torque disturbance.
+    """A linear axis doing one move, plus a planted torque disturbance.
 
     This is the shape that made `events` unusable on real machine data, and no
     fixture had it. An axis is at rest for most of a recording, so over half its

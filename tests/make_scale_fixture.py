@@ -112,7 +112,7 @@ def main():
     meta = {
         "Name": lambda g, c: ["ActPos", "ActVelo", "ActTorque", "bEnable"][c % 4],
         "SymbolName": lambda g, c: (
-            f"Axes.Linear Axis{c + 1} (DRV_1{c + 1:02d}U2_ChA."
+            f"Axes.Linear Axis {c + 1} (DRV_1{c + 1:02d}_ChA."
             f"{['ActPos', 'ActVelo', 'ActTorque', 'bEnable'][c % 4]}"),
         "SymbolComment": lambda g, c: "scale fixture",
         "NetId": lambda g, c: "192.168.1.10.1.1",
