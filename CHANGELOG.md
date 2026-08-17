@@ -4,6 +4,37 @@
 
 First working version. Not yet published.
 
+### Triage that survives real machine data
+
+A second field review on the same 19 genuine exports — kept in
+`evals/field-review-af54888.md`, since the files themselves cannot be — confirmed the group
+model is correct and found that `events` was not.
+
+- **An excursion is one event, however long it lasts.** Reporting each over-threshold sample
+  separately turned a single commanded move into 1199 "steps". Real exports fired 170–413
+  events per channel; on the new at-rest fixture the count went from 713 to 11.
+- **The detection threshold has a floor.** An axis at rest has a first-difference MAD of
+  ~1e-9 — non-zero, so it passed the old zero-guard, and `6·MAD·1.4826` then flagged every
+  acceleration sample. `--min-step` floors it at a fraction of the channel's own travel.
+- **New event kinds `ramp` and `transition`**, so `step` keeps meaning a discontinuity worth
+  explaining rather than "the machine moved". Two-valued channels are exempt from the
+  clipping and flatline tests, which describe a BOOL wrongly in both directions.
+- **Truncation is no longer chronological.** It returned the first 100 events — 0.1% of one
+  recording — while the fault sat at 9 s. Events are now ranked worst-first within each tenth
+  of the recording, and a `summary` totalling *every* event by kind, by channel and by time
+  decile is always returned, truncated or not.
+- **`window` reads distinct instants**, so a repeat-padded group no longer prints every
+  sample twice under one timestamp with its row cap biting at half the promised width.
+  `stats` reports `n_samples` so a standard deviation can be audited against what it covered.
+- **Scale is measured rather than claimed.** `tests/make_scale_fixture.py` and
+  `tests/bench_scale.py`; budget in `references/data-triage.md`. Chunked parsing cut peak
+  memory from 785 MB to 340 MB at ten million samples and ran 30% faster; `manifest` output
+  is byte-identical to the previous reader on every fixture.
+- **Acquisition load is graded into bands** taken from seven real projects, replacing a
+  threshold that sat above every project anyone had built and so never fired.
+- **Regression-tested as correct**: symbol names truncated mid-parenthesis by Beckhoff's own
+  exporter, and the literal unit string `(None)`.
+
 ### Reading real Scope exports
 
 Measured against 19 genuine `TC3ScopeExportTool.exe` exports from a Beckhoff CX/AX8000
