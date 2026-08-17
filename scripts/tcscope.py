@@ -57,12 +57,19 @@ XML_DECL = '<?xml version="1.0" encoding="utf-8"?>'
 # A .tcscopex sample time is expressed in 100 ns ticks.
 TICKS_PER_MS = 10_000
 
-# Above this, a recording starts to compete with the machine it is diagnosing.
-# Directional, not a benchmark - see references/recording-load.md. Set from
-# practice rather than theory: the densest of seven real Beckhoff-authored
-# projects measured 16 250 samples/s, so 100 000 never once fired and warned
-# about nothing. This line means "denser than anything anyone here has shipped".
-LOAD_WARN_SAMPLES_PER_S = 20_000
+# What a recording costs the machine it is diagnosing. Directional, not a
+# benchmark - see references/recording-load.md.
+#
+# There is no universal number here: the ceiling depends on the target CPU, the
+# ADS route and which task the acquisition hangs off. So these bands are
+# empirical, taken from seven real Beckhoff-authored projects on one packaging
+# machine, which measured 417, 2 750, 4 000, 5 750, 7 750, 11 667 and 16 250
+# samples/s. A single threshold above that range is a check that always passes -
+# 100 000 never fired once, and 20 000 would not have either. Reporting which
+# band a project lands in says something at every value instead.
+LOAD_TYPICAL_SAMPLES_PER_S = 6_000     # the median of the seven
+LOAD_HIGH_SAMPLES_PER_S = 10_000       # only the densest two exceed this
+LOAD_WARN_SAMPLES_PER_S = 20_000       # denser than anything measured in practice
 
 
 # --------------------------------------------------------------------------
@@ -358,16 +365,24 @@ def sniff_csv(path, sample_bytes=200_000):
     }
 
 
-def _parse_float(field, decimal):
+def _to_float(field):
+    """One already-normalised field. Anything unreadable is NaN, never 0.0."""
     field = field.strip()
     if not field:
         return float("nan")
-    if decimal == ",":
-        field = field.replace(".", "").replace(",", ".")
     try:
         return float(field)
     except ValueError:
         return float("nan")
+
+
+def _normalise(field):
+    """EU thousands separator, then decimal comma: 1.234,5 -> 1234.5"""
+    return field.replace(".", "").replace(",", ".")
+
+
+def _parse_float(field, decimal):
+    return _to_float(_normalise(field) if decimal == "," else field)
 
 
 class Recording:
@@ -477,26 +492,64 @@ def _finalise_group(np, group, raw):
     return group
 
 
+CHUNK_ROWS = 20_000
+
+
+def _chunk_array(np, block, delim, decimal, ncols):
+    """One chunk of raw lines -> an (n, ncols) float array, or None if empty.
+
+    numpy parses a flat list of strings itself, at C speed and without ever
+    materialising a Python float per cell. That only matters at scale, and at
+    scale it is most of the cost: the list of lists this replaced was ~380 MB
+    of objects on a ten-million-sample export, built to be thrown away.
+
+    A blank or unreadable cell makes numpy raise rather than yield NaN, so such
+    chunks fall back to the field-by-field rule. Real exports do drop cells -
+    7 of the 19 measured files did - so that fallback is a live path.
+    """
+    fields = []
+    for line in block:
+        parts = line.split(delim)
+        if len(parts) == ncols:
+            fields.extend(parts)
+    if not fields:
+        return None
+    if decimal == ",":
+        fields = [_normalise(f) for f in fields]
+    try:
+        return np.array(fields, dtype=float).reshape(-1, ncols)
+    except ValueError:
+        return np.array([_to_float(f) for f in fields],
+                        dtype=float).reshape(-1, ncols)
+
+
 def load_csv(path):
     """Read a Scope CSV export into a Recording."""
     np = need("numpy")
     info = sniff_csv(path)
     delim, decimal, ncols = info["delimiter"], info["decimal"], info["columns"]
 
-    rows = []
     with open(path, "rb") as fh:
         text = fh.read().decode("utf-8-sig", errors="replace")
-    for ln in text.splitlines()[info["data_row"]:]:
-        if not ln.strip():
-            continue
-        fields = ln.split(delim)
-        if len(fields) != ncols:
-            continue
-        rows.append([_parse_float(f, decimal) for f in fields])
-    if not rows:
+    # The same line list sniff_csv indexed into, so data_row still means what it
+    # said there. `text` is released before parsing begins: on a 143 MB export
+    # it and the line list are together 318 MB of the peak.
+    lines = text.splitlines()
+    del text
+    del lines[:info["data_row"]]
+
+    blocks = []
+    for start in range(0, len(lines), CHUNK_ROWS):
+        block = _chunk_array(np, lines[start:start + CHUNK_ROWS],
+                             delim, decimal, ncols)
+        if block is not None:
+            blocks.append(block)
+    del lines
+    if not blocks:
         fail(f"no parsable data rows in {path}")
 
-    data = np.asarray(rows, dtype=float)
+    data = blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
+    del blocks
     groups = []
     for group in info["groups"]:
         for channel in group["channels"]:
@@ -1600,11 +1653,23 @@ def cmd_checkscope(args):
         )
 
     if total_rate > LOAD_WARN_SAMPLES_PER_S:
+        load_band = "above anything measured in practice"
         warnings.append(
             f"{len(channels)} channels totalling ~{total_rate:.0f} samples/s. "
             "A recording this dense competes for real-time bandwidth with the "
             "machine it is diagnosing. Narrow it, or accept the risk knowingly."
         )
+    elif total_rate > LOAD_HIGH_SAMPLES_PER_S:
+        load_band = "high"
+        warnings.append(
+            f"{len(channels)} channels totalling ~{total_rate:.0f} samples/s, which "
+            f"is denser than five of the seven real projects this band was measured "
+            "from. Fine as it stands; worth re-checking before adding channels."
+        )
+    elif total_rate > LOAD_TYPICAL_SAMPLES_PER_S:
+        load_band = "moderate"
+    else:
+        load_band = "typical"
 
     # Wiring is only half of whether a scope catches anything. A fixed window
     # that starts when someone presses Record is fine for a fault you can
@@ -1638,7 +1703,12 @@ def cmd_checkscope(args):
           "acquisitions_without_display_channel": max(0, unwired),
           "acquisitions_without_declared_rate": unrated,
           "total_samples_per_second": total_rate,
-          "load_warn_samples_per_second": LOAD_WARN_SAMPLES_PER_S,
+          "load_band": load_band,
+          "load_bands_samples_per_second": {
+              "typical": LOAD_TYPICAL_SAMPLES_PER_S,
+              "high": LOAD_HIGH_SAMPLES_PER_S,
+              "warn": LOAD_WARN_SAMPLES_PER_S,
+          },
           "record_seconds": record_seconds,
           "trigger_configured": has_trigger,
           "auto_restart_record": auto_restart,

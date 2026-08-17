@@ -34,6 +34,36 @@ you end up with a confident wrong answer.
 Rung 6 exists, and it is capped, and the cap is not negotiable by widening the range. If
 500 rows is not enough, the question is still too broad — go back to rung 3 or 4.
 
+### What a big file actually costs
+
+Measured, not estimated — `tests/make_scale_fixture.py` generates the file and
+`tests/bench_scale.py` measures each verb. Two groups, 20 channels, the slow group
+repeat-padded, on one core of a small Linux container:
+
+| Samples | File | Per verb | Peak RSS |
+|---|---|---|---|
+| 0.4 M | 5.7 MB | ~1 s | 66 MB |
+| 2 M | 28.6 MB | ~4 s | 186 MB |
+| 10 M | 143.6 MB | 15–16 s | 340 MB |
+| 20 M | 288.3 MB | 31–42 s | 630 MB |
+
+**Peak memory tracks the file, not the sample count: roughly 25 MB + 2.2 × file size.** The
+array itself is a fraction of that (20 M samples is 176 MB of float64); the rest is the
+decoded text and its line list, which are both alive at once while the file is split. So the
+opening claim — ten minutes of twenty channels at 1 kHz — costs about 45–55 s per verb and
+under a gigabyte. That is usable on an engineering laptop and slow enough to be worth saying
+out loud before running four verbs in a row on the same file.
+
+Two things follow for how you work:
+
+- **`ingest` to Parquet first if you will ask more than two questions.** Every verb re-parses
+  the CSV from scratch. On the 10 M-sample file: one 13.6 s ingest turns 143.6 MB into an
+  11 MB Parquet, after which the same verbs take 1.8–3.3 s instead of 15–16 s. Two questions
+  pay it back.
+- **The output stays tiny at every size.** Across the whole table `manifest` returns ~5.9 KB
+  and `events` ~28 KB. That is the point of the ladder — the file grew 50×, the answer did
+  not grow at all.
+
 ### Rung 1 — `manifest`
 
 Cheap and always first. It tells you the sample rate rather than letting you assume it,
