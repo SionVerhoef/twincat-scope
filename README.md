@@ -109,7 +109,7 @@ the environment this was built in. Specifically:
   templates validate against it — but no file has been loaded into Scope View. `checkscope`
   has been run against 7 real Beckhoff-authored projects.
 - The CSV reader **was** measured against 19 genuine `TC3ScopeExportTool.exe` exports from a
-  Beckhoff CX/AX8000 machine (TwinCAT 3.1, Dutch Windows), covering both the TAB and `,`
+  Beckhoff CX/AX8000 machine (TwinCAT 3.1, EU locale), covering both the TAB and `,`
   dialects and all three sample-rate alignment states. Those recordings carry customer
   machine behaviour and are not in this repo; `tests/make_real_fixtures.py` regenerates
   structural copies of all five layouts instead.

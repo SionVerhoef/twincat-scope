@@ -33,7 +33,7 @@ and reports seconds everywhere - `manifest` says so via "time_unit": "ms" and
 "times_reported_in": "s".
 
 Status: the CSV reader was measured against 19 genuine TC3ScopeExportTool.exe
-exports from a Beckhoff CX/AX8000 machine (TwinCAT 3.1, Dutch Windows) covering
+exports from a Beckhoff CX/AX8000 machine (TwinCAT 3.1, EU locale) covering
 both the TAB and ',' dialects, and is tested against structural copies of all
 five layouts those files use. The .tcscopex writer is still modelled on real
 Beckhoff sample files but has never been opened in TwinCAT. Both say so rather

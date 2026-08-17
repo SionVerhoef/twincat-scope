@@ -10,6 +10,7 @@ Usage:  uv run tests/test_verbs.py
 """
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -124,8 +125,8 @@ def real_fixture_checks():
           str([g["sample_time_ms_declared"] for g in tab.get("groups", [])]))
     symbols = [c["symbol_name"] for c in tab.get("channels", [])]
     check("TAB dialect: channels carry their qualified SymbolName path",
-          any(s.startswith("Axes.Smarttrak M1 (") for s in symbols)
-          and any(s.startswith("gPlc.emSmartTrak.") for s in symbols),
+          any(s.startswith("Axes.Linear Axis 1 (") for s in symbols)
+          and any(s.startswith("gPlc.emTransport.") for s in symbols),
           symbols[0] if symbols else "")
     check("TAB dialect: the short name stays available as a selector",
           run("stats", REAL / "real_tab_2group.csv",
@@ -213,7 +214,7 @@ def real_fixture_checks():
         check("ingest to Parquet keeps the group model and the qualified names",
               len(back.get("groups", [])) == 2
               and len(back.get("channels", [])) == 54
-              and any(c["symbol_name"].startswith("Axes.Smarttrak")
+              and any(c["symbol_name"].startswith("Axes.Linear Axis")
                       for c in back.get("channels", [])),
               f"groups={len(back.get('groups', []))} channels={len(back.get('channels', []))}")
         rates = [g["estimated_rate_hz"] for g in back.get("groups", [])]
@@ -347,6 +348,40 @@ def at_rest_checks():
     check("a truncated answer says where the activity actually is",
           sum(histogram.get("bins", [])) == histogram.get("timed") == len(whole),
           f"bins={histogram.get('bins')} timed={histogram.get('timed')}")
+
+
+# AMS net IDs that may appear in a public repo: the unfilled template value, the
+# documentation example, and the two the tests pass in. Anything else is a real
+# machine address, and this skill is meant to be shareable.
+ALLOWED_NET_IDS = {"0.0.0.0.0.0", "192.168.1.10.1.1", "1.2.3.4.1.1", "127.0.0.1.1.1"}
+NET_ID = re.compile(r"\b(?:\d{1,3}\.){5}\d{1,3}\b")
+
+
+def shareability_checks():
+    """No real machine address anywhere in the tracked tree.
+
+    An allowlist rather than a list of things to avoid, so the check itself
+    names nothing. The reader was validated against a customer's machine and the
+    obvious way to leak that is to paste its net ID in as the worked example -
+    which is exactly what had happened, in five files including SKILL.md.
+    """
+    listed = subprocess.run(["git", "-C", str(ROOT), "ls-files"],
+                            capture_output=True, text=True)
+    if listed.returncode != 0:
+        check("tracked files carry no real AMS net ID", True, "skipped: no git")
+        return
+
+    offenders = {}
+    for name in listed.stdout.split():
+        path = ROOT / name
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for found in set(NET_ID.findall(text)) - ALLOWED_NET_IDS:
+            offenders.setdefault(found, []).append(name)
+    check("tracked files carry no real AMS net ID", not offenders,
+          "; ".join(f"{k} in {v[0]}" for k, v in list(offenders.items())[:3]))
 
 
 def main():
@@ -497,6 +532,7 @@ def main():
 
     real_fixture_checks()
     at_rest_checks()
+    shareability_checks()
 
     print()
     failed = [name for name, ok, _ in results if not ok]

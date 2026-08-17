@@ -39,7 +39,7 @@ the controller, the core assignment, what else runs on it, and the task cycle ti
 | `high` | ≤ 20,000 | Denser than five of the seven measured projects — worth re-checking before adding channels |
 | warn | > 20,000 | Denser than anything measured in practice; justify it |
 
-The numbers come from seven real Beckhoff-authored projects on one packaging machine, which
+The numbers come from seven real Beckhoff-authored projects on one production machine, which
 measured **417, 2,750, 4,000, 5,750, 7,750, 11,667 and 16,250** samples/s. That distribution
 is the whole reason for bands: an earlier single threshold sat at 100,000, then 20,000, above
 every project anyone had actually built, so it never once fired and graded nothing. A check

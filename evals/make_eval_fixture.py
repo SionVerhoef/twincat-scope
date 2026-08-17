@@ -211,7 +211,7 @@ def write_unwired(out):
     src = (ROOT / "templates" / "minimal-single-channel.tcscopex").read_text(encoding="utf-8")
     src = src.replace("PLACEHOLDER.Symbol", "MAIN.fbAxis.NcToPlc.ActPos")
     src = src.replace("<AmsNetId>0.0.0.0.0.0</AmsNetId>",
-                      "<AmsNetId>5.68.118.43.1.1</AmsNetId>")
+                      "<AmsNetId>192.168.1.10.1.1</AmsNetId>")
 
     target = "<AcquisitionGUID>"
     start = src.index(target) + len(target)

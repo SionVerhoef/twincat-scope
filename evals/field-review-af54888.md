@@ -1,13 +1,18 @@
 # Field review — main @ af54888
 
 Run by an agent on a Beckhoff commissioning workstation against **19 genuine TwinCAT Scope
-CSV exports** from a live packaging machine (SmartTrak linear-motor track, AX8640 drives,
-TC3.1) and **7 real `.tcscopex` project files** from a production TwinCAT Measurement
+CSV exports** from a production machine (linear-motor transport system, AX8000-series
+drives, TC3.1) and **7 real `.tcscopex` project files** from a live TwinCAT Measurement
 project. Windows, Python 3.12.10, numpy 2.5.2, matplotlib 3.11.1, pyarrow 25.0.1,
 `TC3ScopeExportTool.exe` present, `uv` absent so scripts were invoked directly.
 
 **None of those files are in this repo and none can be.** They are customer machine data.
 This document is the only record of their shape, which is why it is kept.
+
+**Anonymised.** File names, project names, symbol paths and channel names below are
+stand-ins. Every number — column counts, group layouts, row counts, skews, sample rates,
+event counts and timings — is the measured one, because the numbers are the evidence and
+the names are not.
 
 ## Verdict
 
@@ -34,23 +39,24 @@ Confirmed on real data:
 
 Groups are (n_channels) per group. MAX_SKEW is `timing.max_skew_ms`.
 
-| File | Delim | Dec | ncols | Data line | Groups | Chans | Rows | MAX_SKEW |
-|---|---|---|---|---|---|---|---|---|
-| Project.csv | `,` | `.` | 34 | 8 | 14/15/2 | 31 | 10141 | 10 |
-| Project1.csv | TAB | `,` | 76 | 24 | 38×1 | 38 | 15577 | 31150 |
-| Project3.csv | TAB | `,` | 76 | 24 | 38×1 | 38 | 15577 | 31150 |
-| Project11.csv | TAB | `,` | 56 | 24 | 24/30 | 54 | 5393 | 2 |
-| Project1223.csv | `,` | `.` | 19 | 8 | 6/11 | 17 | 2939 | 2 |
-| Project123/12345/2/222/44/7/91/99.csv | `,` | `.` | 37 | 8 | 14/18/2 | 34 | 6031–25039 | 10 |
-| Project5.csv | TAB | `,` | 50 | 24 | 25×1 | 25 | 5339 | 0 |
-| Projectccc/ttt.csv | `,` | `.` | 42 | 8 | 14/23/2 | 39 | 12613/19465 | 10 |
-| Projectqqqq.csv | `,` | `.` | 40 | 8 | 14/21/2 | 37 | 7663 | 10 |
-| Projectxxxx.csv | `,` | `.` | 40 | 8 | 25/13 | 38 | 16875 | 2 |
-| Festo Project1.csv | TAB | `,` | 120 | 40 | 60×1 | 60 | 47247 | 0 |
+Eleven rows, nineteen files — two of the rows cover a set of exports that share one shape.
 
-Acquisition load across the 7 real projects: SmartTrak 16 250, Indexer 11 667, Double_Pusher
-7 750, SmartTrakHoming 5 750, PusherAxes 4 000, CaseLift_n_Tipper 2 750, Capacity 417
-samples/s.
+| Export | Delim | Dec | ncols | Data line | Groups | Chans | Rows | MAX_SKEW |
+|---|---|---|---|---|---|---|---|---|
+| A | `,` | `.` | 34 | 8 | 14/15/2 | 31 | 10141 | 10 |
+| B | TAB | `,` | 76 | 24 | 38×1 | 38 | 15577 | 31150 |
+| C | TAB | `,` | 76 | 24 | 38×1 | 38 | 15577 | 31150 |
+| D | TAB | `,` | 56 | 24 | 24/30 | 54 | 5393 | 2 |
+| E | `,` | `.` | 19 | 8 | 6/11 | 17 | 2939 | 2 |
+| F (×8) | `,` | `.` | 37 | 8 | 14/18/2 | 34 | 6031–25039 | 10 |
+| G | TAB | `,` | 50 | 24 | 25×1 | 25 | 5339 | 0 |
+| H (×2) | `,` | `.` | 42 | 8 | 14/23/2 | 39 | 12613/19465 | 10 |
+| I | `,` | `.` | 40 | 8 | 14/21/2 | 37 | 7663 | 10 |
+| J | `,` | `.` | 40 | 8 | 25/13 | 38 | 16875 | 2 |
+| K | TAB | `,` | 120 | 40 | 60×1 | 60 | 47247 | 0 |
+
+Acquisition load across the 7 real projects, densest first: 16 250, 11 667, 7 750, 5 750,
+4 000, 2 750 and 417 samples/s.
 
 Largest genuine export: 43.8 MB, 47 247 rows × 120 columns, 60 channels @ 250 Hz —
 `manifest` 3.42 s, `stats` 3.63 s, `events` 5.63 s.
@@ -61,17 +67,17 @@ Largest genuine export: 43.8 MB, 47 247 rows × 120 columns, 60 channels @ 250 H
 
 Measured firing rates, `--max-events 100000`:
 
-| File | Rows | Chans | Duration | Events | Per channel |
+| Export | Rows | Chans | Duration | Events | Per channel |
 |---|---|---|---|---|---|
-| Project11 | 5393 | 54 | 10.8 s | 9209 | 170 |
-| Project | 10141 | 31 | 20.3 s | 3082 | 99 |
-| Project91 | 25039 | 34 | 50.1 s | 11558 | 340 |
-| Projectxxxx | 16875 | 38 | 33.8 s | 15690 | 413 |
+| D | 5393 | 54 | 10.8 s | 9209 | 170 |
+| A | 10141 | 31 | 20.3 s | 3082 | 99 |
+| F | 25039 | 34 | 50.1 s | 11558 | 340 |
+| J | 16875 | 38 | 33.8 s | 15690 | 413 |
 
-Split by data type: REAL64 298.6/channel, BIT 10.1, INT16 11.6. Worst were all motion
-signals — ActVelo2B 1627, ActVelo1B 1120, ofPositionAxis2B 939. The reviewer disproved the
-obvious hypothesis that repeat-padding caused it: group 0 (`repeat_factor=1`) fired 244.6
-events/channel against group 1's (`repeat_factor=2`) 111.3.
+Split by data type: REAL64 298.6/channel, BIT 10.1, INT16 11.6. The three worst were all
+motion signals — two velocity channels at 1627 and 1120 events, a position channel at 939.
+The reviewer disproved the obvious hypothesis that repeat-padding caused it: group 0
+(`repeat_factor=1`) fired 244.6 events/channel against group 1's (`repeat_factor=2`) 111.3.
 
 Root cause: **MAD of the first difference degenerates on a piecewise-constant signal.** An
 axis at rest has over half its differences at the encoder's quantisation floor, so MAD
@@ -79,14 +85,14 @@ collapses to ~1e-9 — non-zero, so it passed the `if not mad` guard — and `6�
 became a threshold every acceleration sample cleared.
 
 Compounded by chronological truncation: `found.sort(key=time)[:100]` returned the first 100
-events, covering 0.1% of Project11's recording while reporting `ok: true`.
+events, covering 0.1% of export D's recording while reporting `ok: true`.
 
-| File | Returned | Of | Window covered |
+| Export | Returned | Of | Window covered |
 |---|---|---|---|
-| Project11 | 100 | 9209 | 0.1% |
-| Project91 | 100 | 11558 | 12.7% |
-| Project | 100 | 3082 | 22.8% |
-| Projectxxxx | 100 | 15690 | 33.1% |
+| D | 100 | 9209 | 0.1% |
+| F | 100 | 11558 | 12.7% |
+| A | 100 | 3082 | 22.8% |
+| J | 100 | 15690 | 33.1% |
 
 **Done.** `tests/fixtures/real/real_comma_atrest.csv` reproduces the shape — an axis parked
 for 60% of the recording, one commanded move, one planted disturbance. On it the old
@@ -129,9 +135,9 @@ both directions.
 
 Both were checked against the raw bytes of the source files and are now regression-tested.
 
-- **Truncated symbol names.** `Axes.Smarttrak M2 (E1_101U2_ChB.ActTorque` is missing its
-  closing parenthesis in Beckhoff's own export, and every symbol under that axis is truncated
-  identically. Do not add paren-balancing.
+- **Truncated symbol names.** An NC symbol of the form `Axes.<axis name> (<drive tag>.ActTorque`
+  is missing its closing parenthesis in Beckhoff's own export, and every symbol under that
+  axis is truncated identically. Do not add paren-balancing.
 - **`unit: "(None)"`.** The literal string TwinCAT writes in the Unit metadata row. Do not
   coerce it to null.
 

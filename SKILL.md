@@ -135,7 +135,7 @@ both — a confident wrong diagnosis costs a day on the shop floor.
 python3 scripts/tcscope.py newscope templates/axis-diagnosis.tcscopex \
     -o MyScope.tcscopex \
     --channels "MAIN.fbAxis.NcToPlc.ActPos,MAIN.fbAxis.NcToPlc.PosDiff" \
-    --netid 5.68.118.43.1.1 --sample-time-ms 1
+    --netid 192.168.1.10.1.1 --sample-time-ms 1
 
 python3 scripts/tcscope.py checkscope MyScope.tcscopex
 ```
@@ -173,7 +173,7 @@ no Beckhoff toolchain exists in the environment this was built in.
 
 Rule 3 applies to this skill's own claims, so precisely: the CSV reader **was** measured
 against 19 genuine `TC3ScopeExportTool.exe` exports from a Beckhoff CX/AX8000 machine
-(TwinCAT 3.1, Dutch Windows, EU locale) covering both the TAB and `,` dialects, all three
+(TwinCAT 3.1, EU locale) covering both the TAB and `,` dialects, all three
 sample-rate alignment states, and multi-line `SymbolComment` values. Those recordings carry
 customer machine behaviour and are not in this repo. What is here is
 `tests/make_real_fixtures.py`, which regenerates structural copies of all five layouts —

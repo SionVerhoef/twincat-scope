@@ -186,7 +186,7 @@ python3 scripts/tcscope.py checkscope AxisDiagnosis.tcscopex
 I had a look through the XML and it seems fine.
 
 The file has an AdsAcquisition node with a symbol name of MAIN.fbAxis.NcToPlc.ActPos, an AmsNetId
-of 5.68.118.43.1.1 and a 1 ms sample time, and there is a display channel defined for it. The
+of 192.168.1.10.1.1 and a 1 ms sample time, and there is a display channel defined for it. The
 structure matches what a TwinCAT Scope project normally looks like.
 
 You should be good to go - it will record the axis position at 1 kHz.

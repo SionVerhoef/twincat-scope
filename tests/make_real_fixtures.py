@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Regenerate structural copies of the real TC3ScopeExportTool.exe dialects.
 
-Nineteen genuine exports from a Beckhoff CX/AX8000 machine (TwinCAT 3.1, Dutch
-Windows) were measured, then thrown away - recorded data carries real machine
+Nineteen genuine exports from a Beckhoff CX/AX8000 machine (TwinCAT 3.1, EU
+locale) were measured, then thrown away - recorded data carries real machine
 behaviour and never belongs in git. What survives is their *structure*: row
 order, metadata keys, delimiters, decimal separators, group layout and
 time-column behaviour, shrunk to 200 rows and filled with synthetic signal.
+
+Every name below is invented. Symbol paths, net IDs and hardware tags are
+generic stand-ins chosen to keep the *shape* that matters - the spaces, dots,
+brackets and the unbalanced parenthesis - without carrying anything that
+identifies the machine they were measured on.
 
 A Scope CSV is not `time,ch1,ch2,...`. It is a horizontal concatenation of
 independent acquisition groups, each carrying its own time column:
@@ -209,15 +214,16 @@ def tab_symbol(gid, spec, ch):
     """A qualified symbol path, with the spaces, dots and parentheses that make
     splitting on '.' the wrong way to derive a short name.
 
+    Names are invented; the *shape* is copied, and the shape is the whole point.
     Every NC symbol here is truncated mid-parenthesis, because that is what
-    Beckhoff's own exporter writes: in the real files each symbol under
-    `Axes.Smarttrak M2 (E1_101U2_ChB` lost its closing bracket, identically.
-    The reader is being faithful, so nothing here should ever balance it.
+    Beckhoff's own exporter writes - in the measured files every symbol under
+    one axis had lost its closing bracket, identically. The reader is being
+    faithful, so nothing here should ever balance it.
     """
     short = TAB_SHORT[ch % len(TAB_SHORT)]
     if spec["port"] == 501:
-        return f"Axes.Smarttrak M{ch + 1} (E1_1{ch + 1:02d}U2_ChA.{short}"
-    return f"gPlc.emSmartTrak.fbCtrl[{ch}].{short}"
+        return f"Axes.Linear Axis {ch + 1} (DRV_1{ch + 1:02d}_ChA.{short}"
+    return f"gPlc.emTransport.fbCtrl[{ch}].{short}"
 
 
 def write_tab(path, groups, columns, truth, rows, wrap_comments=False):
@@ -250,7 +256,7 @@ def write_tab(path, groups, columns, truth, rows, wrap_comments=False):
         "Name": lambda g, s, c, i: TAB_SHORT[c % len(TAB_SHORT)],
         "SymbolName": lambda g, s, c, i: tab_symbol(g, s, c),
         "SymbolComment": lambda g, s, c, i: comment_for(i, wrap_comments),
-        "NetId": lambda g, s, c, i: "5.68.118.43.1.1",
+        "NetId": lambda g, s, c, i: "192.168.1.10.1.1",
         "Port": lambda g, s, c, i: str(s["port"]),
         "IndexGroup": lambda g, s, c, i: "16448",
         "IndexOffset": lambda g, s, c, i: str(1000 + c * 8),
@@ -298,7 +304,7 @@ def comment_for(idx, wrap):
     if not wrap:
         return "torque feedback"
     if idx == 0:
-        return "(* torque feedback\nscaled in the drive\nsee E1_103U2 *)"
+        return "(* torque feedback\nscaled in the drive\nsee DRV_103 *)"
     if idx % 4 == 0:
         return "(* torque feedback\nscaled in the drive *)"
     return "torque feedback"
@@ -319,7 +325,7 @@ DISTURBANCE_DELTA = 40.0            # Nm
 
 
 def at_rest_columns():
-    """A SmartTrak axis doing one move, plus a planted torque disturbance.
+    """A linear axis doing one move, plus a planted torque disturbance.
 
     This is the shape that made `events` unusable on real machine data, and no
     fixture had it. An axis is at rest for most of a recording, so over half its

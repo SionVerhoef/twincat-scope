@@ -101,7 +101,7 @@ Project-level, `RecordTime` is also in 100 ns ticks — `600000000` is 60 second
 python3 scripts/tcscope.py newscope templates/axis-diagnosis.tcscopex \
     -o MyScope.tcscopex \
     --channels "MAIN.fbAxis.NcToPlc.ActPos,MAIN.fbAxis.NcToPlc.PosDiff" \
-    --netid 5.68.118.43.1.1 --port 851 --sample-time-ms 1
+    --netid 192.168.1.10.1.1 --port 851 --sample-time-ms 1
 
 python3 scripts/tcscope.py checkscope MyScope.tcscopex
 ```

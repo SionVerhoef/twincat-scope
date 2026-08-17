@@ -112,10 +112,10 @@ def main():
     meta = {
         "Name": lambda g, c: ["ActPos", "ActVelo", "ActTorque", "bEnable"][c % 4],
         "SymbolName": lambda g, c: (
-            f"Axes.Smarttrak M{c + 1} (E1_1{c + 1:02d}U2_ChA."
+            f"Axes.Linear Axis {c + 1} (DRV_1{c + 1:02d}_ChA."
             f"{['ActPos', 'ActVelo', 'ActTorque', 'bEnable'][c % 4]}"),
         "SymbolComment": lambda g, c: "scale fixture",
-        "NetId": lambda g, c: "5.68.118.43.1.1",
+        "NetId": lambda g, c: "192.168.1.10.1.1",
         "Port": lambda g, c: "501" if g == 0 else "851",
         "IndexGroup": lambda g, c: "16448",
         "IndexOffset": lambda g, c: str(1000 + c * 8),
