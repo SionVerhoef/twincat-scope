@@ -36,3 +36,8 @@ config.json
 *.db
 .beads-credential-key
 /AGENTS.md
+
+# Agent session state: local settings, transcripts and the scratch git worktrees
+# that background jobs run in. Machine-specific and often verbatim working notes,
+# so it is the last place anything private should be able to reach a public repo.
+.claude/
