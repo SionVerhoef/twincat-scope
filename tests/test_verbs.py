@@ -451,6 +451,27 @@ def main():
                   and any("no trigger configured" in w for w in chk.get("warnings", [])),
                   str(chk.get("warnings")))
 
+            # Acquisition load. The previous threshold sat above every real
+            # project a commissioning engineer had ever built - 100 000, then
+            # 20 000, against a densest-measured 16 250 - so it never fired and
+            # graded nothing. Both directions are checked here for that reason.
+            check("a four-channel recording is reported as a typical load",
+                  chk.get("load_band") == "typical"
+                  and not any("samples/s" in w for w in chk.get("warnings", [])),
+                  f"band={chk.get('load_band')} rate={chk.get('total_samples_per_second')}")
+
+            dense = Path(tmp) / "dense.tcscopex"
+            run("newscope", tpl, "-o", dense, "--netid", "1.2.3.4.1.1",
+                "--channels", ",".join(f"MAIN.fbAxis.Ch{i}" for i in range(14)))
+            heavy = run("checkscope", dense)
+            check("a dense recording lands in a band that says so",
+                  heavy.get("load_band") == "high"
+                  and any("samples/s" in w for w in heavy.get("warnings", [])),
+                  f"band={heavy.get('load_band')} "
+                  f"rate={heavy.get('total_samples_per_second')}")
+            check("a dense-but-buildable recording is still not a problem",
+                  heavy.get("ok") is True, str(heavy.get("problems"))[:70])
+
             # The negative case, or the check above is just a string that is
             # always present. Re-arming after each window is a different plan
             # and must not draw the same warning.
