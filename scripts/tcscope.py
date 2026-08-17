@@ -853,6 +853,11 @@ def cmd_stats(args):
         out.append(dict(
             label,
             **{
+            # Distinct instants, not file rows: a repeat-padded group holds half
+            # as many samples as the file has rows, and without this number
+            # there is no way to tell from the output which one a std was
+            # computed over.
+            "n_samples": int(finite.size),
             "min": lo, "max": hi,
             "mean": float(np.mean(finite)),
             "std": float(np.std(finite)),
@@ -869,6 +874,61 @@ def cmd_stats(args):
     return 0
 
 
+def _runs(np, flags):
+    """(starts, ends) of every run of True in `flags`, as half-open pairs."""
+    edges = np.flatnonzero(np.diff(np.concatenate(
+        ([False], flags, [False])).astype(np.int8)))
+    return edges[0::2], edges[1::2]
+
+
+def _excursions(np, col, d, thresh, gap):
+    """Half-open (start, end) index pairs, one per sustained change in `col`.
+
+    Consecutive over-threshold differences are obviously one excursion. The
+    reason for the gap tolerance is less obvious: a ramp whose per-sample change
+    lands near the threshold flickers over and under it, so one commanded move
+    arrives as dozens of one-sample fragments - which is how a velocity channel
+    still reported 50 "steps" for a single move after the threshold was floored.
+
+    Same-direction excursions within `gap` samples are therefore joined. Opposite
+    directions never are: the return edge of a spike is exactly that, and merging
+    it would erase the out-and-back shape the spike test looks for.
+    """
+    starts, ends = _runs(np, np.abs(d) > thresh)
+    merged = []
+    for s, e in zip(starts.tolist(), ends.tolist()):
+        if merged:
+            ps, pe = merged[-1]
+            if s - pe <= gap and (col[e] - col[s]) * (col[pe] - col[ps]) > 0:
+                merged[-1] = (ps, e)
+                continue
+        merged.append((s, e))
+    return merged
+
+
+def _detection_threshold(np, d, finite_d, span, args):
+    """Smallest first-difference that counts as a real change on this channel.
+
+    MAD alone is what made this verb unusable on real machine data. An axis is
+    at rest for most of a recording, so over half its first differences are the
+    encoder's quantisation floor and MAD collapses to ~1e-9 - non-zero, so it
+    passed the old `if not mad` guard, and 6*MAD*1.4826 then became a threshold
+    that every genuine acceleration sample cleared. One 5000-row export fired
+    1199 "steps" on a position channel that simply moved once.
+
+    So the noise-relative threshold is floored against the channel's own travel:
+    a change worth reporting is exceptional against the quiet stretches *and* a
+    real fraction of the distance this signal covers. The span is measured
+    p0.5-p99.5 so a single outlier cannot set the scale.
+    """
+    mad = (float(np.median(np.abs(finite_d - np.median(finite_d))))
+           if finite_d.size else 0.0)
+    scale = mad * 1.4826
+    if not scale:
+        scale = float(np.std(finite_d)) if finite_d.size else 0.0
+    return max(args.sigma * scale, args.min_step * span)
+
+
 def cmd_events(args):
     np = need("numpy")
     rec = load(args.input)
@@ -878,10 +938,11 @@ def cmd_events(args):
     for channel in select(rec, args.channels):
         name = channel["name"]
 
-        def event(kind, **rest):
+        def event(kind, severity, **rest):
             row = {"channel": name, "symbol_name": channel["symbol_name"], "kind": kind}
             if total > 1:
                 row["group"] = channel["group"]
+            row["severity"] = round(float(severity), 3)
             row.update(rest)
             return row
 
@@ -892,73 +953,182 @@ def cmd_events(args):
         ok = np.isfinite(col)
         if ok.sum() < 8:
             continue
+        finite = col[ok]
+        lo, hi = float(np.min(finite)), float(np.max(finite))
+        # Two distinct values means a digital signal. Its "steps" are toggles and
+        # its rails are just its two states, so the analogue detectors describe
+        # it wrongly in both directions - 100% of a BOOL sits at a rail.
+        digital = bool(np.all((finite == lo) | (finite == hi)))
+        p_lo, p_hi = np.percentile(finite, [0.5, 99.5])
+        span = float(p_hi - p_lo) or (hi - lo)
+
         # NaN diffs stay NaN. Substituting 0.0 turned a blank cell into a real
         # reading of zero - a fake step on a torque channel - and turned a run
         # of blanks into a flatline, reporting missing data as a frozen signal.
         d = np.diff(col)
         finite_d = d[np.isfinite(d)]
-        mad = (float(np.median(np.abs(finite_d - np.median(finite_d))))
-               if finite_d.size else 0.0)
-        if not mad:
-            mad = float(np.std(finite_d)) if finite_d.size else 0.0
+        thresh = _detection_threshold(np, d, finite_d, span, args)
 
-        if mad > 0:
-            # A step goes and stays; a spike comes back. The return edge can be
-            # several samples away - a 3-sample spike puts it at j+3 - so look
-            # ahead over a window rather than at d[j+1] alone, or every spike
-            # gets reported twice as a pair of steps.
-            big = np.flatnonzero(np.abs(d) > args.sigma * mad * 1.4826)
-            reported = set()
-            for j in big:
-                if j in reported:
-                    continue
-                horizon = min(j + args.spike_width + 1, d.size)
-                partner = None
-                for k in range(j + 1, horizon):
-                    if np.sign(d[k]) != np.sign(d[j]) and abs(d[k]) > 0.5 * abs(d[j]):
-                        partner = k
-                        break
-                if partner is not None:
-                    reported.update(range(j, partner + 1))
+        if thresh > 0:
+            # A sustained change is ONE event. Reporting each over-threshold
+            # sample separately turned a single 2.4 s move into 1199 "steps" and
+            # buried every real fault under them. NaN compares False, so a gap
+            # in the data ends an excursion rather than bridging it.
+            for s, e in _excursions(np, col, d, thresh, args.spike_width):
+                # d[s] and d[e-1] are finite by construction, so both endpoints
+                # of the excursion are real readings.
+                base, net = float(col[s]), float(col[e] - col[s])
+                # A spike comes back; a step goes and stays. Test the level the
+                # signal returns to, not the sign of the next difference - the
+                # return edge of a 3-sample spike is its own excursion, several
+                # samples away.
+                horizon = min(e + args.spike_width + 1, col.size)
+                back = np.flatnonzero(np.abs(col[e:horizon] - base) <= 0.5 * abs(net))
+                width = e - s
+                if back.size:
+                    kind, width = "spike", int(width + back[0])
+                elif digital:
+                    kind = "transition"
+                elif width > args.ramp_samples:
+                    # It went, but it took its time getting there. Calling a
+                    # commanded move a "step" would bury the discontinuities
+                    # that are actually worth looking at.
+                    kind = "ramp"
+                else:
+                    kind = "step"
                 found.append(event(
-                    "spike" if partner is not None else "step",
-                    time=float(t[min(j + 1, t.size - 1)]),
-                    index=int(j + 1),
-                    delta=float(d[j]),
-                    **({"width_samples": int(partner - j)} if partner is not None else {}),
+                    kind,
+                    1.0 if kind in ("ramp", "transition") else abs(net) / thresh,
+                    time=float(t[min(s + 1, t.size - 1)]),
+                    index=int(s + 1),
+                    delta=net,
+                    width_samples=int(width),
                 ))
 
-        lo, hi = float(np.nanmin(col)), float(np.nanmax(col))
-        for edge, value in (("max", hi), ("min", lo)):
-            frac = float(np.mean(col[ok] == value))
-            if frac > args.clip_fraction:
-                found.append(event("clipping", edge=edge, value=value, fraction=frac))
+        # A BOOL sits at both its rails 100% of the time and holds each state for
+        # as long as the machine needs it. Clipping and flatline describe neither
+        # - `transition` already reports every change a digital channel makes.
+        if not digital:
+            for edge, value in (("max", hi), ("min", lo)):
+                frac = float(np.mean(col[ok] == value))
+                if frac > args.clip_fraction:
+                    found.append(event("clipping", frac / args.clip_fraction,
+                                       edge=edge, value=value, fraction=frac))
 
-        # NaN == 0 is False, so a gap in the data breaks a flat run instead of
-        # extending it.
-        flat = np.abs(d) == 0
-        run, start = 0, 0
-        for k, is_flat in enumerate(flat):
-            if is_flat:
-                run = run + 1 if run else 1
-                start = k - run + 1
-            else:
+            # NaN == 0 is False, so a gap in the data breaks a flat run instead
+            # of extending it.
+            flat_starts, flat_ends = _runs(np, np.abs(d) == 0)
+            for s, e in zip(flat_starts.tolist(), flat_ends.tolist()):
+                run = e - s
                 if run >= args.flat_samples:
-                    found.append(event("flatline", time=float(t[start]), samples=int(run)))
-                run = 0
-        if run >= args.flat_samples:
-            found.append(event("flatline", time=float(t[start]), samples=int(run)))
+                    found.append(event("flatline", run / args.flat_samples,
+                                       time=float(t[s]), samples=run))
 
         if args.threshold is not None:
             crossings = np.flatnonzero(np.diff((col > args.threshold).astype(int)) != 0)
             for j in crossings[:args.max_events]:
-                found.append(event("crossing", time=float(t[j + 1]),
+                found.append(event("crossing", 1.0, time=float(t[j + 1]),
                                    threshold=args.threshold))
 
-    found.sort(key=lambda e: e.get("time", 0.0))
-    emit({"ok": True, "count": len(found), "events": found[:args.max_events],
-          "truncated": len(found) > args.max_events})
+    t0, t1 = _recording_span(rec)
+    emit({"ok": True, "count": len(found),
+          "summary": _event_summary(found, t0, t1, args.max_events),
+          "events": sorted(_rank(found, t0, t1, args.max_events),
+                           key=lambda e: e.get("time", 0.0)),
+          "truncated": len(found) > args.max_events,
+          "severity": "multiple of each detector's own threshold; ramp, "
+                      "transition and crossing are descriptive, always 1.0",
+          "ranking": "worst first within each tenth of the recording, so a "
+                     "truncated answer still spans the whole of it"})
     return 0
+
+
+BINS = 10
+
+
+def _recording_span(rec):
+    spans = [(g["t_first"], g["t_last"]) for g in rec.groups
+             if g["t_first"] == g["t_first"]]
+    if not spans:
+        return 0.0, 0.0
+    return min(s for s, _ in spans), max(e for _, e in spans)
+
+
+def _bin_of(event, t0, t1):
+    """Which tenth of the recording an event falls in.
+
+    `clipping` describes a whole channel rather than an instant, so it has no
+    time and lands in a pool of its own - counting it as "at t=0" would both
+    skew the histogram and let it crowd out real events from the first tenth.
+    """
+    if "time" not in event:
+        return BINS
+    if t1 <= t0:
+        return 0
+    return min(BINS - 1, int((event["time"] - t0) / (t1 - t0) * BINS))
+
+
+def _rank(found, t0, t1, cap):
+    """The worst events, spread across the recording.
+
+    Chronological truncation was the real defect: the default 100 came back
+    from the first 10 ms of a 10.8 s export and said `truncated`, while the
+    fault sat at 9 s. Pure severity ranking has the same failure in a different
+    costume - it answers about the loudest second and says nothing about the
+    rest.
+
+    So: one pass per round, taking the worst remaining event from each tenth of
+    the recording, and visiting the tenths worst-first. Round one therefore
+    always contains the single worst event in the file, and a cap smaller than
+    the number of tenths still spends itself on the worst of them rather than
+    the earliest.
+    """
+    if len(found) <= cap:
+        return list(found)
+    bins = [[] for _ in range(BINS + 1)]
+    for event in found:
+        bins[_bin_of(event, t0, t1)].append(event)
+    for b in bins:
+        b.sort(key=lambda e: -e["severity"])
+
+    kept, round_ = [], 0
+    while len(kept) < cap:
+        ready = [b for b in bins if round_ < len(b)]
+        if not ready:
+            break
+        ready.sort(key=lambda b: -b[round_]["severity"])
+        for b in ready:
+            kept.append(b[round_])
+            if len(kept) == cap:
+                break
+        round_ += 1
+    return kept
+
+
+def _event_summary(found, t0, t1, cap):
+    """Per-kind, per-channel and per-decile totals over ALL events.
+
+    Always present, truncated or not. Without it the only way to learn that the
+    returned events cover 0.1% of the recording was to re-run with a cap no
+    caller would think to guess.
+    """
+    by_kind, by_channel = {}, {}
+    bins, timed = [0] * BINS, 0
+    for e in found:
+        by_kind[e["kind"]] = by_kind.get(e["kind"], 0) + 1
+        by_channel[e["channel"]] = by_channel.get(e["channel"], 0) + 1
+        if "time" in e:
+            bins[_bin_of(e, t0, t1)] += 1
+            timed += 1
+    return {
+        "by_kind": dict(sorted(by_kind.items(), key=lambda kv: -kv[1])),
+        "by_channel": dict(sorted(by_channel.items(), key=lambda kv: -kv[1])),
+        "per_channel_max": max(by_channel.values()) if by_channel else 0,
+        # `timed` is below `count` by however many clipping events there are:
+        # clipping describes a channel, not an instant, so it has no bin.
+        "time_histogram": {"t_first": t0, "t_last": t1, "bins": bins, "timed": timed},
+        "returned": min(len(found), cap),
+    }
 
 
 def _unit_vector(np, values):
@@ -1083,8 +1253,14 @@ def cmd_window(args):
     blocks, total_rows = [], 0
     for gid in sorted(wanted):
         group = rec.groups[gid]
-        t = group["time"]
-        idx = np.flatnonzero((t >= args.start) & (t <= args.end) & np.isfinite(t))
+        # One row per distinct instant, like every other verb. Indexing the raw
+        # rows printed each sample of a repeat-padded group twice under the same
+        # timestamp - so a table this tool had just described as 4 ms-sampled
+        # came back with duplicate times, and the row cap bit at half the real
+        # width because it was counting padding.
+        keep = group["instants"]
+        t = group["time"][keep]
+        idx = keep[np.flatnonzero((t >= args.start) & (t <= args.end))]
         total_rows += idx.size
         blocks.append((gid, group, wanted[gid], idx))
 
@@ -1497,10 +1673,17 @@ def build_parser():
     q.add_argument("--channels")
     q.set_defaults(func=cmd_stats)
 
-    q = sub.add_parser("events", help="steps, spikes, flatlines, clipping, crossings")
+    q = sub.add_parser("events", help="steps, ramps, spikes, flatlines, clipping")
     q.add_argument("input")
     q.add_argument("--channels")
     q.add_argument("--sigma", type=float, default=6.0)
+    q.add_argument("--min-step", type=float, default=0.01,
+                   help="floor under --sigma, as a fraction of the channel's own "
+                        "travel. Without it, a signal that rests has a noise "
+                        "estimate of ~0 and every sample of a move is an event.")
+    q.add_argument("--ramp-samples", type=int, default=3,
+                   help="an excursion wider than this many samples is a ramp - a "
+                        "commanded move - rather than a step discontinuity")
     q.add_argument("--spike-width", type=int, default=16,
                    help="how many samples a value may stay out before it counts "
                         "as a step rather than a spike")

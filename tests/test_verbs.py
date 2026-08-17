@@ -228,6 +228,126 @@ def real_fixture_checks():
           and "rows" not in win,
           f"{len(win.get('groups', []))} groups, flat rows={'rows' in win}")
 
+    # A repeat-padded group prints each sample again on the next row. window
+    # used to index those raw rows, so it emitted every slow-group sample twice
+    # under one timestamp - in a table this same tool had just called 4 ms.
+    for block in win.get("groups", []):
+        times = [row["time"] for row in block["rows"]]
+        dupes = sum(1 for a, b in zip(times, times[1:]) if a == b)
+        span = block["sample_time_ms"] / 1000.0
+        expected = sum(1 for t in times if t <= 0.02)
+        check(f"window group {block['group']}: no repeated timestamps",
+              dupes == 0, f"{dupes} duplicates in {len(times)} rows")
+        check(f"window group {block['group']}: rows land one sample time apart",
+              all(near(b - a, span, span * 0.01) for a, b in zip(times, times[1:])),
+              f"sample_time={span}s rows={len(times)}")
+        check(f"window group {block['group']}: every returned row is in range",
+              expected == len(times), f"{len(times)} rows, {expected} in range")
+
+    # The cap has to count real samples too, or it bites at half the width it
+    # promises on any group that is padded.
+    padded = run("window", REAL / "real_comma_3group.csv", "--start", 0.0,
+                 "--end", 0.4, "--channels", "PosDiff", "--max-rows", 210)
+    check("window's row cap is evaluated on de-duplicated samples",
+          padded.get("ok") is True,
+          str(padded.get("error", ""))[:70])
+
+    # --- stats is auditable -------------------------------------------------
+    man = run("manifest", REAL / "real_comma_3group.csv")
+    counts = {g["group"]: g["n_samples"] for g in man.get("groups", [])}
+    st = run("stats", REAL / "real_comma_3group.csv")
+    per_group = {c.get("group"): c.get("n_samples") for c in st.get("channels", [])}
+    check("stats reports a per-channel sample count",
+          all(c.get("n_samples") for c in st.get("channels", [])),
+          f"{len(st.get('channels', []))} channels")
+    check("stats counts distinct instants, not padded file rows",
+          per_group == counts, f"stats={per_group} manifest={counts}")
+
+    # --- the reader is faithful, even where the source is malformed ---------
+    tab_ch = run("manifest", REAL / "real_tab_2group.csv").get("channels", [])
+    symbols = [c["symbol_name"] for c in tab_ch]
+    check("a symbol truncated by Beckhoff's own exporter is left truncated",
+          any(s.count("(") == 1 and s.count(")") == 0 for s in symbols),
+          next((s for s in symbols if "(" in s), "")[:60])
+    check("the literal unit string '(None)' is not coerced to null",
+          all(c["unit"] == "(None)" for c in tab_ch),
+          str({c["unit"] for c in tab_ch}))
+
+
+def at_rest_checks():
+    """The shape that made `events` unusable on real machine data.
+
+    An axis at rest has a first-difference MAD of ~1e-9 - non-zero, so it passed
+    the old zero-guard, and every sample of a move then cleared 6*MAD*1.4826.
+    On this fixture the old detector produced 713 events, 601 of them on one
+    position channel that moved exactly once, and the default 100 came back from
+    the first third of the recording without the planted fault in it.
+    """
+    truth = json.loads((REAL / "ground_truth.json").read_text())
+    want = truth["real_comma_atrest.csv"]["groups"][0]
+
+    ev = run("events", REAL / "real_comma_atrest.csv")
+    events, summary = ev.get("events", []), ev.get("summary", {})
+
+    check("an at-rest recording does not flood: under 5 events per channel",
+          0 < (summary.get("per_channel_max") or 999) < 5,
+          f"worst channel has {summary.get('per_channel_max')}, "
+          f"{ev.get('count')} events total")
+
+    # The torque channel also steps twice as the move loads and unloads it, so
+    # "the first ActTorque step" is not the planted one. Rank picks it out,
+    # which is the property under test.
+    worst = max(events, key=lambda e: e["severity"])
+    check("the planted disturbance is the most severe thing in the recording",
+          worst["channel"] == "ActTorque" and worst["kind"] == "step"
+          and near(worst.get("time"), want["step_time_s"], 0.005)
+          and near(worst.get("delta"), want["step_delta"], 0.5),
+          f"{worst['channel']} {worst['kind']} at {worst.get('time')} "
+          f"delta={worst.get('delta')} severity={worst['severity']}")
+
+    # A commanded move is one event, not one per sample. Naming it `ramp` is
+    # what keeps `step` meaning a discontinuity worth looking at.
+    ramps = [e for e in events if e["kind"] == "ramp" and e["channel"] == "ActVelo"]
+    check("a commanded move is reported once, as a ramp",
+          len(ramps) == 2 and all(e["width_samples"] > 10 for e in ramps),
+          f"{len(ramps)} ramps, widths={[e['width_samples'] for e in ramps]}")
+    check("no analysis verb calls the move a step",
+          not [e for e in events
+               if e["kind"] == "step" and e["channel"] in ("ActPos", "ActVelo")],
+          str([e["channel"] for e in events if e["kind"] == "step"]))
+
+    # A digital channel sits at both rails 100% of the time and holds each state
+    # as long as the machine needs it. Neither is clipping or a frozen signal.
+    check("a BOOL's toggles are transitions, not steps at a rail",
+          [e["kind"] for e in events if e["channel"] == "bEnable"] == ["transition"] * 2,
+          str([e["kind"] for e in events if e["channel"] == "bEnable"]))
+
+    # --- what a truncated answer is allowed to hide -------------------------
+    # Measured against the span the events themselves occupy, not the span of
+    # the recording: no ranking can return an event from a stretch where none
+    # happened, and this fixture is deliberately quiet at both ends.
+    whole = [e["time"] for e in events if "time" in e]
+    span = max(whole) - min(whole)
+    cut = run("events", REAL / "real_comma_atrest.csv", "--max-events", 4)
+    times = [e["time"] for e in cut.get("events", []) if "time" in e]
+    check("a truncated answer still spans the events it is truncating",
+          cut.get("truncated") is True and times
+          and (max(times) - min(times)) > 0.8 * span,
+          f"covers {(max(times) - min(times)) / span * 100:.0f}% of the {span:.2f}s "
+          f"the {len(whole)} timed events occupy" if times else "no timed events")
+    check("truncation never drops the worst event in the file",
+          max(cut.get("events", []), key=lambda e: e["severity"])["severity"]
+          == worst["severity"],
+          f"kept {max(cut.get('events', []), key=lambda e: e['severity'])['severity']}")
+    check("a truncated answer still totals every event it did not return",
+          cut.get("summary", {}).get("by_kind") == summary.get("by_kind")
+          and cut.get("summary", {}).get("by_channel") == summary.get("by_channel"),
+          f"returned {cut.get('summary', {}).get('returned')} of {cut.get('count')}")
+    histogram = cut.get("summary", {}).get("time_histogram", {})
+    check("a truncated answer says where the activity actually is",
+          sum(histogram.get("bins", [])) == histogram.get("timed") == len(whole),
+          f"bins={histogram.get('bins')} timed={histogram.get('timed')}")
+
 
 def main():
     subprocess.run([sys.executable, str(ROOT / "tests" / "make_fixture.py")],
@@ -346,6 +466,7 @@ def main():
                   str(chk_restart.get("warnings")))
 
     real_fixture_checks()
+    at_rest_checks()
 
     print()
     failed = [name for name, ok, _ in results if not ok]

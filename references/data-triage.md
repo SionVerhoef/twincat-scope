@@ -88,21 +88,57 @@ Detectors, and what each one actually means on a machine:
 
 | Kind | Physical reading |
 |---|---|
-| `step` | Something changed state and stayed changed — a setpoint jump, a mode switch, a re-home |
+| `step` | A discontinuity that stayed — a setpoint jump, a mode switch, an encoder jump, a re-home |
+| `ramp` | A commanded move: the signal travelled, but it took many samples to get there |
 | `spike` | Something transient — a torque impulse, EMI on an analogue input, a single bad ADC read |
+| `transition` | A digital channel changed state |
 | `flatline` | The signal stopped updating for a sustained run |
 | `clipping` | The signal hit a rail; the true value is unknown beyond it |
 | `crossing` | A user-supplied threshold was crossed |
 
+An excursion is **one event however long it lasts**. Reporting each over-threshold sample
+separately is what made this verb unusable on real machine data: a single 2.4 s move arrived
+as 1199 "steps" and buried every real fault underneath them.
+
 The step/spike distinction is a judgement about *width*, controlled by `--spike-width`. A
 value that leaves and returns within that many samples is a spike; one that leaves and stays
 is a step. Getting this wrong in either direction is common: too narrow and every spike is
-reported twice as a pair of steps, too wide and genuine steps get swallowed.
+reported twice as a pair of steps, too wide and genuine steps get swallowed. `--ramp-samples`
+draws the other boundary: an excursion wider than that is a move rather than a discontinuity.
+Both names matter — filtering for `step` is how you find the jumps worth explaining, and a
+commanded move is not one of them.
 
-`--sigma` scales the detection threshold against the median absolute deviation, not the
-standard deviation, so a few large outliers do not raise the bar and hide everything else.
-Default 6 is deliberately conservative. If a known fault is not being found, lower it to 3
-before concluding the data is clean.
+#### Why the threshold has a floor
+
+`--sigma` scales the threshold against the median absolute deviation of the first difference,
+not the standard deviation, so a few large outliers do not raise the bar and hide everything
+else. On its own that fails badly on exactly the signals this skill exists for. **An axis is
+at rest for most of a recording**, so over half its first differences are the encoder's
+quantisation floor, MAD collapses to ~1e-9, and 6·MAD·1.4826 becomes a threshold that every
+genuine acceleration sample clears. Measured on real exports: 298 events per REAL64 motion
+channel, against 10 per digital channel.
+
+So `--min-step` (default 1%) floors the threshold at a fraction of the channel's own travel.
+A change worth reporting is exceptional against the quiet stretches **and** a real fraction of
+the distance the signal covers. If a known fault is not being found, lower `--sigma` to 3 and
+`--min-step` toward 0.001 before concluding the data is clean.
+
+#### Reading a truncated answer
+
+`count` is every event found; `events` is what fits under `--max-events`. The returned set is
+the worst event in each tenth of the recording, worst tenth first — so a truncated answer
+still spans the recording and still contains the single worst thing in it. `summary` is always
+complete regardless: `by_kind`, `by_channel`, `per_channel_max` and a ten-bin `time_histogram`
+count *every* event, including the ones not returned. Read the histogram before re-running
+with a bigger cap — it tells you which part of the recording to ask about instead.
+
+`severity` is a multiple of each detector's own threshold, so it is comparable within a kind
+and only roughly across kinds. `ramp`, `transition` and `crossing` are descriptive rather than
+anomalous and are always 1.0.
+
+**Known limitation.** `clipping` fires on an axis parked at the end of its travel, because a
+rest position and a rail look identical in the data. Check `stats` → `pct_at_max` and the
+`plot` before repeating a clipping claim about a position channel.
 
 ### Rung 4 — `plot`, and the one rule that matters
 

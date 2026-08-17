@@ -140,7 +140,7 @@ def decimal_comma(text):
     return text.replace(".", ",")
 
 
-def write_comma(path, groups, columns, truth, rows, blanks=False):
+def write_comma(path, groups, columns, truth, rows, blanks=False, names=None):
     """COMMA dialect: ',' delimiter, '.' decimals, a Name row and nothing else.
 
     Short channel names only, disambiguated with (1)/(2)/(3) suffixes that say
@@ -162,7 +162,7 @@ def write_comma(path, groups, columns, truth, rows, blanks=False):
     for gid, spec in enumerate(groups):
         name_row.append("Name")
         for ch in range(spec["channels"]):
-            short = COMMA_NAMES[ch % len(COMMA_NAMES)]
+            short = (names[ch] if names else COMMA_NAMES[ch % len(COMMA_NAMES)])
             seen[short] = seen.get(short, 0) + 1
             suffix = f" ({seen[short]})" if seen[short] > 1 else ""
             name_row.append(short + suffix)
@@ -207,10 +207,16 @@ TAB_SHORT = ["ActTorque", "ActPos", "ActVelo", "PosDiff", "CtrlOut",
 
 def tab_symbol(gid, spec, ch):
     """A qualified symbol path, with the spaces, dots and parentheses that make
-    splitting on '.' the wrong way to derive a short name."""
+    splitting on '.' the wrong way to derive a short name.
+
+    Every NC symbol here is truncated mid-parenthesis, because that is what
+    Beckhoff's own exporter writes: in the real files each symbol under
+    `Axes.Smarttrak M2 (E1_101U2_ChB` lost its closing bracket, identically.
+    The reader is being faithful, so nothing here should ever balance it.
+    """
     short = TAB_SHORT[ch % len(TAB_SHORT)]
     if spec["port"] == 501:
-        return f"Axes.Smarttrak M{ch + 1} (E1_1{ch + 1:02d}U2_ChA).{short}"
+        return f"Axes.Smarttrak M{ch + 1} (E1_1{ch + 1:02d}U2_ChA.{short}"
     return f"gPlc.emSmartTrak.fbCtrl[{ch}].{short}"
 
 
@@ -255,7 +261,10 @@ def write_tab(path, groups, columns, truth, rows, wrap_comments=False):
         "Offset": lambda g, s, c, i: "0",
         "ScaleFactor": lambda g, s, c, i: decimal_comma("1.000000"),
         "BitMask": lambda g, s, c, i: "0",
-        "Unit": lambda g, s, c, i: "",
+        # The literal string TwinCAT writes when a symbol carries no unit. It is
+        # not a null and must not be coerced into one - round-tripping what the
+        # source says beats guessing what it meant.
+        "Unit": lambda g, s, c, i: "(None)",
         "StartTime": lambda g, s, c, i: "0",
         "EndTime": lambda g, s, c, i: "0",
     }
@@ -293,6 +302,80 @@ def comment_for(idx, wrap):
     if idx % 4 == 0:
         return "(* torque feedback\nscaled in the drive *)"
     return "torque feedback"
+
+
+# --------------------------------------------------------------------------
+# an axis that is at rest for most of the recording
+# --------------------------------------------------------------------------
+
+AT_REST_ROWS = 1500
+AT_REST_STEP_MS = 2.0
+AT_REST_NAMES = ["ActPos", "ActVelo", "ActTorque", "bEnable"]
+# One commanded move: park, accelerate, cruise, decelerate, park again.
+MOVE_START, CRUISE_START, CRUISE_END, MOVE_END = 450, 500, 1000, 1050
+CRUISE_VELO = 250.0                 # mm/s
+DISTURBANCE_INDEX = 1200            # the one genuine fault, well after the move
+DISTURBANCE_DELTA = 40.0            # Nm
+
+
+def at_rest_columns():
+    """A SmartTrak axis doing one move, plus a planted torque disturbance.
+
+    This is the shape that made `events` unusable on real machine data, and no
+    fixture had it. An axis is at rest for most of a recording, so over half its
+    first differences are the encoder's quantisation floor - MAD collapses to
+    ~1e-9, which is non-zero, so a threshold of 6*MAD*1.4826 flagged every
+    sample of the move. One real 5000-row export produced 1199 "steps" from a
+    position channel that moved exactly once.
+
+    The dither below is what keeps MAD non-zero rather than exactly zero. That
+    distinction is the whole defect: a zero MAD was already handled.
+    """
+    rng = random.Random(97)
+    pos, cols = 0.0, {name: [] for name in AT_REST_NAMES}
+    truth = {"step_time_s": None, "move_time_s": None}
+    for i in range(AT_REST_ROWS):
+        if i < MOVE_START or i >= MOVE_END:
+            velo = 0.0
+        elif i < CRUISE_START:
+            velo = CRUISE_VELO * (i - MOVE_START) / (CRUISE_START - MOVE_START)
+        elif i < CRUISE_END:
+            velo = CRUISE_VELO
+        else:
+            velo = CRUISE_VELO * (MOVE_END - i) / (MOVE_END - CRUISE_END)
+        pos += velo * AT_REST_STEP_MS / 1000.0
+
+        # Torque: never at rest, so it is the control - the detector always
+        # worked on channels like this one.
+        t_s = i * AT_REST_STEP_MS / 1000.0
+        torque = 2.0 * math.sin(2 * math.pi * 3.0 * t_s) + rng.gauss(0, 0.05)
+        if MOVE_START <= i < MOVE_END:
+            torque += 12.0
+        if i >= DISTURBANCE_INDEX:
+            torque += DISTURBANCE_DELTA
+            if truth["step_time_s"] is None:
+                truth["step_time_s"] = t_s
+        if i == MOVE_START:
+            truth["move_time_s"] = t_s
+
+        dither = rng.uniform(-1e-9, 1e-9)
+        cols["ActPos"].append(f"{round(pos, 4) + dither:.9f}")
+        cols["ActVelo"].append(f"{round(velo, 4) + dither:.9f}")
+        cols["ActTorque"].append(f"{torque:.9f}")
+        cols["bEnable"].append(f"{1.0 if MOVE_START - 50 <= i < MOVE_END + 50 else 0.0:.6f}")
+
+    times = [i * AT_REST_STEP_MS for i in range(AT_REST_ROWS)]
+    columns = [[f"{t:.6f}" for t in times]] + [cols[n] for n in AT_REST_NAMES]
+    gt = [{
+        "group": 0, "start_column": 0, "channels": len(AT_REST_NAMES),
+        "sample_time_ms": AT_REST_STEP_MS, "repeat_factor": 1, "offset_ms": 0.0,
+        "padded": True, "step_channel": AT_REST_NAMES.index("ActTorque"),
+        "step_time_s": truth["step_time_s"], "move_time_s": truth["move_time_s"],
+        "step_delta": DISTURBANCE_DELTA,
+        "at_rest_fraction": 1.0 - (MOVE_END - MOVE_START) / AT_REST_ROWS,
+        "t_first_s": 0.0, "t_last_s": times[-1] / 1000.0,
+    }]
+    return columns, gt
 
 
 # --------------------------------------------------------------------------
@@ -347,6 +430,15 @@ def main():
     truth["real_tab_pergroup_single.csv"] = write_tab(
         out / "real_tab_pergroup_single.csv", groups, cols, gt, ROWS,
         wrap_comments=True)
+
+    # One axis, at rest for 60% of the recording, with one commanded move and
+    # one planted torque disturbance. Signal shape rather than dialect: this is
+    # the file that says whether `events` is usable on real machine data.
+    groups = [spec(len(AT_REST_NAMES), AT_REST_STEP_MS, AT_REST_STEP_MS)]
+    cols, gt = at_rest_columns()
+    truth["real_comma_atrest.csv"] = write_comma(
+        out / "real_comma_atrest.csv", groups, cols, gt, AT_REST_ROWS,
+        names=AT_REST_NAMES)
 
     (out / "ground_truth.json").write_text(json.dumps(truth, indent=2))
     print(json.dumps(
