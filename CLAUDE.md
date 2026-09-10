@@ -47,6 +47,34 @@ to someone with access to one specific installation, it is wrong for this repo �
 or leave it out. A finding learned from one machine is welcome; the machine's identity is not
 part of the finding.
 
+## What you may use, and what you may not
+
+**Research is not redistribution.** Read any source you lawfully can — Beckhoff InfoSys, the
+Scope View documentation, vendor sample projects. Copyright protects expression, not facts,
+rules, procedures or APIs. So state that `BaseSampleTime` is in 100 ns ticks, or lay out the
+element hierarchy of a `.tcscopex`, after learning both by reading real files. Do not paste the
+documentation's own paragraph, or a close paraphrase of it.
+
+Before reproducing any source material here, check that material's own licence:
+
+- **Permissive** (MIT, 0BSD, BSD-2, Apache-2) — may ship. Copy the upstream `LICENSE` into the
+  folder and add an `ATTRIBUTIONS.md` row in the same commit.
+- **Copyleft** (GPL/LGPL) — do not vendor; it would relicense this whole skill. Ask first.
+- **Proprietary / all rights reserved** (InfoSys, blogs, forums) — research source only. Cite
+  and link; reproduce no passages, tables, diagrams or screenshots.
+- **Specs and standards** — the technical rule can be stated independently; the document's own
+  text, tables, diagrams and examples still cannot.
+
+The `.tcscopex` files in `templates/` were written from the observed schema rather than copied
+from a sample, which is why `ATTRIBUTIONS.md` lists no bundled content. Keep it that way: people
+paste these templates into their own projects, and a lifted sample would drag someone's notice
+requirement along with them.
+
+Read the licence from the upstream `LICENSE` file, never a GitHub badge. A citation is not
+permission. Copyright clearance is not permission to scrape either — check a site's terms before
+automated fetching. Spec PDFs, sample archives and other research copies stay on your machine and
+are never committed here. `ATTRIBUTIONS.md` is the authority and carries the full table.
+
 ## Before adding any real file
 
 `examples/README.md` carries the full redaction checklist and is the authority for files
