@@ -38,9 +38,9 @@ ScopeProject                     AssemblyName="TwinCAT.Measurement.Scope.API.Mod
     ├── DataPool                 what is sampled          Suffix .svdp
     │   └── SubMember
     │       └── AdsAcquisition   ONE PER CHANNEL          Suffix .svacq
-    ├── YTChart                  how it is drawn          Suffix .svchart
+    ├── YTChart                  ONE PER TAB              Suffix .svchart
     │   └── SubMember
-    │       ├── AxisGroup                                 Suffix .svagroup
+    │       ├── AxisGroup    ONE PER STACKED BAND     Suffix .svagroup
     │       │   └── SubMember
     │       │       ├── TimeAxis / ValueAxis              Suffix .svaxis
     │       │       ├── MarkerContainer                   Suffix .svmc
@@ -78,6 +78,45 @@ Two consequences worth internalising:
 whose text matches, whatever its tag, so references travel with their targets.
 `checkscope` verifies afterwards that every `AcquisitionGUID` resolves.
 
+## Layout: what shares a tab, a band and an axis
+
+Wiring decides whether a channel is *recorded*. Layout decides whether anyone can *see* it,
+and it is the easier of the two to get wrong without noticing, because the file passes every
+structural check either way.
+
+Three levels, and the middle one is the one people skip:
+
+| Element | On screen | Consequence |
+|---|---|---|
+| `YTChart` | one tab | Tabs cost nothing. Use them. |
+| `AxisGroup` | one band stacked inside that tab, with its own time and value axis | Bands share the tab's height, so six is about the limit before each is too thin to read. |
+| `Channel` | one trace inside that band | **Everything in a band shares one auto-scaled Y axis.** |
+
+That last line is the whole problem. Put a following error of 0.02 mm on the same axis as a
+position of 1200 mm and the error is drawn as a flat line on zero — recorded perfectly,
+present in the export, invisible on screen. Twenty channels in one band is twenty traces
+fighting over one axis, most of them flat.
+
+So group by what the axis has to do:
+
+- **Same quantity, same order of magnitude → same band.** Set and actual position belong
+  together; the gap between them is usually the thing being looked at. Same for two axes'
+  torque when comparing them, or a set/actual velocity pair.
+- **Different quantity → different band.** Position, following error, velocity, torque and a
+  handful of booleans on one axis is five different scales and no useful picture.
+- **Different device → different tab.** One tab per axis, per drive, per station.
+
+`ChartStyle/StackedAxes` says whether a chart's bands are drawn one above another. `newscope`
+sets it `true` whenever it writes more than one band and `false` for a single-band chart,
+which has nothing to stack. Channels sharing a band are also given different `DisplayColor`
+values — a signed 32-bit ARGB integer — because two traces of the same colour on one axis is
+the same failure by another route.
+
+**Untested in TwinCAT, like the rest of this schema.** The element hierarchy was read from
+real projects; that multiple `YTChart` siblings arrive as multiple tabs, and that
+`StackedAxes` is what stacks the bands, is the reading of that structure and not something
+this repo has watched Scope View do. Say so if you report the layout to someone.
+
 ## `AdsAcquisition` fields that matter
 
 | Field | Notes |
@@ -110,6 +149,25 @@ python3 scripts/tcscope.py checkscope MyScope.tcscopex
 symbol, re-GUIDs both, and wires them together. Requesting four channels from a one-channel
 template therefore yields four plotted traces, not four invisible acquisitions.
 
+It also lays them out, rather than piling every trace onto one axis:
+
+- **One tab per device.** The symbol path minus its leaf, minus the structs that describe a
+  wrapper rather than a device (`NcToPlc`, `PlcToNc`, `Status`, `Inputs`…), so
+  `MAIN.fbAxis1.NcToPlc.ActPos` is grouped under `fbAxis1`. Two devices whose paths end in
+  the same segment keep their full paths as titles rather than merging into one tab.
+- **One band per quantity inside that tab**, ordered position, following error, velocity,
+  acceleration, torque/current, pressure, temperature, digital state, other. The quantity is
+  read from the leaf name, so `PosDiff` is a following error rather than a position and
+  `bPosReached` is a state rather than either.
+- **Tabs appear in the order the symbols were asked for**, because that ordering is
+  information.
+
+The grouping is a naming heuristic and will not know every house convention; anything it
+cannot place lands in an `Other` band, visible and clearly labelled rather than silently
+misfiled. `newscope` prints the layout it wrote, so it can be checked before the file is
+handed over. `--layout flat` puts everything back on one axis for the case where the channels
+genuinely share a scale.
+
 Neither verb needs third-party packages, so this works on a machine with only Python.
 
 ## `checkscope`
@@ -121,5 +179,9 @@ acquisitions at all.
 Reports a **warning** for things that are legal but probably not what you meant: a placeholder
 `AmsNetId`, no display channel wired to anything, and a total sample rate high enough to
 perturb the target.
+
+It also prints the layout — every chart, its bands and their channels — and warns when a chart
+stacks more than six bands or a band overlays more than eight channels. Both are readability,
+not validity: the file is fine, the picture is not.
 
 Run it every time before handing a file to a human.

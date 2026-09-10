@@ -384,6 +384,108 @@ def shareability_checks():
           "; ".join(f"{k} in {v[0]}" for k, v in list(offenders.items())[:3]))
 
 
+def layout_checks():
+    """Where a channel lands on screen, which is not the same as being wired.
+
+    The complaint this answers came from a real session: twenty channels arrived
+    as twenty traces in one chart, every one of them the same colour and sharing
+    one auto-scaled axis. The file was flawlessly built and unreadable.
+    """
+    import xml.etree.ElementTree as ET
+
+    tpl = ROOT / "templates" / "axis-diagnosis.tcscopex"
+    if not tpl.exists():
+        check("newscope groups channels into tabs", True, "skipped: no template")
+        return
+
+    symbols = [
+        "MAIN.fbAxis1.NcToPlc.ActPos", "MAIN.fbAxis1.NcToPlc.SetPos",
+        "MAIN.fbAxis1.NcToPlc.PosDiff", "MAIN.fbAxis1.NcToPlc.ActVelo",
+        "MAIN.fbAxis1.NcToPlc.ActTorque",
+        "MAIN.fbAxis2.NcToPlc.ActPos", "MAIN.fbAxis2.NcToPlc.SetPos",
+        "MAIN.fbAxis2.NcToPlc.PosDiff", "MAIN.fbAxis2.NcToPlc.ActVelo",
+        "MAIN.fbAxis2.NcToPlc.ActTorque",
+        "GVL.Axes[3].fActPos", "GVL.Axes[3].fSetPos",
+        "GVL.Axes[3].fFollowingError", "GVL.Axes[3].bEnabled",
+    ]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        grouped = Path(tmp) / "grouped.tcscopex"
+        made = run("newscope", tpl, "-o", grouped, "--netid", "1.2.3.4.1.1",
+                   "--channels", ",".join(symbols))
+        charts = made.get("charts") or []
+        titles = [c["chart"] for c in charts]
+        check("newscope gives each device its own chart tab",
+              titles == ["fbAxis1", "fbAxis2", "Axes[3]"], str(titles))
+
+        bands = {c["chart"]: [b["band"] for b in c["bands"]] for c in charts}
+        check("bands are stacked in reading order, position first",
+              bands.get("fbAxis1") == ["Position", "Following error",
+                                       "Velocity", "Torque / current"],
+              str(bands.get("fbAxis1")))
+
+        by_band = {b["band"]: b["channels"] for b in charts[0]["bands"]}
+        check("set and actual position share one axis, being one comparison",
+              by_band.get("Position") == ["MAIN.fbAxis1.NcToPlc.ActPos",
+                                          "MAIN.fbAxis1.NcToPlc.SetPos"],
+              str(by_band.get("Position")))
+        # The whole point of the split: a following error of a few microns on
+        # the position axis is a flat line on zero.
+        check("the following error is not left on the position axis",
+              by_band.get("Following error") == ["MAIN.fbAxis1.NcToPlc.PosDiff"],
+              str(by_band.get("Following error")))
+        check("a name that only looks like a position is read as a state",
+              by_band.get("Digital / state") is None
+              and bands.get("Axes[3]", [])[-1] == "Digital / state",
+              str(bands.get("Axes[3]")))
+
+        # Wiring has to survive the regrouping: every trace still has to reach
+        # its acquisition, or the project opens and plots nothing.
+        chk = run("checkscope", grouped)
+        check("a multi-chart project is still fully wired",
+              chk.get("ok") is True
+              and chk.get("display_channels_wired") == len(symbols),
+              f"wired={chk.get('display_channels_wired')} {chk.get('problems')}")
+        check("checkscope reports the layout it would draw",
+              [c["chart"] for c in chk.get("charts", [])] == titles,
+              str([c["chart"] for c in chk.get("charts", [])]))
+
+        root = ET.fromstring(grouped.read_text(encoding="utf-8-sig"))
+        first_band = root.find("SubMember/YTChart/SubMember/AxisGroup")
+        colours = [c.findtext("DisplayColor")
+                   for c in first_band.findall("SubMember/Channel")]
+        check("channels sharing an axis are drawn in different colours",
+              len(set(colours)) == len(colours) and len(colours) == 2, str(colours))
+        stacked = root.findtext("SubMember/YTChart/SubMember/ChartStyle/StackedAxes")
+        check("a chart with several bands asks for them to be stacked",
+              stacked == "true", str(stacked))
+
+        # The escape hatch, for channels that genuinely share a scale.
+        flat = Path(tmp) / "flat.tcscopex"
+        made_flat = run("newscope", tpl, "-o", flat, "--netid", "1.2.3.4.1.1",
+                        "--layout", "flat", "--channels", ",".join(symbols))
+        check("--layout flat keeps every channel on one axis",
+              len(made_flat.get("charts", [])) == 1
+              and len(made_flat["charts"][0]["bands"]) == 1,
+              str([c["chart"] for c in made_flat.get("charts", [])]))
+        crowded = run("checkscope", flat)
+        check("checkscope says when one axis is carrying too much",
+              any("one value axis" in w for w in crowded.get("warnings", [])),
+              str(crowded.get("warnings"))[:80])
+        check("an overloaded axis is a warning, not a broken file",
+              crowded.get("ok") is True, str(crowded.get("problems")))
+
+        # A symbol listed twice is one signal, not two claims on the target's
+        # bandwidth.
+        twice = Path(tmp) / "twice.tcscopex"
+        dup = run("newscope", tpl, "-o", twice, "--netid", "1.2.3.4.1.1",
+                  "--channels", "MAIN.fbAxis.NcToPlc.ActPos,MAIN.fbAxis.NcToPlc.ActPos")
+        check("a symbol asked for twice is recorded once",
+              len(dup.get("channels", [])) == 1
+              and run("checkscope", twice).get("acquisitions") == 1,
+              str(dup.get("channels")))
+
+
 def main():
     subprocess.run([sys.executable, str(ROOT / "tests" / "make_fixture.py")],
                    check=True, capture_output=True)
@@ -532,6 +634,7 @@ def main():
 
     real_fixture_checks()
     at_rest_checks()
+    layout_checks()
     shareability_checks()
 
     print()

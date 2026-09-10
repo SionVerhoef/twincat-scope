@@ -6,7 +6,7 @@ pass `scripts/tcscope.py checkscope`.
 | File | What it is |
 |---|---|
 | `minimal-single-channel.tcscopex` | The smallest thing that records: one `AdsAcquisition`, one wired display `Channel`, one axis group. The base to build from. Its `SymbolName` is `PLACEHOLDER.Symbol`, so `checkscope` **deliberately fails** on it until you fill it in. |
-| `axis-diagnosis.tcscopex` | Four channels on one servo axis — position, velocity, torque, following error — at 1 ms. The default starting point for "why did this axis misbehave". Generated from the minimal template with `newscope`. |
+| `axis-diagnosis.tcscopex` | Five channels on one servo axis at 1 ms, in one tab of four stacked bands: set and actual position together, then following error, velocity and torque. The default starting point for "why did this axis misbehave", and the worked example of the layout `newscope` writes. |
 
 ## Use them through the script, not by copying
 
@@ -26,6 +26,11 @@ Re-GUIDing without that step produces a project that opens perfectly and plots n
 
 `newscope` also clones the matching display channel per symbol, so asking a one-channel
 template for four channels gives four visible traces rather than four invisible acquisitions.
+
+The templates supply the *style* — axis settings, chart options, byte conventions — while
+`newscope` decides the *layout*: a chart tab per device and a stacked band per quantity, so
+requesting twenty channels does not produce twenty traces sharing one axis. See
+`references/scope-configuration.md` → *Layout*.
 
 ## What the templates deliberately show
 

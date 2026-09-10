@@ -44,6 +44,7 @@ import argparse
 import copy
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -70,6 +71,12 @@ TICKS_PER_MS = 10_000
 LOAD_TYPICAL_SAMPLES_PER_S = 6_000     # the median of the seven
 LOAD_HIGH_SAMPLES_PER_S = 10_000       # only the densest two exceed this
 LOAD_WARN_SAMPLES_PER_S = 20_000       # denser than anything measured in practice
+
+# Readability, which is a separate failure from wiring: a project can be
+# perfectly built and still be unreadable on screen. Bands share the chart's
+# height between them, and traces sharing a band share one auto-scaled axis.
+BANDS_PER_CHART_WARN = 6
+CHANNELS_PER_BAND_WARN = 8
 
 
 # --------------------------------------------------------------------------
@@ -1473,6 +1480,120 @@ def refresh_guids(root):
     return {"minted": len(mapping), "references_rewritten": rewritten - len(mapping)}
 
 
+# --------------------------------------------------------------------------
+# Chart layout - which tab a channel lands in, and which band inside it
+# --------------------------------------------------------------------------
+#
+# A Scope project draws in three levels: YTChart is one tab, AxisGroup is one
+# stacked band inside that tab with its own value axis, Channel is one trace on
+# that axis. Channels sharing an AxisGroup share one auto-scaling Y axis, so the
+# grouping is not cosmetic. Put a following error of 0.02 mm on the same axis as
+# a position of 1200 mm and the error is a flat line on zero - the signal is
+# present, recorded, and invisible. Split by quantity and both are readable.
+#
+# Hence: one tab per device instance, and inside it one band per physical
+# quantity. Set and actual position deliberately share a band - same unit, same
+# magnitude, and the gap between them is usually the thing being looked at.
+
+BAND_OTHER = "Other"
+
+# Matched against the leaf of the symbol path, lowercased, first hit wins - so
+# the specific entries must come before the general ones. "PosDiff" contains
+# "pos" but is a following error, and "bPosReached" is a bool, not a position.
+QUANTITY_BANDS = (
+    ("Following error", r"posdiff|posdev|posdelta|poserr|posfehler|schlepp"
+                        r"|lag(pos|dist|err)|follow(ing)?_?err"),
+    ("Digital / state", r"enable|busy|done|active|ready|reached|inpos|error|fault"
+                        r"|alarm|warn|state|status|mode|valid|exec|homed|homing"
+                        r"|moving|flag|bit(?![a-z])"),
+    ("Position",        r"pos|angle|winkel|encoder"),
+    ("Velocity",        r"velo|speed|rpm|drehzahl|omega"),
+    ("Acceleration",    r"accel|decel|jerk|acc(?![a-z])"),
+    ("Torque / current", r"torque|trq|moment|current|curr|amps|ampere|force"
+                         r"|kraft|load|iq(?![a-z])"),
+    ("Temperature",     r"temperatur|temp(?![a-z])"),
+    ("Pressure",        r"pressure|druck|druk|vacuum|vakuum"),
+)
+
+# Reading order down the chart, which is not matching order: position on top,
+# then what position is judged by, then the effort that produced it.
+BAND_ORDER = ("Position", "Following error", "Velocity", "Acceleration",
+              "Torque / current", "Pressure", "Temperature",
+              "Digital / state", BAND_OTHER)
+
+# Path segments that describe a struct rather than a device. Stripping them
+# means MAIN.fbAxis1.NcToPlc.ActPos is grouped under fbAxis1, not NcToPlc,
+# which would otherwise collect every axis in the machine into one tab.
+WRAPPER_SEGMENTS = {"nctoplc", "plctonc", "nctoplcaxis", "plctoncaxis",
+                    "status", "state", "inputs", "outputs", "in", "out",
+                    "data", "axisdata", "signals"}
+
+# DisplayColor is a signed 32-bit ARGB integer. Channels sharing an axis need
+# to be told apart, and the template's four channels were all the same green.
+CHANNEL_COLOURS = tuple(v - 2 ** 32 for v in (
+    0xFF1F77B4, 0xFFD62728, 0xFF2CA02C, 0xFFFF7F0E,
+    0xFF9467BD, 0xFF8C564B, 0xFF17BECF, 0xFF7F7F7F))
+
+
+def _segments(symbol):
+    # ^ is a pointer dereference in ST: pAxis^.NcToPlc.ActPos.
+    return [part for part in symbol.replace("^", ".").split(".") if part]
+
+
+def quantity_of(symbol):
+    """Which physical quantity a symbol measures, judged from its leaf name."""
+    parts = _segments(symbol)
+    leaf = parts[-1].lower() if parts else ""
+    for band, pattern in QUANTITY_BANDS:
+        if re.search(pattern, leaf):
+            return band
+    return BAND_OTHER
+
+
+def device_of(symbol):
+    """The instance path a symbol belongs to, or '' when it names no instance."""
+    parts = _segments(symbol)[:-1]
+    while parts and parts[-1].lower() in WRAPPER_SEGMENTS:
+        parts.pop()
+    return ".".join(parts)
+
+
+def _chart_titles(devices):
+    """Name each tab after its own last segment, lengthening only on a clash.
+
+    Station1.fbAxis and Station2.fbAxis both end in fbAxis and are different
+    machines; a shared title would read as one tab covering both.
+    """
+    titles = {device: (_segments(device)[-1] if device else "General")
+              for device in devices}
+    for title in list(titles.values()):
+        clashing = [d for d, t in titles.items() if t == title]
+        if len(clashing) > 1:
+            for device in clashing:
+                titles[device] = device or "General"
+    return titles
+
+
+def plan_layout(symbols, flat=False):
+    """Group symbols into charts (tabs), each holding bands (stacked axes)."""
+    if flat:
+        return [{"chart": "All channels",
+                 "bands": [{"band": BAND_OTHER, "channels": list(symbols)}]}]
+
+    charts = {}
+    for symbol in symbols:
+        bands = charts.setdefault(device_of(symbol), {})
+        bands.setdefault(quantity_of(symbol), []).append(symbol)
+
+    titles = _chart_titles(list(charts))
+    # dicts keep insertion order, so tabs appear in the order the symbols were
+    # asked for. The caller's ordering is information; alphabetising discards it.
+    return [{"chart": titles[device],
+             "bands": [{"band": band, "channels": bands[band]}
+                       for band in BAND_ORDER if band in bands]}
+            for device, bands in charts.items()]
+
+
 def cmd_newscope(args):
     template = Path(args.template)
     if not template.exists():
@@ -1496,7 +1617,11 @@ def cmd_newscope(args):
             if el is not None:
                 el.text = value
 
-    channels = [c.strip() for c in args.channels.split(",")] if args.channels else []
+    requested = [c.strip() for c in args.channels.split(",")] if args.channels else []
+    # A symbol listed twice would otherwise cost target bandwidth twice for one
+    # signal. Keep first-seen order; it drives the tab order below.
+    channels = list(dict.fromkeys(c for c in requested if c))
+    layout = None
 
     if not channels:
         for node in acquisitions:
@@ -1506,24 +1631,35 @@ def cmd_newscope(args):
         if acq_parent is None:
             fail("could not locate the AdsAcquisition parent in the template")
         model_acq = acquisitions[0]
-        model_guid = (model_acq.findtext("Guid") or "").strip()
 
-        # The display Channel that reads this acquisition, so a cloned channel
-        # keeps its link. Without this a new channel plots nothing.
-        model_chan, chan_parent = None, None
-        for chan in root.findall(".//Channel"):
-            ref = chan.find(".//AcquisitionGUID")
-            if ref is not None and (ref.text or "").strip() == model_guid:
-                model_chan, chan_parent = chan, parent_of(chan)
-                break
+        chart = root.find(".//YTChart")
+        model_group = chart.find(".//AxisGroup") if chart is not None else None
+        model_chan = model_group.find(".//Channel") if model_group is not None else None
+        if chart is None or model_group is None or model_chan is None:
+            fail(f"{template} has no YTChart/AxisGroup/Channel to clone",
+                 "A template must draw at least one channel, or the generated "
+                 "project would record data and plot nothing.")
+        chart_parent = parent_of(chart)
+
+        # Take the clone sources before anything is removed from the tree, and
+        # empty them: a blank chart with no bands, a blank band with no traces.
+        blank_chart = copy.deepcopy(chart)
+        blank_group = copy.deepcopy(model_group)
+        blank_chan = copy.deepcopy(model_chan)
+        chart_sub = blank_chart.find("SubMember")
+        for node in blank_chart.findall("SubMember/AxisGroup"):
+            chart_sub.remove(node)
+        group_sub = blank_group.find("SubMember")
+        for node in blank_group.findall("SubMember/Channel"):
+            group_sub.remove(node)
 
         for node in acquisitions:
             acq_parent.remove(node)
-        if model_chan is not None and chan_parent is not None:
-            for chan in list(chan_parent):
-                if chan.tag == "Channel":
-                    chan_parent.remove(chan)
+        at = list(chart_parent).index(chart)
+        for node in chart_parent.findall("YTChart"):
+            chart_parent.remove(node)
 
+        acq_guid_of = {}
         for symbol in channels:
             acq = copy.deepcopy(model_acq)
             # Every clone starts out carrying the template's nested GUIDs -
@@ -1533,6 +1669,7 @@ def cmd_newscope(args):
             # matching display channel points at.
             refresh_guids(acq)
             acq_guid = str(uuid.uuid4())
+            acq_guid_of[symbol] = acq_guid
             set_fields(acq, (
                 ("SymbolName", symbol),
                 ("AmsNetId", args.netid),
@@ -1547,14 +1684,42 @@ def cmd_newscope(args):
                 ))
             acq_parent.append(acq)
 
-            if model_chan is not None and chan_parent is not None:
-                chan = copy.deepcopy(model_chan)
-                refresh_guids(chan)
-                set_fields(chan, (("Name", symbol.split(".")[-1]), ("Title", symbol)))
-                ref = chan.find(".//AcquisitionGUID")
-                if ref is not None:
-                    ref.text = acq_guid
-                chan_parent.append(chan)
+        layout = plan_layout(channels, flat=args.layout == "flat")
+        for chart_index, spec in enumerate(layout):
+            chart_node = copy.deepcopy(blank_chart)
+            refresh_guids(chart_node)
+            set_fields(chart_node, (("Title", spec["chart"]), ("Name", spec["chart"]),
+                                    ("SortPriority", str(10 + chart_index))))
+            # Bands are only drawn one above another when the chart says so.
+            # A single band has nothing to stack, and stacking it wastes height.
+            stacked = chart_node.find(".//ChartStyle/StackedAxes")
+            if stacked is not None:
+                stacked.text = "true" if len(spec["bands"]) > 1 else "false"
+            sub = chart_node.find("SubMember")
+
+            for band_index, band in enumerate(spec["bands"]):
+                group = copy.deepcopy(blank_group)
+                refresh_guids(group)
+                set_fields(group, (("Title", band["band"]), ("Name", band["band"]),
+                                   ("SortPriority", str(10 + band_index))))
+                target = group.find("SubMember")
+                for position, symbol in enumerate(band["channels"]):
+                    chan = copy.deepcopy(blank_chan)
+                    refresh_guids(chan)
+                    colour = CHANNEL_COLOURS[position % len(CHANNEL_COLOURS)]
+                    set_fields(chan, (("Name", symbol.split(".")[-1]),
+                                      ("Title", symbol),
+                                      ("DisplayColor", str(colour))))
+                    ref = chan.find(".//AcquisitionGUID")
+                    if ref is not None:
+                        ref.text = acq_guid_of[symbol]
+                    target.append(chan)
+                # Ahead of OverviewChart and ChartStyle, which the blank chart
+                # kept and which belong after the bands.
+                sub.insert(band_index, group)
+
+            chart_parent.insert(at, chart_node)
+            at += 1
 
     guids = refresh_guids(root)
     write_tcscopex(root, args.output)
@@ -1562,6 +1727,7 @@ def cmd_newscope(args):
         "ok": True,
         "output": str(args.output),
         "channels": channels or "unchanged from template",
+        "charts": layout if layout is not None else "unchanged from template",
         "guids": guids,
         "ams_net_id": args.netid,
         "note": "Written from a schema derived from real Beckhoff sample files, "
@@ -1656,6 +1822,36 @@ def cmd_checkscope(args):
             f"{plotted} wired channels come from {len(wired_to)} sources."
         )
 
+    # How it will actually look: charts are tabs, axis groups are bands stacked
+    # inside one tab, and everything in a band shares one auto-scaled Y axis.
+    # A file can be flawlessly wired and still arrive as twenty traces fighting
+    # over one axis, which is a real way to waste a trip to the machine.
+    layout = []
+    for chart in root.findall(".//YTChart"):
+        bands = [{"band": (group.findtext("Name") or group.findtext("Title") or "?").strip(),
+                  "channels": [(chan.findtext("Name") or "?").strip()
+                               for chan in group.findall("SubMember/Channel")]}
+                 for group in chart.findall("SubMember/AxisGroup")]
+        layout.append({
+            "chart": (chart.findtext("Name") or chart.findtext("Title") or "?").strip(),
+            "bands": bands,
+        })
+
+    for entry in layout:
+        if len(entry["bands"]) > BANDS_PER_CHART_WARN:
+            warnings.append(
+                f"chart '{entry['chart']}' stacks {len(entry['bands'])} bands. They "
+                "share the chart's height, so each ends up too thin to read. Split "
+                "the channels across more charts."
+            )
+        widest = max((len(b["channels"]) for b in entry["bands"]), default=0)
+        if widest > CHANNELS_PER_BAND_WARN:
+            warnings.append(
+                f"chart '{entry['chart']}' overlays {widest} channels on one value "
+                "axis. Signals of different magnitude flatten each other there - "
+                "group them by quantity instead."
+            )
+
     if unrated:
         warnings.append(
             f"{unrated} of {len(acquisitions)} acquisitions declare no "
@@ -1713,6 +1909,7 @@ def cmd_checkscope(args):
           "acquisitions": len(acq_guids), "acquisitions_plotted": len(wired_to),
           "acquisitions_without_display_channel": max(0, unwired),
           "acquisitions_without_declared_rate": unrated,
+          "charts": layout,
           "total_samples_per_second": total_rate,
           "load_band": load_band,
           "load_bands_samples_per_second": {
@@ -1807,6 +2004,10 @@ def build_parser():
     q.add_argument("--netid", default="0.0.0.0.0.0", help="target AmsNetId")
     q.add_argument("--port", type=int, default=851)
     q.add_argument("--sample-time-ms", type=float)
+    q.add_argument("--layout", choices=("auto", "flat"), default="auto",
+                   help="auto: one chart tab per device, stacked bands per "
+                        "quantity. flat: every channel on one axis, which is "
+                        "only readable when they share a scale.")
     q.set_defaults(func=cmd_newscope)
 
     q = sub.add_parser("checkscope", help="validate a .tcscopex")

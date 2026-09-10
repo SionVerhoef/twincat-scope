@@ -31,9 +31,10 @@ bucket, never decimation.** At 22 samples per pixel, decimation gives a 3-sample
 1-in-7 chance of appearing — so six times out of seven you get a clean-looking chart of a
 machine that faulted.
 
-It also builds recordings: `newscope` writes a `.tcscopex` with fresh GUIDs, and `checkscope`
-catches the failure that looks like success — a display channel wired to nothing, which opens
-perfectly and plots an empty chart.
+It also builds recordings: `newscope` writes a `.tcscopex` with fresh GUIDs, laid out as a
+chart tab per device and a stacked band per quantity rather than every trace on one axis, and
+`checkscope` catches the failure that looks like success — a display channel wired to nothing,
+which opens perfectly and plots an empty chart.
 
 ## Install
 
