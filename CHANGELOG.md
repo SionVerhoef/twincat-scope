@@ -4,6 +4,36 @@
 
 First working version. Not yet published.
 
+### Charts laid out to be read, not just to be valid
+
+Field feedback from a first real use of `newscope`: every requested channel arrived in a single
+chart, sharing one auto-scaled axis, all in the same colour. Nothing was wrong with the file —
+that is the point. A following error of a few microns next to a position of a metre is drawn
+as a flat line on zero, so a correctly recorded signal is an invisible one.
+
+- **One chart tab per device.** Taken from the symbol path with the wrapper structs stripped,
+  so `MAIN.fbAxis1.NcToPlc.ActPos` groups under `fbAxis1`. Two devices whose paths end in the
+  same segment keep their full paths rather than merging into one tab.
+- **One stacked band per quantity inside a tab**, ordered position, following error, velocity,
+  acceleration, torque/current, pressure, temperature, digital state, other. Set and actual
+  position deliberately share a band — same unit, same magnitude, and the gap between them is
+  the measurement. Read from the leaf name, so `PosDiff` is a following error rather than a
+  position and `bPosReached` is a state rather than either. Anything unrecognised lands in a
+  labelled `Other` band instead of being misfiled.
+- **Channels sharing an axis get different colours**, and `StackedAxes` is set whenever a
+  chart holds more than one band. `--layout flat` restores a single axis for channels that
+  genuinely share a scale.
+- **`checkscope` reports the layout** — charts, bands and their channels — and warns when a
+  chart stacks more than six bands or a band overlays more than eight channels. Readability,
+  not validity: the file is fine, the picture is not.
+- **A symbol asked for twice is now recorded once**, rather than costing target bandwidth
+  twice for one signal.
+- `templates/axis-diagnosis.tcscopex` was regenerated in that shape: five channels, four
+  bands, set and actual position together.
+
+Still unopened in TwinCAT, so that multiple `YTChart` siblings arrive as tabs and that
+`StackedAxes` is what stacks the bands remain readings of the schema rather than observations.
+
 ### Triage that survives real machine data
 
 A second field review on the same 19 genuine exports — kept in

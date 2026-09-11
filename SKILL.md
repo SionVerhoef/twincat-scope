@@ -140,9 +140,19 @@ python3 scripts/tcscope.py newscope templates/axis-diagnosis.tcscopex \
 python3 scripts/tcscope.py checkscope MyScope.tcscopex
 ```
 
+`newscope` also decides where each channel is drawn, which matters as much as recording it.
+Everything sharing an axis shares one auto-scaled range, so twenty channels on one axis is
+nineteen flat lines and a following error of a few microns disappears under a position of a
+metre. It writes **one chart tab per device** and, inside each tab, **one stacked band per
+quantity** — position (set and actual together, since that gap is the measurement), following
+error, velocity, acceleration, torque, then states — and gives channels sharing a band
+different colours. It prints the layout it chose; check it before handing the file over.
+`--layout flat` returns to a single axis for channels that genuinely share a scale.
+
 Always `checkscope` before handing a file over. It catches the failure that looks like
 success: a display channel whose `AcquisitionGUID` points at nothing still opens perfectly
-and plots an empty chart.
+and plots an empty chart. It reports the layout too, and says when a chart is too crowded to
+read.
 
 It also reads the capture strategy, which is a separate way to waste a trip to the machine.
 A correctly wired project that records a fixed window with no trigger is a lottery ticket for
