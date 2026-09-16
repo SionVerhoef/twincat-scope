@@ -51,7 +51,7 @@ Plus `scripts/tcscope.py` (every verb), `templates/` (known-good `.tcscopex`), `
 
 ```bash
 uv run scripts/tcscope.py <verb> ...        # analysis verbs need dependencies
-python3 scripts/tcscope.py doctor           # works with nothing installed
+py -3 scripts/tcscope.py doctor             # works with nothing installed
 ```
 
 `doctor`, `newscope` and `checkscope` deliberately need no third-party packages, so the
@@ -132,13 +132,28 @@ both — a confident wrong diagnosis costs a day on the shop floor.
 ## Workflow — building a recording
 
 ```bash
-python3 scripts/tcscope.py newscope templates/axis-diagnosis.tcscopex \
+py -3 scripts/tcscope.py newscope templates/axis-diagnosis.tcscopex \
     -o MyScope.tcscopex \
-    --channels "MAIN.fbAxis.NcToPlc.ActPos,MAIN.fbAxis.NcToPlc.PosDiff" \
-    --netid 192.168.1.10.1.1 --sample-time-ms 1
+    --channels "MAIN.fbAxis.NcToPlc.ActPos,MAIN.fbStation.sbBlocked:BOOL,Axes.Axis1.ActPos" \
+    --netid 192.168.1.10.1.1 --sample-time-ms 1 --record-time 120
 
-python3 scripts/tcscope.py checkscope MyScope.tcscopex
+py -3 scripts/tcscope.py checkscope MyScope.tcscopex
 ```
+
+Three things decide whether the file records at all, and none of them are visible until you
+are stood at the machine:
+
+- **The port follows the symbol.** `Axes.…` is served by the NC runtime on 501, everything
+  else by `--port` (851). `newscope` splits them; one port for both is why a file whose symbol
+  names are all correct still reports "Symbolname could not be found". Override it per channel
+  with a third field — `SYMBOL:TYPE:PORT` — which is also how a second PLC runtime (852, 853…)
+  is reached.
+- **The type has to be Scope's, not IEC's.** Give it per channel — `SYMBOL:BOOL`, `:INT`,
+  `:LREAL` — and it is written as `BIT`/`INT16`/`REAL64` with the matching width. A channel
+  with no type declared is written as `REAL64` and reported as *defaulted*; on a `BOOL` that
+  reads 8 bytes from a 1-byte variable and records nothing usable.
+- **The window has to contain the event.** `--record-time <seconds>`; the templates ship 60 s,
+  and a homing sequence alone can outrun that.
 
 `newscope` also decides where each channel is drawn, which matters as much as recording it.
 Everything sharing an axis shares one auto-scaled range, so twenty channels on one axis is
@@ -149,10 +164,14 @@ error, velocity, acceleration, torque, then states — and gives channels sharin
 different colours. It prints the layout it chose; check it before handing the file over.
 `--layout flat` returns to a single axis for channels that genuinely share a scale.
 
-Always `checkscope` before handing a file over. It catches the failure that looks like
-success: a display channel whose `AcquisitionGUID` points at nothing still opens perfectly
-and plots an empty chart. It reports the layout too, and says when a chart is too crowded to
-read.
+Always `checkscope` before handing a file over. It catches the failures that look like
+success: a display channel whose `AcquisitionGUID` points at nothing opens perfectly and
+plots an empty chart; an NC symbol on a PLC port never resolves; an IEC type name or a width
+that contradicts its type records the wrong bytes; and channels sharing one name export as
+columns nobody can tell apart. It reports the layout too, and says when a chart is too
+crowded to read.
+
+`py -3` is the Windows launcher, and TwinCAT runs on Windows; on Linux or macOS (and in this repo's CI) the same commands are `python3`.
 
 It also reads the capture strategy, which is a separate way to waste a trip to the machine.
 A correctly wired project that records a fixed window with no trigger is a lottery ticket for
@@ -178,8 +197,16 @@ Then stop. Opening it in Scope View and pressing Record is the human's move — 
 **Target:** TwinCAT 3 Scope — TE1300 Scope View and TF3300 Scope Server.
 
 The `.tcscopex` schema here was derived by reading real Beckhoff sample projects, and the
-templates are validated against that schema. **Nothing has been opened in TwinCAT**, because
-no Beckhoff toolchain exists in the environment this was built in.
+templates are validated against that schema. It is not written in an environment that has a
+Beckhoff toolchain, so almost nothing here has been watched working in TwinCAT.
+
+One thing has. A generated project was opened in Scope View on a running machine and started:
+**it opened cleanly, and it recorded nothing** — the axis channels were looked up on the PLC
+port, every channel declared an IEC type name and an 8-byte width, and every channel carried
+the template's placeholder name, which is also the CSV column header. `checkscope` passed the
+file. That session is written up in `evals/field-review-1fa0e9b.md`; the port, type, name and
+record-window handling in this version is what came out of it, and **those fixes have not
+themselves been back to a machine**.
 
 Rule 3 applies to this skill's own claims, so precisely: the CSV reader **was** measured
 against 19 genuine `TC3ScopeExportTool.exe` exports from a Beckhoff CX/AX8000 machine
@@ -190,7 +217,9 @@ customer machine behaviour and are not in this repo. What is here is
 same group boundaries, metadata keys, delimiters, decimal separators and time-column
 behaviour, shrunk to 200 rows with synthetic signal. The verbs are tested against those and
 against synthetic fixtures with planted defects. `checkscope` was run against 7 real
-Beckhoff-authored `.tcscopex` files.
+Beckhoff-authored `.tcscopex` files, which validated *reading* a real project file rather
+than *writing* an equivalent one.
 
 What that does **not** prove: no `.svdx` has been converted by the real export tool in this
-environment, and no generated `.tcscopex` has been opened in TwinCAT.
+environment, and no generated `.tcscopex` has been shown to record correctly on a target —
+only to open, and to fail in the four ways above.

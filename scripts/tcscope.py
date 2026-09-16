@@ -43,6 +43,7 @@ than implying otherwise.
 import argparse
 import copy
 import json
+import math
 import os
 import re
 import shutil
@@ -71,6 +72,9 @@ TICKS_PER_MS = 10_000
 LOAD_TYPICAL_SAMPLES_PER_S = 6_000     # the median of the seven
 LOAD_HIGH_SAMPLES_PER_S = 10_000       # only the densest two exceed this
 LOAD_WARN_SAMPLES_PER_S = 20_000       # denser than anything measured in practice
+
+# Template leftovers. Harmless in the project tree, useless as a column header.
+PLACEHOLDER_NAMES = {"signal", "channel", "untitled", "none"}
 
 # Readability, which is a separate failure from wiring: a project can be
 # perfectly built and still be unreadable on screen. Bands share the chart's
@@ -1481,6 +1485,204 @@ def refresh_guids(root):
 
 
 # --------------------------------------------------------------------------
+# What a channel is: a symbol, the port that serves it, and its type
+# --------------------------------------------------------------------------
+#
+# Both of these were learned the same way - a generated file that opened
+# cleanly in Scope View and recorded nothing, while every symbol name in it was
+# correct (evals/field-review-1fa0e9b.md).
+#
+# TwinCAT serves NC axis symbols and PLC symbols from different ADS ports, so
+# one port written across every channel resolves half of them and fails the
+# rest with "Symbolname could not be found" - a message that sends you looking
+# at the name, which was never the problem.
+
+NC_PORT = 501  # the NC runtime. PLC runtimes start at 851.
+
+
+def is_nc_symbol(symbol):
+    """Does this symbol live in the NC runtime rather than the PLC one?"""
+    return symbol.split(".")[0].strip().lower() == "axes"
+
+
+def port_for(symbol, plc_port):
+    """Which ADS port serves this symbol."""
+    return NC_PORT if is_nc_symbol(symbol) else plc_port
+
+
+# <DataType> is Scope's own vocabulary, not IEC's, and <VariableSize> is the
+# width in bytes that goes with it. Declaring LREAL on a BOOL is not rejected
+# anywhere - it is read as 8 bytes from a 1-byte variable, which is a wrong
+# recording rather than an error.
+#
+# BIT, INT16 and REAL64 are the three observed in real project files. The rest
+# follow the same naming and are not confirmed, which is why checkscope warns
+# about an unrecognised name instead of rejecting it.
+SCOPE_TYPE_SIZES = {
+    "BIT": 1,
+    "INT8": 1, "UINT8": 1,
+    "INT16": 2, "UINT16": 2,
+    "INT32": 4, "UINT32": 4,
+    "INT64": 8, "UINT64": 8,
+    "REAL32": 4, "REAL64": 8,
+}
+
+# What someone writing a channel list will type, because it is what the
+# declaration in their PLC says.
+IEC_TO_SCOPE = {
+    "BOOL": "BIT",
+    "SINT": "INT8", "USINT": "UINT8", "BYTE": "UINT8",
+    "INT": "INT16", "UINT": "UINT16", "WORD": "UINT16",
+    "DINT": "INT32", "UDINT": "UINT32", "DWORD": "UINT32",
+    "LINT": "INT64", "ULINT": "UINT64", "LWORD": "UINT64",
+    "REAL": "REAL32", "LREAL": "REAL64",
+}
+
+# Nothing can be inferred from a symbol name alone, so an undeclared channel
+# keeps the width that NC values and most measurements have. It is reported as
+# defaulted rather than resolved, because a default is a guess.
+DEFAULT_SCOPE_TYPE = "REAL64"
+
+# A bit is a state. An integer that no keyword recognised is a step number, a
+# mode or a counter far more often than it is a measurement. The type is
+# evidence; a naming convention belongs to one codebase.
+DIGITAL_SCOPE_TYPES = {"BIT", "INT8", "UINT8", "INT16", "UINT16",
+                       "INT32", "UINT32", "INT64", "UINT64"}
+
+
+def scope_type(name):
+    """Normalise a type name to the Scope vocabulary, or None if unknown."""
+    key = (name or "").strip().upper()
+    key = IEC_TO_SCOPE.get(key, key)
+    size = SCOPE_TYPE_SIZES.get(key)
+    return (key, size) if size is not None else None
+
+
+def parse_channel_spec(spec, plc_port):
+    """Read one `--channels` entry: `SYMBOL`, `SYMBOL:TYPE`, or `SYMBOL:TYPE:PORT`.
+
+    Peeled from the right, and only when the tail is recognisable - a port is
+    all digits, a type is one this tool knows. No TwinCAT symbol path seen here
+    contains a colon, but nothing in the format promises that, so an
+    unrecognised tail is refused rather than quietly swallowed or quietly left
+    on the symbol.
+
+    The explicit port is the escape hatch from the `Axes.` rule, and reaches a
+    second PLC runtime (852, 853…) per channel.
+    """
+    text = spec.strip()
+    port, resolved = None, None
+    for _ in range(2):
+        head, sep, tail = text.rpartition(":")
+        tail = tail.strip()
+        if not sep or not head.strip():
+            break
+        if port is None and resolved is None and tail.isdigit():
+            port, text = int(tail), head
+            continue
+        if resolved is None and scope_type(tail):
+            resolved, text = scope_type(tail), head
+            continue
+        break
+
+    symbol = text.strip()
+    if not symbol:
+        fail(f"--channels entry '{spec}' has no symbol name")
+    if ":" in symbol:
+        head, _, leftover = symbol.rpartition(":")
+        if not head.strip():
+            fail(f"--channels entry '{spec}' has no symbol name before the colon")
+        fail(f"unrecognised '{leftover}' in --channels entry '{spec}'",
+             "Write SYMBOL, SYMBOL:TYPE or SYMBOL:TYPE:PORT. Types are IEC "
+             "(BOOL, INT, LREAL) or Scope's own "
+             f"({', '.join(sorted(SCOPE_TYPE_SIZES))}). A symbol that itself "
+             "contains a colon cannot be written here.")
+
+    if resolved:
+        data_type, size = resolved
+        source = "declared"
+    else:
+        data_type = DEFAULT_SCOPE_TYPE
+        size = SCOPE_TYPE_SIZES[DEFAULT_SCOPE_TYPE]
+        source = "default"
+    return {"symbol": symbol,
+            "port": port if port is not None else port_for(symbol, plc_port),
+            "port_source": "declared" if port is not None else "derived",
+            "data_type": data_type, "variable_size": size,
+            "type_source": source}
+
+
+def _safe_segment(text):
+    """What survives of a path segment as a CSV column header."""
+    return re.sub(r"[^A-Za-z0-9]+", "_", text).strip("_") or "ch"
+
+
+def _alias_parts(symbol):
+    """The segments an alias may be built from, wrapper structs dropped.
+
+    Two axes' ActPos should separate into fbAxis1_ActPos and fbAxis2_ActPos,
+    not into two identical NcToPlc_ActPos.
+    """
+    segments = _segments(symbol)
+    if not segments:
+        return ["ch"]
+    stem = [part for part in segments[:-1]
+            if part.lower() not in WRAPPER_SEGMENTS]
+    return [_safe_segment(part) for part in stem + segments[-1:]]
+
+
+def short_aliases(symbols):
+    """A short unique name per symbol, for <Name>.
+
+    <Name> is the label in the Scope tree *and* the column header of an
+    exported CSV, so leaving the template's placeholder on every channel
+    exports fifty-three columns called Signal. The leaf is usually enough;
+    where two leaves collide, lengthen both with the segments in front of them
+    until they no longer do.
+    """
+    parts = {s: _alias_parts(s) for s in symbols}
+    depth = {s: 1 for s in symbols}
+    widened = set()
+
+    def alias_of(symbol):
+        return "_".join(parts[symbol][-depth[symbol]:])
+
+    for _ in range(2 * max((len(v) for v in parts.values()), default=1) + 2):
+        clashing = {}
+        for symbol in symbols:
+            clashing.setdefault(alias_of(symbol), []).append(symbol)
+        groups = [g for g in clashing.values() if len(g) > 1]
+        if not groups:
+            break
+        for group in groups:
+            for symbol in group:
+                if depth[symbol] < len(parts[symbol]):
+                    depth[symbol] += 1
+                elif symbol not in widened:
+                    # Lengthening ran out of path because the only thing that
+                    # differs is a wrapper struct this dropped. Put the
+                    # wrappers back: NcToPlc and PlcToNc is the difference
+                    # between what the axis did and what it was told to do.
+                    widened.add(symbol)
+                    parts[symbol] = ([_safe_segment(part)
+                                      for part in _segments(symbol)] or ["ch"])
+                    depth[symbol] = min(len(parts[symbol]), depth[symbol] + 1)
+
+    # Two different paths can still sanitise to one name. Number them - and
+    # check the number is free too, or the fix reintroduces the collision.
+    aliases, used = {}, set()
+    for symbol in symbols:
+        stem = alias_of(symbol)
+        name, suffix = stem, 1
+        while name in used:
+            suffix += 1
+            name = f"{stem}_{suffix}"
+        used.add(name)
+        aliases[symbol] = name
+    return aliases
+
+
+# --------------------------------------------------------------------------
 # Chart layout - which tab a channel lands in, and which band inside it
 # --------------------------------------------------------------------------
 #
@@ -1496,6 +1698,7 @@ def refresh_guids(root):
 # magnitude, and the gap between them is usually the thing being looked at.
 
 BAND_OTHER = "Other"
+BAND_DIGITAL = "Digital / state"
 
 # Matched against the leaf of the symbol path, lowercased, first hit wins - so
 # the specific entries must come before the general ones. "PosDiff" contains
@@ -1503,7 +1706,7 @@ BAND_OTHER = "Other"
 QUANTITY_BANDS = (
     ("Following error", r"posdiff|posdev|posdelta|poserr|posfehler|schlepp"
                         r"|lag(pos|dist|err)|follow(ing)?_?err"),
-    ("Digital / state", r"enable|busy|done|active|ready|reached|inpos|error|fault"
+    (BAND_DIGITAL, r"enable|busy|done|active|ready|reached|inpos|error|fault"
                         r"|alarm|warn|state|status|mode|valid|exec|homed|homing"
                         r"|moving|flag|bit(?![a-z])"),
     ("Position",        r"pos|angle|winkel|encoder"),
@@ -1519,7 +1722,7 @@ QUANTITY_BANDS = (
 # then what position is judged by, then the effort that produced it.
 BAND_ORDER = ("Position", "Following error", "Velocity", "Acceleration",
               "Torque / current", "Pressure", "Temperature",
-              "Digital / state", BAND_OTHER)
+              BAND_DIGITAL, BAND_OTHER)
 
 # Path segments that describe a struct rather than a device. Stripping them
 # means MAIN.fbAxis1.NcToPlc.ActPos is grouped under fbAxis1, not NcToPlc,
@@ -1540,13 +1743,27 @@ def _segments(symbol):
     return [part for part in symbol.replace("^", ".").split(".") if part]
 
 
-def quantity_of(symbol):
-    """Which physical quantity a symbol measures, judged from its leaf name."""
+def quantity_of(symbol, data_type=None):
+    """Which physical quantity a symbol measures, judged from its leaf name.
+
+    The type is the tie-breaker when the name says nothing. A house that names
+    its booleans `sbBlocked` and its enums `seStep` matches none of the
+    patterns above, and its whole function block lands in one band on one axis
+    - which is the picture the bands exist to avoid.
+    """
+    # A bit cannot be a torque, whatever it is called: bTorqueOn on the torque
+    # axis is a 0/1 trace next to newton metres, which is the flat line the
+    # bands exist to prevent. An integer still can be a measurement - a raw
+    # encoder count - so for those the name goes first.
+    if data_type == "BIT":
+        return BAND_DIGITAL
     parts = _segments(symbol)
     leaf = parts[-1].lower() if parts else ""
     for band, pattern in QUANTITY_BANDS:
         if re.search(pattern, leaf):
             return band
+    if data_type in DIGITAL_SCOPE_TYPES:
+        return BAND_DIGITAL
     return BAND_OTHER
 
 
@@ -1574,16 +1791,17 @@ def _chart_titles(devices):
     return titles
 
 
-def plan_layout(symbols, flat=False):
+def plan_layout(symbols, flat=False, types=None):
     """Group symbols into charts (tabs), each holding bands (stacked axes)."""
     if flat:
         return [{"chart": "All channels",
                  "bands": [{"band": BAND_OTHER, "channels": list(symbols)}]}]
 
+    types = types or {}
     charts = {}
     for symbol in symbols:
         bands = charts.setdefault(device_of(symbol), {})
-        bands.setdefault(quantity_of(symbol), []).append(symbol)
+        bands.setdefault(quantity_of(symbol, types.get(symbol)), []).append(symbol)
 
     titles = _chart_titles(list(charts))
     # dicts keep insertion order, so tabs appear in the order the symbols were
@@ -1611,21 +1829,68 @@ def cmd_newscope(args):
                 return candidate
         return None
 
-    def set_fields(node, pairs):
+    def set_fields(node, pairs, required=False):
+        """Write each field. `required` refuses a template that lacks one.
+
+        Skipping quietly is how a generated file ends up with the template's
+        own port and type still in it - valid, openable, and recording the
+        wrong thing.
+        """
+        missing = []
         for tag, value in pairs:
             el = node.find(tag)
             if el is not None:
                 el.text = value
+            elif required:
+                missing.append(tag)
+        if missing:
+            fail(f"{template} has no <{'>, <'.join(missing)}> under "
+                 f"<{node.tag}>, so this run could not write "
+                 f"{'it' if len(missing) == 1 else 'them'}",
+                 "The file would open and record the template's own values. "
+                 "Use a template exported from a real Scope project.")
+
+    # A fixed window that cannot contain the event is a wasted trip: the
+    # template ships 60 s, and a homing sweep or a slow startup sequence runs
+    # past that. checkscope has always warned about the window; this is how you
+    # act on the warning.
+    if args.record_time is not None:
+        if not math.isfinite(args.record_time) or args.record_time <= 0:
+            fail(f"--record-time must be a positive number of seconds, not "
+                 f"{args.record_time}")
+        ticks = int(round(args.record_time * 1000 * TICKS_PER_MS))
+        if ticks < 1:
+            fail(f"--record-time {args.record_time} rounds to zero 100 ns "
+                 "ticks - the shortest window that can be written is 0.0000001 s")
+        record_node = root.find(".//RecordTime")
+        if record_node is None:
+            fail(f"{template} has no RecordTime element to set")
+        record_node.text = str(ticks)
 
     requested = [c.strip() for c in args.channels.split(",")] if args.channels else []
     # A symbol listed twice would otherwise cost target bandwidth twice for one
     # signal. Keep first-seen order; it drives the tab order below.
-    channels = list(dict.fromkeys(c for c in requested if c))
+    specs = {}
+    for entry in (c for c in requested if c):
+        spec = parse_channel_spec(entry, args.port)
+        seen = specs.get(spec["symbol"])
+        if seen is None:
+            specs[spec["symbol"]] = spec
+        elif (seen["data_type"], seen["port"]) != (spec["data_type"], spec["port"]):
+            fail(f"{spec['symbol']} is listed twice with different settings "
+                 f"({seen['data_type']} on {seen['port']}, then "
+                 f"{spec['data_type']} on {spec['port']})",
+                 "One of them is wrong and this cannot tell which.")
+    channels = list(specs)
+    aliases = short_aliases(channels)
     layout = None
 
     if not channels:
         for node in acquisitions:
-            set_fields(node, (("AmsNetId", args.netid), ("TargetPort", str(args.port))))
+            symbol = (node.findtext("SymbolName") or "").strip()
+            set_fields(node, (("AmsNetId", args.netid),
+                              ("TargetPort", str(port_for(symbol, args.port)))),
+                       required=True)
     else:
         acq_parent = parent_of(acquisitions[0])
         if acq_parent is None:
@@ -1661,6 +1926,7 @@ def cmd_newscope(args):
 
         acq_guid_of = {}
         for symbol in channels:
+            channel = specs[symbol]
             acq = copy.deepcopy(model_acq)
             # Every clone starts out carrying the template's nested GUIDs -
             # AcquisitionInterpreter, ChannelStyle and friends. Left alone, all
@@ -1673,18 +1939,24 @@ def cmd_newscope(args):
             set_fields(acq, (
                 ("SymbolName", symbol),
                 ("AmsNetId", args.netid),
-                ("TargetPort", str(args.port)),
+                ("TargetPort", str(channel["port"])),
+                ("DataType", channel["data_type"]),
+                ("VariableSize", str(channel["variable_size"])),
                 ("Guid", acq_guid),
                 ("Title", symbol),
-            ))
+                # Not the template's placeholder: this is the CSV column header.
+                ("Name", aliases[symbol]),
+            ), required=True)
             if args.sample_time_ms is not None:
                 set_fields(acq, (
                     ("BaseSampleTime", str(int(args.sample_time_ms * TICKS_PER_MS))),
                     ("UseTaskSampleTime", "false"),
-                ))
+                ), required=True)
             acq_parent.append(acq)
 
-        layout = plan_layout(channels, flat=args.layout == "flat")
+        layout = plan_layout(
+            channels, flat=args.layout == "flat",
+            types={symbol: spec["data_type"] for symbol, spec in specs.items()})
         for chart_index, spec in enumerate(layout):
             chart_node = copy.deepcopy(blank_chart)
             refresh_guids(chart_node)
@@ -1707,9 +1979,10 @@ def cmd_newscope(args):
                     chan = copy.deepcopy(blank_chan)
                     refresh_guids(chan)
                     colour = CHANNEL_COLOURS[position % len(CHANNEL_COLOURS)]
-                    set_fields(chan, (("Name", symbol.split(".")[-1]),
+                    set_fields(chan, (("Name", aliases[symbol]),
                                       ("Title", symbol),
-                                      ("DisplayColor", str(colour))))
+                                      ("DisplayColor", str(colour))),
+                               required=True)
                     ref = chan.find(".//AcquisitionGUID")
                     if ref is not None:
                         ref.text = acq_guid_of[symbol]
@@ -1723,16 +1996,39 @@ def cmd_newscope(args):
 
     guids = refresh_guids(root)
     write_tcscopex(root, args.output)
-    emit({
+    defaulted = [s for s, spec in specs.items() if spec["type_source"] == "default"]
+    record_node = root.find(".//RecordTime")
+    record_ticks = (record_node.text or "").strip() if record_node is not None else ""
+    out = {
         "ok": True,
         "output": str(args.output),
-        "channels": channels or "unchanged from template",
+        "channels": [{"symbol": s, "name": aliases[s], "port": spec["port"],
+                      "port_source": spec["port_source"],
+                      "data_type": spec["data_type"],
+                      "variable_size": spec["variable_size"],
+                      "type_source": spec["type_source"]}
+                     for s, spec in specs.items()] or "unchanged from template",
         "charts": layout if layout is not None else "unchanged from template",
         "guids": guids,
         "ams_net_id": args.netid,
+        "record_seconds": (int(record_ticks) / TICKS_PER_MS / 1000.0
+                           if record_ticks.isdigit() and int(record_ticks) > 0
+                           else None),
         "note": "Written from a schema derived from real Beckhoff sample files, "
                 "but never opened in TwinCAT. Verify before relying on it.",
-    })
+    }
+    if defaulted:
+        # Silence here is what produced 53 channels of LREAL on a machine whose
+        # symbols were half bits and enums.
+        out["types_defaulted"] = defaulted
+        out["types_note"] = (
+            f"{len(defaulted)} channel(s) had no type given, so they were "
+            f"written as {DEFAULT_SCOPE_TYPE}. Scope reads the declared width "
+            "from the target whatever the variable really is - a BOOL read as "
+            "8 bytes records nothing usable. Declare them as "
+            "'SYMBOL:BOOL' / ':INT' / ':LREAL' in --channels."
+        )
+    emit(out)
     return 0
 
 
@@ -1757,10 +2053,16 @@ def cmd_checkscope(args):
     channels = []
     acq_guids = set()
     unrated = 0
+    acq_names = {}
     for node in acquisitions:
         symbol = (node.findtext("SymbolName") or "").strip()
         netid = (node.findtext("AmsNetId") or "").strip()
         guid = (node.findtext("Guid") or "").strip()
+        port = (node.findtext("TargetPort") or "").strip()
+        declared_type = (node.findtext("DataType") or "").strip()
+        declared_size = (node.findtext("VariableSize") or "").strip()
+        name = (node.findtext("Name") or "").strip()
+        acq_names.setdefault(name, []).append(symbol or "(no symbol)")
         acq_guids.add(guid)
         ticks = node.findtext("BaseSampleTime")
         rate = None
@@ -1776,7 +2078,86 @@ def cmd_checkscope(args):
             problems.append(f"channel has an unfilled symbol name: {symbol or '(empty)'}")
         if netid in ("", "0.0.0.0.0.0"):
             warnings.append(f"{symbol}: AmsNetId is a placeholder")
-        channels.append({"symbol": symbol, "ams_net_id": netid, "rate_hz": rate})
+
+        # The ones that let a perfectly valid-looking file record nothing.
+        # None of them is visible until you are stood at the machine - and an
+        # empty field is not a lesser version of a wrong one.
+        if not port:
+            problems.append(f"{symbol}: no TargetPort, so nothing says which "
+                            "runtime to ask for this symbol")
+        elif not port.isdigit():
+            problems.append(f"{symbol}: TargetPort '{port}' is not a number")
+        if not declared_type:
+            problems.append(f"{symbol}: no DataType, so nothing says how to "
+                            "read the variable")
+        if not declared_size:
+            problems.append(f"{symbol}: no VariableSize, so nothing says how "
+                            "many bytes to read")
+        elif not declared_size.isdigit():
+            problems.append(f"{symbol}: VariableSize '{declared_size}' is not "
+                            "a number")
+
+        nc_symbol = bool(symbol) and is_nc_symbol(symbol)
+        if nc_symbol and port.isdigit() and int(port) != NC_PORT:
+            problems.append(
+                f"{symbol}: an NC symbol on port {port}. NC axis symbols live in "
+                f"the NC runtime ({NC_PORT}); on a PLC port the name cannot "
+                "resolve and Scope reports it as an unknown symbol."
+            )
+        elif symbol and not nc_symbol and port == str(NC_PORT):
+            warnings.append(
+                f"{symbol}: a PLC-looking symbol on the NC port ({NC_PORT}). "
+                "Intentional for a symbol outside the PLC runtime; otherwise it "
+                "will not resolve."
+            )
+
+        resolved = scope_type(declared_type)
+        if declared_type.upper() in IEC_TO_SCOPE:
+            problems.append(
+                f"{symbol}: DataType '{declared_type}' is an IEC type name. Scope "
+                f"uses its own vocabulary - did you mean "
+                f"'{IEC_TO_SCOPE[declared_type.upper()]}'?"
+            )
+        elif resolved is None and declared_type:
+            warnings.append(
+                f"{symbol}: DataType '{declared_type}' is not one this tool "
+                "recognises. Only BIT, INT16 and REAL64 have been seen in real "
+                "project files, so this may still be valid - check it against a "
+                "file Scope View wrote."
+            )
+        # Checked separately: an IEC name and a contradictory width are two
+        # different mistakes, and reporting one of them buys a second trip.
+        if resolved and declared_size.isdigit() and int(declared_size) != resolved[1]:
+            problems.append(
+                f"{symbol}: DataType {resolved[0]} is {resolved[1]} byte(s) but "
+                f"VariableSize says {declared_size}. Scope reads the declared "
+                "width from the target, so the recording would be of the wrong "
+                "bytes rather than of this variable."
+            )
+
+        channels.append({"symbol": symbol, "ams_net_id": netid, "rate_hz": rate,
+                         "name": name, "port": int(port) if port.isdigit() else None,
+                         "data_type": declared_type or None,
+                         "variable_size": int(declared_size) if declared_size.isdigit() else None})
+
+    # <Name> is the column header of an exported CSV. Duplicates there are not
+    # cosmetic: the export becomes columns nobody can tell apart, after the
+    # recording is over and the machine has moved on.
+    for name, owners in acq_names.items():
+        if not name:
+            problems.append(f"acquisition for {owners[0]} has no Name - it would "
+                            "export as an unnamed column")
+        elif len(owners) > 1:
+            problems.append(
+                f"{len(owners)} acquisitions share the name '{name}' "
+                f"({', '.join(owners[:3])}{', ...' if len(owners) > 3 else ''}). "
+                "Exported to CSV they become columns that cannot be told apart."
+            )
+        elif name.lower() in PLACEHOLDER_NAMES:
+            warnings.append(
+                f"{owners[0]}: acquisition is still named '{name}', the template "
+                "placeholder. That name is the CSV column header on export."
+            )
 
     # A display channel reaches its data through AcquisitionGUID. If that
     # reference dangles, the project opens perfectly and plots nothing - the
@@ -1892,6 +2273,14 @@ def cmd_checkscope(args):
     record_seconds = None
     if record_ticks.isdigit() and int(record_ticks) > 0:
         record_seconds = int(record_ticks) / TICKS_PER_MS / 1000.0
+    elif record_ticks.isdigit():
+        # Zero silences the fixed-window warning below, which would otherwise
+        # be the one thing telling you the window is wrong.
+        warnings.append(
+            "RecordTime is 0. Whether Scope reads that as 'no limit' or as "
+            "'record nothing' has not been established here - set the window "
+            "explicitly with `newscope --record-time <seconds>`."
+        )
 
     auto_restart = (root.findtext(".//AutoRestartRecord") or "").strip().lower() == "true"
 
@@ -2000,10 +2389,21 @@ def build_parser():
     q = sub.add_parser("newscope", help="write a .tcscopex from a template")
     q.add_argument("template")
     q.add_argument("-o", "--output", required=True)
-    q.add_argument("--channels", help="comma-separated PLC symbol names")
+    q.add_argument("--channels",
+                   help="comma-separated symbols, each optionally with its type: "
+                        "'MAIN.fb.sbFlag:BOOL,MAIN.fb.seStep:INT,Axes.A1.ActPos'. "
+                        "Undeclared channels are written as "
+                        f"{DEFAULT_SCOPE_TYPE}, which is wrong for a BOOL or an "
+                        "enum and is reported as a default rather than a fact.")
     q.add_argument("--netid", default="0.0.0.0.0.0", help="target AmsNetId")
-    q.add_argument("--port", type=int, default=851)
+    q.add_argument("--port", type=int, default=851,
+                   help=f"ADS port for PLC symbols. Symbols under 'Axes.' are "
+                        f"served by the NC runtime and always go to {NC_PORT}.")
     q.add_argument("--sample-time-ms", type=float)
+    q.add_argument("--record-time", type=float,
+                   help="length of the recording window in seconds. The window "
+                        "has to be long enough to contain the event you are "
+                        "after, or the trip is wasted.")
     q.add_argument("--layout", choices=("auto", "flat"), default="auto",
                    help="auto: one chart tab per device, stacked bands per "
                         "quantity. flat: every channel on one axis, which is "

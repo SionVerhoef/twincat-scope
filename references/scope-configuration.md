@@ -124,26 +124,41 @@ this repo has watched Scope View do. Say so if you report the layout to someone.
 | `SymbolName` | The PLC symbol path, e.g. `MAIN.fbAxis.NcToPlc.ActPos`. Used when `SymbolBased` is `true`. |
 | `SymbolBased` | `true` = resolve by name (portable). `false` = use `IndexGroup`/`IndexOffset`, which are addresses and break when the program is rebuilt. Prefer `true`. |
 | `IndexGroup` / `IndexOffset` | Direct addresses. Leave `0` when symbol-based. **Never copy these between machines.** |
-| `TargetPort` | `851` for the first PLC runtime. `852`, `853`… for further ones. |
+| `TargetPort` | `851` for the first PLC runtime. `852`, `853`… for further ones. **NC axis symbols (`Axes.…`) are served by the NC runtime on `501`.** One port written across every channel resolves the PLC symbols and fails every axis symbol with "Symbolname could not be found" — a message that sends you looking at the name, which is not the problem. |
 | `AmsNetId` | The target. A placeholder here is the single most common reason a scope records nothing. |
-| `DataType` | `LREAL`, `REAL`, `INT16`, `DINT`… Must match the symbol, or values are garbage. |
-| `VariableSize` | Bytes: 8 for LREAL, 4 for REAL/DINT, 2 for INT16. Keep consistent with `DataType`. |
+| `DataType` | Scope's own vocabulary, **not IEC's**: `BIT` for a `BOOL`, `INT16` for an `INT`, `REAL64` for an `LREAL`. Those three are the ones seen in real project files; the others follow the same naming. Writing `LREAL` here is accepted by nothing and rejected by nothing — the recording is simply of the wrong bytes. |
+| `VariableSize` | Bytes, and it must match `DataType`: 1 for `BIT`, 2 for `INT16`, 8 for `REAL64`. Scope reads that many bytes from the target whatever the variable actually is, so 8 bytes off a `BOOL` is a recording of its neighbours. |
+| `Name` | The label in the Scope tree **and the column header when the recording is exported to CSV**. The templates ship `Signal`; left alone, fifty-three channels export as fifty-three columns called `Signal`. |
 | `BaseSampleTime` | **100 ns ticks.** 10000 = 1 ms, 1000 = 100 µs. Only honoured when `UseTaskSampleTime` is `false`. |
 | `UseTaskSampleTime` | `true` samples at the owning task's rate — usually what you want. See `recording-load.md`. |
 | `Oversample` | For oversampling terminals. `0` unless the hardware supports it. |
 
-Project-level, `RecordTime` is also in 100 ns ticks — `600000000` is 60 seconds.
+Project-level, `RecordTime` is also in 100 ns ticks — `600000000` is 60 seconds, which is what the templates ship. `newscope --record-time <seconds>` sets it. A window shorter than the event you are after is a wasted trip: a homing sequence or a slow startup can outrun 60 s on its own.
 
 ## Generating one
 
 ```bash
-python3 scripts/tcscope.py newscope templates/axis-diagnosis.tcscopex \
+py -3 scripts/tcscope.py newscope templates/axis-diagnosis.tcscopex \
     -o MyScope.tcscopex \
-    --channels "MAIN.fbAxis.NcToPlc.ActPos,MAIN.fbAxis.NcToPlc.PosDiff" \
-    --netid 192.168.1.10.1.1 --port 851 --sample-time-ms 1
+    --channels "MAIN.fbAxis.NcToPlc.ActPos:LREAL,MAIN.fbStation.sbBlocked:BOOL,Axes.Axis1.ActPos" \
+    --netid 192.168.1.10.1.1 --port 851 --sample-time-ms 1 --record-time 120
 
-python3 scripts/tcscope.py checkscope MyScope.tcscopex
+py -3 scripts/tcscope.py checkscope MyScope.tcscopex
 ```
+
+An entry is `SYMBOL`, `SYMBOL:TYPE` or `SYMBOL:TYPE:PORT`. The type is IEC (`BOOL`, `INT`,
+`LREAL`) or Scope's own (`BIT`, `INT16`, `REAL64`); the port overrides the namespace rule and
+is how a second PLC runtime (852, 853…) is reached per channel. Fields are read from the
+right and only when they are recognisable — a digits-only tail is a port, a known name is a
+type — and anything else is refused rather than guessed at, so a mistyped type is an error
+instead of part of a symbol name. No TwinCAT symbol path seen here contains a colon, but
+nothing in the format promises that, and a symbol that does contain one cannot be written in
+this grammar.
+
+A channel given no type is written as `REAL64` and **listed in the output as defaulted**,
+because a default is a guess and guessing wrong on a `BOOL` records nothing usable. `--port`
+sets the PLC port for every channel that does not name its own; anything under `Axes.` goes
+to the NC runtime on 501 unless a channel overrides it.
 
 `newscope` clones the template's acquisition **and its matching display channel** for each
 symbol, re-GUIDs both, and wires them together. Requesting four channels from a one-channel
@@ -158,7 +173,9 @@ It also lays them out, rather than piling every trace onto one axis:
 - **One band per quantity inside that tab**, ordered position, following error, velocity,
   acceleration, torque/current, pressure, temperature, digital state, other. The quantity is
   read from the leaf name, so `PosDiff` is a following error rather than a position and
-  `bPosReached` is a state rather than either.
+  `bPosReached` is a state rather than either. Where the name says nothing — a house that
+  writes `seStep` and `sbBlocked` matches no keyword at all — the **declared type** decides:
+  bits and integers band as state rather than piling into `Other` on one axis.
 - **Tabs appear in the order the symbols were asked for**, because that ordering is
   information.
 

@@ -17,7 +17,7 @@
           <Enabled>true</Enabled>
           <AmsNetId>0.0.0.0.0.0</AmsNetId>
           <UseLocalServer>true</UseLocalServer>
-          <DataType>LREAL</DataType>
+          <DataType>REAL64</DataType>
           <BaseSampleTime>10000</BaseSampleTime>
           <UseTaskSampleTime>false</UseTaskSampleTime>
           <Oversample>0</Oversample>
@@ -65,7 +65,7 @@
           <Area>Local</Area>
           <Guid>1ae05c99-3eba-4e80-8a31-b7394545fdb0</Guid>
           <Title>MAIN.fbAxis.NcToPlc.ActPos</Title>
-          <Name>Signal</Name>
+          <Name>ActPos</Name>
           <Comment />
           <DisplayColor>Black</DisplayColor>
           <SortPriority>10</SortPriority>
@@ -86,7 +86,7 @@
           <Enabled>true</Enabled>
           <AmsNetId>0.0.0.0.0.0</AmsNetId>
           <UseLocalServer>true</UseLocalServer>
-          <DataType>LREAL</DataType>
+          <DataType>REAL64</DataType>
           <BaseSampleTime>10000</BaseSampleTime>
           <UseTaskSampleTime>false</UseTaskSampleTime>
           <Oversample>0</Oversample>
@@ -134,7 +134,7 @@
           <Area>Local</Area>
           <Guid>8fe5ad0b-daa4-44b4-9f49-3a8e61ce597b</Guid>
           <Title>MAIN.fbAxis.NcToPlc.SetPos</Title>
-          <Name>Signal</Name>
+          <Name>SetPos</Name>
           <Comment />
           <DisplayColor>Black</DisplayColor>
           <SortPriority>10</SortPriority>
@@ -155,7 +155,7 @@
           <Enabled>true</Enabled>
           <AmsNetId>0.0.0.0.0.0</AmsNetId>
           <UseLocalServer>true</UseLocalServer>
-          <DataType>LREAL</DataType>
+          <DataType>REAL64</DataType>
           <BaseSampleTime>10000</BaseSampleTime>
           <UseTaskSampleTime>false</UseTaskSampleTime>
           <Oversample>0</Oversample>
@@ -203,7 +203,7 @@
           <Area>Local</Area>
           <Guid>80ea5fc4-3a7e-4f42-b46b-24986ad55204</Guid>
           <Title>MAIN.fbAxis.NcToPlc.PosDiff</Title>
-          <Name>Signal</Name>
+          <Name>PosDiff</Name>
           <Comment />
           <DisplayColor>Black</DisplayColor>
           <SortPriority>10</SortPriority>
@@ -224,7 +224,7 @@
           <Enabled>true</Enabled>
           <AmsNetId>0.0.0.0.0.0</AmsNetId>
           <UseLocalServer>true</UseLocalServer>
-          <DataType>LREAL</DataType>
+          <DataType>REAL64</DataType>
           <BaseSampleTime>10000</BaseSampleTime>
           <UseTaskSampleTime>false</UseTaskSampleTime>
           <Oversample>0</Oversample>
@@ -272,7 +272,7 @@
           <Area>Local</Area>
           <Guid>85c830c5-dc24-46f4-b434-8e97fb9d8bea</Guid>
           <Title>MAIN.fbAxis.NcToPlc.ActVelo</Title>
-          <Name>Signal</Name>
+          <Name>ActVelo</Name>
           <Comment />
           <DisplayColor>Black</DisplayColor>
           <SortPriority>10</SortPriority>
@@ -293,7 +293,7 @@
           <Enabled>true</Enabled>
           <AmsNetId>0.0.0.0.0.0</AmsNetId>
           <UseLocalServer>true</UseLocalServer>
-          <DataType>LREAL</DataType>
+          <DataType>REAL64</DataType>
           <BaseSampleTime>10000</BaseSampleTime>
           <UseTaskSampleTime>false</UseTaskSampleTime>
           <Oversample>0</Oversample>
@@ -341,7 +341,7 @@
           <Area>Local</Area>
           <Guid>b131b038-47a3-49f8-8b5b-d290249555a3</Guid>
           <Title>MAIN.fbAxis.NcToPlc.ActTorque</Title>
-          <Name>Signal</Name>
+          <Name>ActTorque</Name>
           <Comment />
           <DisplayColor>Black</DisplayColor>
           <SortPriority>10</SortPriority>

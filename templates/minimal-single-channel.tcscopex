@@ -17,7 +17,7 @@
           <Enabled>true</Enabled>
           <AmsNetId>0.0.0.0.0.0</AmsNetId>
           <UseLocalServer>true</UseLocalServer>
-          <DataType>LREAL</DataType>
+          <DataType>REAL64</DataType>
           <BaseSampleTime>10000</BaseSampleTime>
           <UseTaskSampleTime>false</UseTaskSampleTime>
           <Oversample>0</Oversample>
