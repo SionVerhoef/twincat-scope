@@ -78,6 +78,29 @@ ROWS = 1000
 SKEWED = "clamp_station_export.csv"
 PLANTED = "axis1_run_20260722.csv"
 UNWIRED = "AxisDiagnosis.tcscopex"
+SCALED = "axis_run_20260904.csv"
+
+# The scaled twin of PLANTED, written only with --scale.
+#
+# Iteration 1 scored 6/6 in both arms on the needle and the saturated channel,
+# and the reason turned out to be the fixture: 20 000 rows is a haystack you
+# can tip out onto the table. A baseline that loads the whole file and takes
+# diff().abs().max() finds a three-sample spike every time.
+#
+# SKILL.md's opening argument is ten minutes of twenty channels at 1 kHz -
+# 12 million samples, a few hundred MB. That is 600 000 ROWS by 20 channels,
+# not 12 million rows, and is entirely writable from stdlib Python if the rows
+# are streamed rather than accumulated.
+#
+# Same defect kinds as PLANTED so the ground truth carries over, but placed
+# where nothing draws the eye: not on a round second, and inside the middle
+# 80% so that head, tail and any coarse decimation step over them.
+SCALE_ROWS = 600_000                 # ten minutes at 1 kHz
+SCALE_AXES = 4                       # x 5 signals = 20 channels = 12M samples
+SCALE_SPIKE_ROW = 413_777            # 413.777 s
+SCALE_STEP_ROW = 128_431             # 128.431 s
+SCALE_FLAT_ROWS = (291_004, 293_517)  # 291.004 - 293.517 s
+SCALE_SIGNALS = ("ActPos", "SetPos", "ActVelo", "ActTorque", "PosDiff")
 
 # Group 0 runs at 2 ms and is padded, so its time column is the wall clock.
 # Group 1 declares 4 ms and was never padded, so row i lands at 4i ms on its
@@ -195,6 +218,85 @@ def write_planted(out):
     }
 
 
+def write_scaled(out, rows=SCALE_ROWS, axes=SCALE_AXES):
+    """The same recording at the scale the skill's argument is about.
+
+    Streamed a row at a time: the whole point is a file too big to hold, and
+    building the list first would defeat both the fixture and the machine
+    generating it. Only axis 1 carries the defects; the other axes are there to
+    be the haystack, which is what 20 000 rows never were.
+    """
+    import math
+    import random
+
+    rate_hz = make_fixture.RATE_HZ
+    clip = make_fixture.CLIP_LIMIT
+    header = ["Time"] + [f"Axis{a + 1}.{sig}"
+                         for a in range(axes) for sig in SCALE_SIGNALS]
+    rng = random.Random(20260904)
+    path = out / SCALED
+
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        for line in ("Name,Synthetic scope export",
+                     f"File,{SCALED}",
+                     "StartTime,2026-09-04 06:00:00",
+                     f"SampleTime,{1.0 / rate_hz:.6f}",
+                     "",
+                     ",".join(header)):
+            handle.write(line + "\r\n")
+
+        for i in range(rows):
+            t = i / rate_hz
+            values = [f"{t * make_fixture.MS_PER_S:.6f}"]
+            for axis in range(axes):
+                phase = axis * 0.4
+                pos = 50.0 * math.sin(2 * math.pi * 0.25 * t + phase) + rng.gauss(0, 0.02)
+                setpos = 50.0 * math.sin(2 * math.pi * 0.25 * t + phase)
+                velo = 78.5 * math.cos(2 * math.pi * 0.25 * t + phase)
+                torque = 1.5 + 0.4 * math.sin(2 * math.pi * 3.0 * t + phase) + rng.gauss(0, 0.01)
+                lag = 0.05 * math.sin(2 * math.pi * 0.25 * t + phase) + rng.gauss(0, 0.002)
+
+                if axis == 0:
+                    # Axis 1 is the one the questions are about.
+                    if i >= SCALE_STEP_ROW:
+                        pos += 12.0
+                    velo = max(-clip, min(clip, velo + rng.gauss(0, 0.05)))
+                    if SCALE_FLAT_ROWS[0] <= i <= SCALE_FLAT_ROWS[1]:
+                        torque = 1.5
+                    if abs(i - SCALE_SPIKE_ROW) <= make_fixture.SPIKE_WIDTH // 2:
+                        lag += 4.0
+                else:
+                    # The others move, and none of them saturates: a channel
+                    # pinned at a rail has to be a finding, not the house style.
+                    velo = velo * 0.35 + rng.gauss(0, 0.05)
+
+                values.extend(f"{v:.6f}" for v in (pos, setpos, velo, torque, lag))
+            handle.write(",".join(values) + "\r\n")
+
+    return {
+        "rows": rows,
+        "channels": len(header) - 1,
+        "samples": rows * (len(header) - 1),
+        "rate_hz": rate_hz,
+        "duration_s": rows / rate_hz,
+        "size_bytes": path.stat().st_size,
+        "planted": {
+            "step": {"channel": "Axis1.ActPos",
+                     "time_s": SCALE_STEP_ROW / rate_hz, "delta": 12.0},
+            "spike": {"channel": "Axis1.PosDiff",
+                      "time_s": SCALE_SPIKE_ROW / rate_hz,
+                      "width_samples": make_fixture.SPIKE_WIDTH, "amplitude": 4.0},
+            "flatline": {"channel": "Axis1.ActTorque",
+                         "start_s": SCALE_FLAT_ROWS[0] / rate_hz,
+                         "end_s": SCALE_FLAT_ROWS[1] / rate_hz},
+            "clipping": {"channel": "Axis1.ActVelo", "limit": clip,
+                         "true_amplitude": 78.5,
+                         "note": "the recorded maximum is the clip, not the peak"},
+        },
+        "note": "Only Axis1 carries defects. Axes 2-4 are the haystack.",
+    }
+
+
 NULL_GUID = "00000000-0000-0000-0000-000000000000"
 DANGLING = "deadbeef-0000-4000-8000-000000000000"
 
@@ -228,6 +330,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(Path(__file__).parent / "fixtures"),
                     help="where the fixtures go. The ground truth never goes here.")
+    ap.add_argument("--scale", action="store_true",
+                    help=f"also write {SCALED}: {SCALE_ROWS} rows x "
+                         f"{SCALE_AXES * len(SCALE_SIGNALS)} channels, a few "
+                         "hundred MB, minutes to generate")
+    ap.add_argument("--scale-rows", type=int, default=SCALE_ROWS,
+                    help="rows in the scaled fixture. Smaller is for checking "
+                         "the generator, not for running the evals.")
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -235,6 +344,7 @@ def main():
     skewed = write_skewed(out)
     planted = write_planted(out)
     unwired = write_unwired(out)
+    scaled = write_scaled(out, args.scale_rows) if args.scale else None
 
     truth = {
         SKEWED: {
@@ -255,6 +365,8 @@ def main():
             "acquisition_guid": unwired,
         },
     }
+    if scaled is not None:
+        truth[SCALED] = scaled
     # One directory up, deliberately: see the module docstring.
     (Path(__file__).parent / "ground_truth.json").write_text(json.dumps(truth, indent=2))
     print(json.dumps({"ok": True, "out": str(out),

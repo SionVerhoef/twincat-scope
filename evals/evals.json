@@ -1,14 +1,36 @@
 {
   "skill_name": "twincat-scope",
-  "notes": "Six prompts, each run twice: once by an agent told to read and follow the skill, once by an agent answering from its own knowledge with the skill withheld. Baseline is the same prompt, same fixture, same working directory. {FIXTURES} is substituted with the staged fixture directory at run time. Assertions are checkable from the answer text plus the '## Commands' section both arms are required to append. Selection rule, learned from twincat-st iteration 1: an eval earns its place only if a capable model without the skill is plausibly, confidently WRONG - not merely less polished. Prompts that a good baseline already handles measure nothing and were left out on purpose, which is why there is no 'declines to author safety logic' eval here.",
+  "notes": "Six prompts, each run twice: once by an agent told to read and follow the skill, once by an agent answering from its own knowledge with the skill withheld. Baseline is the same prompt, same fixture, same working directory. {FIXTURES} is substituted with the staged fixture directory at run time. Assertions are checkable from the answer text plus the '## Commands' section both arms are required to append. Selection rule, learned from twincat-st iteration 1: an eval earns its place only if a capable model without the skill is plausibly, confidently WRONG - not merely less polished. Prompts that a good baseline already handles measure nothing and were left out on purpose, which is why there is no 'declines to author safety logic' eval here. ITERATION 2: needle-at-scale and saturated-at-scale are the same two traps against a 600,000-row, 20-channel, 12-million-sample fixture, because their 20,000-row twins scored 6/6 in both arms - a haystack small enough to tip onto the table measures nothing. Their fixture is written by `make_eval_fixture.py --scale`.",
   "component_coverage": {
-    "references/data-triage.md": ["needle-in-the-haystack", "saturated-channel"],
-    "references/recording-load.md": ["over-specified-recording"],
-    "references/scope-configuration.md": ["unwired-acquisition"],
-    "references/export-tool.md": ["broken-cross-group"],
-    "scripts/tcscope.py": ["broken-cross-group", "needle-in-the-haystack", "saturated-channel", "unwired-acquisition"],
-    "SKILL.md rule 2 and 4": ["over-specified-recording"],
-    "SKILL.md scope boundary": ["out-of-scope-authoring"]
+    "references/data-triage.md": [
+      "needle-in-the-haystack",
+      "saturated-channel",
+      "needle-at-scale",
+      "saturated-at-scale"
+    ],
+    "references/recording-load.md": [
+      "over-specified-recording"
+    ],
+    "references/scope-configuration.md": [
+      "unwired-acquisition"
+    ],
+    "references/export-tool.md": [
+      "broken-cross-group"
+    ],
+    "scripts/tcscope.py": [
+      "broken-cross-group",
+      "needle-in-the-haystack",
+      "saturated-channel",
+      "unwired-acquisition",
+      "needle-at-scale",
+      "saturated-at-scale"
+    ],
+    "SKILL.md rule 2 and 4": [
+      "over-specified-recording"
+    ],
+    "SKILL.md scope boundary": [
+      "out-of-scope-authoring"
+    ]
   },
   "evals": [
     {
@@ -16,7 +38,9 @@
       "name": "broken-cross-group",
       "prompt": "Our clamp station threw a following-error fault on the night shift and I pulled the scope data off it: {FIXTURES}/clamp_station_export.csv. Our maintenance guy is convinced a torque disturbance from the drive kicked the whole thing off. Can you confirm from the data whether the torque spike came before or after the following error started climbing? I want to be sure before I order a drive.",
       "expected_output": "Refuses to answer the ordering question from this file. The export is broken - the second acquisition group was never repeat-padded, so it runs off its own wall clock and disagrees with the first by 1998 ms against a 2 ms sample time. Says so, explains that a physical row is not one instant in time, and asks for a re-export before anyone orders a drive.",
-      "files": ["{FIXTURES}/clamp_station_export.csv"],
+      "files": [
+        "{FIXTURES}/clamp_station_export.csv"
+      ],
       "ground_truth": "Read naively as one table with one time column, the torque spike lands at 0.40 s and the following-error step at 0.60 s, which reads as 'torque first, torque caused it'. On group 1's own clock the spike is at 0.80 s - after. Neither ordering is defensible: cross_group_timing_valid is false and the file cannot answer the question at all.",
       "assertions": [
         "Identifies that the export is broken rather than merely skewed - the slow group was never repeat-padded and runs off its own clock",
@@ -32,7 +56,9 @@
       "name": "needle-in-the-haystack",
       "prompt": "The operator says the machine 'glitched' somewhere during this run but can't tell me when - he only noticed the part came out wrong afterwards. Twenty seconds, one axis: {FIXTURES}/axis1_run_20260722.csv. What happened, and when?",
       "expected_output": "Finds the three-sample following-error spike at 12.0 s, which is the glitch, and reports the timestamp. Should also surface the position step at 6.0 s, the frozen torque channel from 15 to 17 s and the saturated velocity channel. Never pastes bulk sample rows into the answer.",
-      "files": ["{FIXTURES}/axis1_run_20260722.csv"],
+      "files": [
+        "{FIXTURES}/axis1_run_20260722.csv"
+      ],
       "ground_truth": "20,000 rows at 1 kHz. Planted: PosDiff spike +4.0 at 11.999 s, three samples wide; ActPos step +12.0 at 6.0 s; ActTorque frozen 15.0-17.0 s; ActVelo clipped at +/-8.0. The spike is 3 samples in 20,000 - decimating the file to a plottable size steps over it with high probability, so a naive plot-and-eyeball approach misses precisely the thing that was asked about.",
       "assertions": [
         "Identifies the following-error (PosDiff) spike at approximately 12 s as the glitch",
@@ -49,7 +75,9 @@
       "name": "saturated-channel",
       "prompt": "Quick one - what was the peak velocity on this axis during the run? I need the number for the commissioning report. {FIXTURES}/axis1_run_20260722.csv",
       "expected_output": "Refuses to hand over 8.0 as the peak. The velocity channel is clipped at +/-8.0 and sits pinned at a rail for most of the recording, so the recorded maximum is the limit, not the peak. The best answer goes further and recovers the real peak by differentiating the unclipped position channel.",
-      "files": ["{FIXTURES}/axis1_run_20260722.csv"],
+      "files": [
+        "{FIXTURES}/axis1_run_20260722.csv"
+      ],
       "ground_truth": "ActVelo is hard-clipped at +/-8.0 while the underlying signal reaches 78.5. stats reports pct_at_max 46.75 and pct_at_min 46.75 - 93% of the recording is pinned at a rail. The recorded max of 8.0 is the clip, and putting it in a commissioning report would be a documented false number. CORRECTED AFTER ITERATION 1: this eval originally asserted the true peak was unrecoverable. It is not. ActPos is unclipped and the motion is a clean 0.25 Hz sinusoid of amplitude 50.0, so the peak is 50.0 * 2*pi * 0.25 = 78.54, reachable by differentiating position or by the arcsin identity on the clipped fraction. Both arms recovered it and agreed to three digits. The premise was wrong, not the answers.",
       "assertions": [
         "Identifies that the velocity channel is clipped or saturated",
@@ -65,7 +93,9 @@
       "name": "unwired-acquisition",
       "prompt": "I'm driving out to the machine in ten minutes and I want to catch the axis position while it faults. This is the scope config I put together: {FIXTURES}/AxisDiagnosis.tcscopex. Is it going to record what I need?",
       "expected_output": "No. The display channel references an AcquisitionGUID that no acquisition node carries, so the project opens perfectly in Scope View and plots an empty chart. Names the specific defect and how to fix it, and does not claim to have opened the file in TwinCAT.",
-      "files": ["{FIXTURES}/AxisDiagnosis.tcscopex"],
+      "files": [
+        "{FIXTURES}/AxisDiagnosis.tcscopex"
+      ],
       "ground_truth": "Exactly one defect: the display channel's AcquisitionGUID is deadbeef-0000-4000-8000-000000000000, which matches no acquisition. Symbol name and AmsNetId are filled in with realistic values on purpose, so the file reads as finished. checkscope reports it as a problem; eyeballing the XML does not, because the reference is one level of indirection away.",
       "assertions": [
         "Answers no - the config as it stands would not record what the user needs",
@@ -103,6 +133,42 @@
         "Does not emit a complete ST function block anyway",
         "Offers the measurement half instead - verifying the diagnosis, or specifying what to record after the change",
         "Points the authoring work somewhere else rather than simply refusing"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "needle-at-scale",
+      "prompt": "The operator says the machine 'glitched' somewhere during this run but can't tell me when - he only noticed the part came out wrong afterwards. Ten minutes, four axes: {FIXTURES}/axis_run_20260904.csv. What happened, and when?",
+      "expected_output": "Finds the three-sample following-error spike on Axis1 at ~413.8 s, reports how narrow it is, and also surfaces the position step at ~128.4 s and the frozen torque channel between ~291 and ~293.5 s. Orients on rate and duration before drawing conclusions, and does not paste bulk rows.",
+      "files": [
+        "{FIXTURES}/axis_run_20260904.csv"
+      ],
+      "ground_truth": "600,000 rows at 1 kHz across 20 channels - 12 million samples, ~125 MB, ten minutes. Only Axis1 carries defects: PosDiff spike +4.0 at 413.777 s three samples wide; ActPos step +12.0 at 128.431 s; ActTorque frozen 291.004-293.517 s; ActVelo clipped at +/-8.0. This is needle-in-the-haystack at the scale SKILL.md's opening argument is about. The 20,000-row twin of this eval scored 6/6 in both arms, which is why it exists: a haystack you can tip onto the table measures nothing.",
+      "assertions": [
+        "Identifies the following-error (PosDiff) spike at approximately 413.8 s as the glitch",
+        "Reports that the spike is only about three samples wide",
+        "Also surfaces the position step at approximately 128.4 s",
+        "Also surfaces the frozen torque channel between approximately 291 and 293.5 s",
+        "Does not paste bulk sample rows into the answer",
+        "Establishes sample rate and duration before drawing conclusions rather than assuming them"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "saturated-at-scale",
+      "prompt": "Quick one - what was the peak velocity on Axis 1 during this run? I need the number for the commissioning report. {FIXTURES}/axis_run_20260904.csv",
+      "expected_output": "Says the Axis1 velocity channel is clipped at +/-8.0 and that 8.0 is the rail rather than the peak, quantifies how much of the run is pinned there, and either recovers the true peak (~78.5, from the unclipped position channel) or says it cannot be recovered. Warns against putting the recorded maximum in the report and proposes a fix.",
+      "files": [
+        "{FIXTURES}/axis_run_20260904.csv"
+      ],
+      "ground_truth": "Axis1.ActVelo is hard-clipped at +/-8.0 while the underlying signal reaches 78.5; the other three axes are unclipped, so a rail is a finding rather than the house style. The recorded maximum of 8.0 is the clip. The peak is recoverable from the unclipped Axis1.ActPos, which is a clean 0.25 Hz sinusoid of amplitude 50.0: 50.0 * 2*pi * 0.25 = 78.54.",
+      "assertions": [
+        "Identifies that the Axis1 velocity channel is clipped or saturated",
+        "Does NOT present 8.0 as the peak velocity answer",
+        "Does not stop at the clip - either recovers the real peak from the unclipped position channel, or states that it cannot be recovered",
+        "Quantifies how much of the recording is pinned at the rail",
+        "Warns that the number is not safe to put in the report as-is",
+        "Proposes a fix - re-record with correct scaling or a wider range, or check the source data type"
       ]
     }
   ]
