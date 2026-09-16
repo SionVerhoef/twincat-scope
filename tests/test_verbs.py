@@ -357,6 +357,216 @@ ALLOWED_NET_IDS = {"0.0.0.0.0.0", "192.168.1.10.1.1", "1.2.3.4.1.1", "127.0.0.1.
 NET_ID = re.compile(r"\b(?:\d{1,3}\.){5}\d{1,3}\b")
 
 
+def recordability_checks():
+    """Whether a generated file could actually record, which is not validity.
+
+    Every check here is a defect a real machine found first: a file that opened
+    cleanly in Scope View, passed checkscope, and recorded nothing
+    (evals/field-review-1fa0e9b.md).
+    """
+    import xml.etree.ElementTree as ET
+
+    tpl = ROOT / "templates" / "axis-diagnosis.tcscopex"
+    if not tpl.exists():
+        check("a generated file could record", True, "skipped: no template")
+        return
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "mixed.tcscopex"
+        made = run("newscope", tpl, "-o", out, "--netid", "1.2.3.4.1.1",
+                   "--record-time", "180",
+                   "--channels",
+                   "MAIN.fbStation.seStep:INT,MAIN.fbStation.sbFlag:BOOL,"
+                   "Axes.Mover 1 (Drive1_ChA).SetPosModulo")
+        # Read the file back rather than the JSON newscope printed about it.
+        # The report is built in memory, so it would still look right if the
+        # write into the XML silently did nothing - which is the whole class of
+        # bug this section exists for.
+        written = {}
+        for acq in ET.fromstring(out.read_text(encoding="utf-8-sig")).findall(
+                ".//AdsAcquisition"):
+            written[(acq.findtext("SymbolName") or "").strip()] = {
+                "port": (acq.findtext("TargetPort") or "").strip(),
+                "data_type": (acq.findtext("DataType") or "").strip(),
+                "variable_size": (acq.findtext("VariableSize") or "").strip(),
+                "name": (acq.findtext("Name") or "").strip(),
+                "title": (acq.findtext("Title") or "").strip(),
+            }
+        reported = {c["symbol"]: c for c in made["channels"]}
+        check("the report and the file agree, field by field",
+              all(written[s]["port"] == str(c["port"])
+                  and written[s]["data_type"] == c["data_type"]
+                  and written[s]["variable_size"] == str(c["variable_size"])
+                  and written[s]["name"] == c["name"]
+                  and written[s]["title"] == s
+                  for s, c in reported.items()),
+              str(written))
+
+        by_symbol = written
+        nc = by_symbol["Axes.Mover 1 (Drive1_ChA).SetPosModulo"]
+        plc = by_symbol["MAIN.fbStation.sbFlag"]
+
+        # The showstopper: one port across every channel resolves the PLC
+        # symbols and leaves every axis symbol unfindable.
+        check("an NC symbol is recorded on the NC port",
+              nc["port"] == "501" and plc["port"] == "851",
+              f"nc={nc['port']} plc={plc['port']}")
+
+        check("declared types become Scope's vocabulary, not IEC's",
+              (plc["data_type"], plc["variable_size"]) == ("BIT", "1")
+              and (by_symbol["MAIN.fbStation.seStep"]["data_type"],
+                   by_symbol["MAIN.fbStation.seStep"]["variable_size"]) == ("INT16", "2"),
+              str([(c["data_type"], c["variable_size"]) for c in written.values()]))
+
+        check("an undeclared type is reported as a default, not as a fact",
+              made.get("types_defaulted") == ["Axes.Mover 1 (Drive1_ChA).SetPosModulo"]
+              and reported["Axes.Mover 1 (Drive1_ChA).SetPosModulo"]["type_source"]
+              == "default",
+              str(made.get("types_defaulted")))
+
+        # <Name> is the CSV column header. Fifty-three columns called Signal is
+        # an export nobody can read, discovered after the machine has moved on.
+        names = [c["name"] for c in written.values()]
+        check("every channel gets its own name, not the placeholder",
+              len(set(names)) == 3 and "Signal" not in names, str(names))
+
+        check("--record-time sets the window",
+              made.get("record_seconds") == 180.0
+              and ET.fromstring(out.read_text(encoding="utf-8-sig")
+                                ).findtext(".//RecordTime") == "1800000000",
+              str(made.get("record_seconds")))
+
+        # Prefix-style names match no quantity keyword; the type still says
+        # what they are, so they do not all pile onto one axis.
+        bands = {c["chart"]: [b["band"] for b in c["bands"]] for c in made["charts"]}
+        check("a bit and an enum band as state, whatever they are called",
+              bands.get("fbStation") == ["Digital / state"], str(bands))
+
+        chk = run("checkscope", out)
+        check("checkscope passes a file that could record", chk.get("ok") is True,
+              str(chk.get("problems")))
+
+        # And the same file with the field session's defects put back.
+        text = out.read_text(encoding="utf-8-sig")
+        broken = Path(tmp) / "broken.tcscopex"
+        # Each channel gets its own IEC name, so the mapping is proved per
+        # type rather than three times for LREAL.
+        spoiled = text.replace("<DataType>BIT</DataType>",
+                               "<DataType>BOOL</DataType>")
+        spoiled = spoiled.replace("<DataType>INT16</DataType>",
+                                  "<DataType>INT</DataType>")
+        spoiled = spoiled.replace("<DataType>REAL64</DataType>",
+                                  "<DataType>LREAL</DataType>")
+        spoiled = spoiled.replace("<TargetPort>501</TargetPort>",
+                                  "<TargetPort>851</TargetPort>")
+        for leaf in names:
+            spoiled = spoiled.replace(f"<Name>{leaf}</Name>", "<Name>Signal</Name>")
+        broken.write_bytes(b"\xef\xbb\xbf" + spoiled.encode("utf-8"))
+        bad = run("checkscope", broken, expect_ok=False)
+        problems = " | ".join(bad.get("problems", []))
+        check("checkscope names the Scope type each IEC name should have been",
+              all(f"'{iec}' is an IEC type name" in problems
+                  and f"did you mean '{scope}'" in problems
+                  for iec, scope in (("BOOL", "BIT"), ("INT", "INT16"),
+                                     ("LREAL", "REAL64"))),
+              problems[:120])
+        check("checkscope rejects an NC symbol on a PLC port",
+              "NC symbol on port 851" in problems, problems[:90])
+        check("checkscope rejects channels that would export as one column",
+              "share the name 'Signal'" in problems, problems[:90])
+
+        # An absent field is the same failure as a wrong one: nothing says
+        # which runtime to ask, how to read the variable, or how much of it.
+        empty = Path(tmp) / "empty-fields.tcscopex"
+        stripped = (text.replace("<DataType>REAL64</DataType>", "<DataType></DataType>")
+                        .replace("<VariableSize>8</VariableSize>", "<VariableSize></VariableSize>")
+                        .replace("<TargetPort>501</TargetPort>", "<TargetPort></TargetPort>"))
+        empty.write_bytes(b"\xef\xbb\xbf" + stripped.encode("utf-8"))
+        blank = run("checkscope", empty, expect_ok=False)
+        check("checkscope rejects fields that are simply absent",
+              blank.get("ok") is False
+              and sum(any(w in p for w in ("no TargetPort", "no DataType",
+                                           "no VariableSize"))
+                      for p in blank.get("problems", [])) == 3,
+              str(blank.get("problems"))[:90])
+
+        # Names must stay unique however the paths collide, or the export has
+        # two columns with one heading - the thing the names exist to prevent.
+        collide = Path(tmp) / "collide.tcscopex"
+        clashing = run("newscope", tpl, "-o", collide, "--netid", "1.2.3.4.1.1",
+                       "--channels", "MAIN.a.NcToPlc.Val,MAIN.a.PlcToNc.Val,"
+                                     "MAIN.a.Val_2,MAIN.a.Status.Val_2")
+        clashed = [c["name"] for c in clashing["channels"]]
+        check("colliding paths still get distinct names",
+              len(set(clashed)) == 4 and run("checkscope", collide).get("ok") is True,
+              str(clashed))
+        # Dropping the wrapper is what made them collide, so put it back rather
+        # than separate a setpoint from a measurement by an ordinal.
+        check("a wrapper struct comes back when it is the only difference",
+              "NcToPlc" in clashed[0] and "PlcToNc" in clashed[1], str(clashed[:2]))
+
+        # The escape hatch from the Axes. rule, and the way to reach a second
+        # PLC runtime per channel.
+        ported = run("newscope", tpl, "-o", Path(tmp) / "ported.tcscopex",
+                     "--netid", "1.2.3.4.1.1",
+                     "--channels", "Axes.NotAnAxis.Val:LREAL:852,MAIN.b:BOOL")
+        check("an explicit port overrides the namespace rule",
+              [(c["port"], c["port_source"]) for c in ported["channels"]]
+              == [(852, "declared"), (851, "derived")],
+              str([(c["port"], c["port_source"]) for c in ported["channels"]]))
+
+        # Bad input answers in the tool's own JSON, not with a traceback.
+        for label, args_in in (
+                ("a window that is not a number", ("--record-time", "nan")),
+                ("a window that rounds to nothing", ("--record-time", "0.00000001")),
+                ("an entry with no symbol", ("--channels", ":BOOL")),
+                ("an unknown type name", ("--channels", "MAIN.a:LREALX")),
+                ("one symbol declared two ways", ("--channels", "MAIN.a:BOOL,MAIN.a:LREAL"))):
+            refused = run("newscope", tpl, "-o", Path(tmp) / "refused.tcscopex",
+                          "--netid", "1.2.3.4.1.1", *args_in, expect_ok=False)
+            check(f"newscope refuses {label}, in JSON",
+                  refused.get("ok") is False and bool(refused.get("error")),
+                  str(refused.get("error"))[:70])
+
+        # A width that does not match its type reads the wrong bytes off the
+        # target - a recording of something, just not of this variable.
+        mismatched = Path(tmp) / "mismatched.tcscopex"
+        # The BIT channel is the only 1-byte one, so widening every 1 widens it.
+        wrong_size = text.replace("<VariableSize>1</VariableSize>",
+                                  "<VariableSize>8</VariableSize>")
+        mismatched.write_bytes(b"\xef\xbb\xbf" + wrong_size.encode("utf-8"))
+        size_check = run("checkscope", mismatched, expect_ok=False)
+        check("checkscope rejects a width that contradicts the type",
+              any("VariableSize says 8" in p for p in size_check.get("problems", [])),
+              str(size_check.get("problems"))[:90])
+
+    # The templates ship what everyone copies, so they have to be right too.
+    for name in ("axis-diagnosis.tcscopex", "minimal-single-channel.tcscopex"):
+        path = ROOT / "templates" / name
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8-sig")
+        check(f"{name} declares types in Scope's vocabulary",
+              "<DataType>LREAL<" not in text and "<DataType>REAL64<" in text,
+              name)
+
+    # A channel named Signal exports as a column called Signal. The
+    # single-channel template is the exception on purpose: its symbol is
+    # PLACEHOLDER.Symbol, so its name is a placeholder for the same reason and
+    # checkscope says so when anyone generates from it unchanged.
+    axis_tpl = (ROOT / "templates" / "axis-diagnosis.tcscopex")
+    if axis_tpl.exists():
+        check("the worked template carries no placeholder channel name",
+              "<Name>Signal</Name>" not in axis_tpl.read_text(encoding="utf-8-sig"),
+              "axis-diagnosis.tcscopex")
+    placeholder_tpl = (ROOT / "templates" / "minimal-single-channel.tcscopex")
+    if placeholder_tpl.exists():
+        text = placeholder_tpl.read_text(encoding="utf-8-sig")
+        check("the placeholder template is a placeholder throughout",
+              "PLACEHOLDER" in text and "<Name>Signal</Name>" in text,
+              "minimal-single-channel.tcscopex")
+
+
 def shareability_checks():
     """No real machine address anywhere in the tracked tree.
 
@@ -635,6 +845,7 @@ def main():
     real_fixture_checks()
     at_rest_checks()
     layout_checks()
+    recordability_checks()
     shareability_checks()
 
     print()

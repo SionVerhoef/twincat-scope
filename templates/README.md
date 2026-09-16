@@ -11,13 +11,15 @@ pass `scripts/tcscope.py checkscope`.
 ## Use them through the script, not by copying
 
 ```bash
-python3 scripts/tcscope.py newscope templates/axis-diagnosis.tcscopex \
+py -3 scripts/tcscope.py newscope templates/axis-diagnosis.tcscopex \
     -o MyScope.tcscopex \
-    --channels "MAIN.fbAxis.NcToPlc.ActPos,MAIN.fbAxis.NcToPlc.PosDiff" \
+    --channels "MAIN.fbAxis.NcToPlc.ActPos,MAIN.fbAxis.NcToPlc.PosDiff:LREAL" \
     --netid 192.168.1.10.1.1 --sample-time-ms 1
 
-python3 scripts/tcscope.py checkscope MyScope.tcscopex
+py -3 scripts/tcscope.py checkscope MyScope.tcscopex
 ```
+
+`py -3` is the Windows launcher, and TwinCAT runs on Windows; on Linux or macOS (and in this repo's CI) the same commands are `python3`.
 
 **Copying a template file duplicates its GUIDs, and a project with duplicate identifiers is
 invalid.** `newscope` mints fresh ones and — the part that is easy to get wrong — rewrites the

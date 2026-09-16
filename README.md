@@ -81,7 +81,8 @@ The acquisition half — `doctor`, `newscope`, `checkscope` — needs nothing bu
 works on a locked-down machine before uv exists.
 
 ```bash
-python3 scripts/tcscope.py doctor      # tells you exactly what is missing, and the fix
+py -3 scripts/tcscope.py doctor        # tells you exactly what is missing, and the fix
+                                       # (py -3 on Windows; python3 elsewhere)
 ```
 
 ## Layout
@@ -103,12 +104,14 @@ twincat-scope/
 
 ## Status
 
-**No `.tcscopex` written here has been opened in TwinCAT.** No Beckhoff toolchain existed in
-the environment this was built in. Specifically:
+**A generated `.tcscopex` has been opened in TwinCAT exactly once, and it did not record.**
+That session found the port, data-type, channel-name and record-window defects this version
+fixes; the fixes have not been back to a machine
+(`evals/field-review-1fa0e9b.md`). Specifically:
 
 - The `.tcscopex` schema was derived by reading real Beckhoff sample projects, and the
-  templates validate against it — but no file has been loaded into Scope View. `checkscope`
-  has been run against 7 real Beckhoff-authored projects.
+  templates validate against it. `checkscope` has been run against 7 real Beckhoff-authored
+  projects, which shows it can *read* one — not that it can write an equivalent.
 - The CSV reader **was** measured against 19 genuine `TC3ScopeExportTool.exe` exports from a
   Beckhoff CX/AX8000 machine (TwinCAT 3.1, EU locale), covering both the TAB and `,`
   dialects and all three sample-rate alignment states. Those recordings carry customer
@@ -127,8 +130,10 @@ confirmation that `.svdx` export behaves as documented.
 ## Tests
 
 ```bash
-python3 tests/make_fixture.py     # synthetic recordings, US and EU locale
-python3 tests/test_verbs.py       # 20 end-to-end checks
+py -3 tests/make_fixture.py       # synthetic recordings, US and EU locale
+py -3 tests/test_verbs.py         # end-to-end checks; a script, not a pytest suite,
+                                  # so `pytest` collects nothing from it
+                                  # (py -3 on Windows; python3 elsewhere, as CI runs them)
 ```
 
 ## Licence

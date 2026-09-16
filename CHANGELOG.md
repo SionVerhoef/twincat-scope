@@ -4,6 +4,50 @@
 
 First working version. Not yet published.
 
+### A generated file that can actually record
+
+A field session took a generated 53-channel project to a running machine. It opened in Scope
+View, `checkscope` passed it, and it recorded nothing — every channel had the wrong type and
+width, every axis channel was looked up in the wrong runtime, and every column of the export
+was called `Signal`. The review is in `evals/field-review-1fa0e9b.md`.
+
+- **The ADS port follows the symbol.** `Axes.…` is served by the NC runtime on 501, every
+  other symbol by `--port`. One port across both namespaces resolves the PLC channels and
+  fails the axis ones with "Symbolname could not be found", which reads as a naming problem
+  and is not one.
+- **`DataType` is Scope's vocabulary, not IEC's** — `BIT`, `INT16`, `REAL64`, with
+  `VariableSize` to match. Declare a type per channel as `SYMBOL:BOOL`, `:INT`, `:LREAL`.
+  Undeclared channels are still written as `REAL64`, but are now reported as *defaulted*
+  rather than passed off as resolved. Both templates shipped `LREAL`, which appears in none
+  of the seven real project files this schema was read from; they now ship `REAL64`.
+- **Every channel gets its own name.** `<Name>` is the Scope tree label *and* the CSV column
+  header, so the template's placeholder exported fifty-three columns called `Signal`. Names
+  are derived from the symbol's leaf and lengthened along the path only where two would
+  collide.
+- **`--record-time <seconds>`.** The window was fixed at the template's 60 s with no way to
+  change it, while the event being chased ran longer than that. `checkscope` already warned
+  about the window; there is now a way to act on the warning.
+- **A band decided by type where the name says nothing.** Houses that write `seStep` and
+  `sbBlocked` match no quantity keyword, so a whole function block landed on one axis. Bits
+  and integers now band as state.
+- **`checkscope` refuses all of it**: an NC symbol on a PLC port, an IEC type name (naming the
+  Scope one it means), a width that contradicts its type, and channels that would export as
+  columns nobody can tell apart — and a field that is simply *absent* counts as the same
+  failure as a wrong one, since an empty `DataType` says no more about how to read a variable
+  than a wrong one does.
+- **Bad input answers in JSON, not with a traceback**: a record window that is not a positive
+  finite number of ticks, an entry with no symbol, an unrecognised type, one symbol declared
+  two different ways, and a template missing a field this version needs to write — which
+  would otherwise be skipped silently, leaving the template's own values in the file.
+
+`SYMBOL:TYPE:PORT` is the whole channel grammar; the port field overrides the `Axes.` rule and
+reaches a second PLC runtime (852, 853…) per channel. Fields are read from the right and only
+when recognisable, so a mistyped type is an error rather than part of a symbol name.
+
+Documentation moved to `py -3`, which is how Windows invokes Python and therefore how these
+commands run on a machine with TwinCAT on it; every block that uses it says what the command
+is everywhere else.
+
 ### Charts laid out to be read, not just to be valid
 
 Field feedback from a first real use of `newscope`: every requested channel arrived in a single
