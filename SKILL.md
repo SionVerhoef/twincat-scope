@@ -28,8 +28,9 @@ different job — hand off to whatever covers ST authoring in this project.
    variable, activating a configuration, or switching Run/Config mode is a human gesture —
    propose the command, do not run it.
 3. **Never claim something is verified that you have not verified.** There is very likely no
-   TwinCAT installation on this machine. Say "this has not been opened in TwinCAT" rather
-   than implying it has.
+   TwinCAT installation on this machine. What this skill's own output has and has not been
+   seen doing in TwinCAT is under *Status and scope* below — report that, and do not round it
+   up to "works".
 4. **A recording is not free.** Sample rate × channel count consumes real-time bandwidth on
    the target. An over-specified scope can disturb the very machine it is diagnosing, which
    corrupts the measurement and the process at the same time. **Propose the configuration;
@@ -147,7 +148,8 @@ are stood at the machine:
   else by `--port` (851). `newscope` splits them; one port for both is why a file whose symbol
   names are all correct still reports "Symbolname could not be found". Override it per channel
   with a third field — `SYMBOL:TYPE:PORT` — which is also how a second PLC runtime (852, 853…)
-  is reached.
+  is reached. A PLC symbol on a port below 851 answers nowhere; both verbs say so, because
+  `--port 85` is a file that opens and records nothing.
 - **The type has to be Scope's, not IEC's.** Give it per channel — `SYMBOL:BOOL`, `:INT`,
   `:LREAL` — and it is written as `BIT`/`INT16`/`REAL64` with the matching width. A channel
   with no type declared is written as `REAL64` and reported as *defaulted*; on a `BOOL` that
@@ -166,8 +168,9 @@ different colours. It prints the layout it chose; check it before handing the fi
 
 Always `checkscope` before handing a file over. It catches the failures that look like
 success: a display channel whose `AcquisitionGUID` points at nothing opens perfectly and
-plots an empty chart; an NC symbol on a PLC port never resolves; an IEC type name or a width
-that contradicts its type records the wrong bytes; and channels sharing one name export as
+plots an empty chart; an NC symbol on a PLC port never resolves, and neither does any symbol
+on a port no runtime serves; an IEC type name or a width that contradicts its type records the
+wrong bytes; and channels sharing one name, or left with the template's placeholder, export as
 columns nobody can tell apart. It reports the layout too, and says when a chart is too
 crowded to read.
 

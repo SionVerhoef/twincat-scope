@@ -1,21 +1,20 @@
 # Real recordings — intentionally empty
 
-**Adding one real, redacted export is the highest-value single improvement available to this
-skill.**
+**A real, redacted recording of a known fault is the most valuable thing this folder can
+hold.**
 
-The reference files describe the CSV format in prose. Prose is a weak signal. The reader
-currently *sniffs* the delimiter, the decimal separator and the preamble layout, because it
-has never seen genuine `TC3ScopeExportTool.exe` output. One real file turns all of that from
-inference into fact.
+The format questions are answered: the reader was measured against 19 genuine
+`TC3ScopeExportTool.exe` exports covering both dialects, and `tests/make_real_fixtures.py`
+reproduces the five layouts they use. Another clean export adds little.
 
-The same applies to diagnosis. A model reading "look for saturation" produces generic advice.
+Diagnosis is the gap. A model reading "look for saturation" produces generic advice.
 A model that has seen what your machine's torque channel looks like when the drive is
 healthy produces advice about *your* machine.
 
 ## What to put here
 
-- **One CSV export**, from any short recording. Even ten seconds of two channels settles the
-  format questions.
+- **One CSV export**, from any short recording, if it comes from an installation whose export
+  looks unlike the five layouts already reproduced — a different locale or tool version.
 - **A `.tcscopex` from a project that works**, so the templates can be checked against
   something Scope View has actually opened.
 - **A recording with a known fault**, plus a one-line note saying what the fault was. These

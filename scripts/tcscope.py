@@ -35,9 +35,10 @@ and reports seconds everywhere - `manifest` says so via "time_unit": "ms" and
 Status: the CSV reader was measured against 19 genuine TC3ScopeExportTool.exe
 exports from a Beckhoff CX/AX8000 machine (TwinCAT 3.1, EU locale) covering
 both the TAB and ',' dialects, and is tested against structural copies of all
-five layouts those files use. The .tcscopex writer is still modelled on real
-Beckhoff sample files but has never been opened in TwinCAT. Both say so rather
-than implying otherwise.
+five layouts those files use. The .tcscopex writer is modelled on real Beckhoff
+sample files. A file it generated opened in Scope View once and recorded
+nothing; the fixes from that session have not been back to a machine. Both say
+so rather than implying otherwise.
 """
 
 import argparse
@@ -1497,7 +1498,8 @@ def refresh_guids(root):
 # rest with "Symbolname could not be found" - a message that sends you looking
 # at the name, which was never the problem.
 
-NC_PORT = 501  # the NC runtime. PLC runtimes start at 851.
+NC_PORT = 501  # the NC runtime.
+PLC_FIRST_PORT = 851  # the first TC3 PLC runtime; a second is 852, and so on.
 
 
 def is_nc_symbol(symbol):
@@ -1508,6 +1510,25 @@ def is_nc_symbol(symbol):
 def port_for(symbol, plc_port):
     """Which ADS port serves this symbol."""
     return NC_PORT if is_nc_symbol(symbol) else plc_port
+
+
+def valid_port(port, what):
+    """Refuse a number no ADS port can have."""
+    if not 1 <= port <= 65535:
+        fail(f"{what} {port} is not an ADS port (1-65535)",
+             f"PLC runtimes are {PLC_FIRST_PORT}, {PLC_FIRST_PORT + 1}, ...; "
+             f"NC axes are {NC_PORT}.")
+    return port
+
+
+def unlikely_plc_port(symbol, port):
+    """A PLC symbol on a port no TC3 PLC runtime uses.
+
+    Nothing about 85 looks wrong in the file, and it records nothing. It stays
+    a warning because a symbol may genuinely come from another ADS device.
+    """
+    return (bool(symbol) and not is_nc_symbol(symbol)
+            and port != NC_PORT and port < PLC_FIRST_PORT)
 
 
 # <DataType> is Scope's own vocabulary, not IEC's, and <VariableSize> is the
@@ -1546,8 +1567,8 @@ DEFAULT_SCOPE_TYPE = "REAL64"
 # A bit is a state. An integer that no keyword recognised is a step number, a
 # mode or a counter far more often than it is a measurement. The type is
 # evidence; a naming convention belongs to one codebase.
-DIGITAL_SCOPE_TYPES = {"BIT", "INT8", "UINT8", "INT16", "UINT16",
-                       "INT32", "UINT32", "INT64", "UINT64"}
+DIGITAL_SCOPE_TYPES = {name for name in SCOPE_TYPE_SIZES
+                       if not name.startswith("REAL")}
 
 
 def scope_type(name):
@@ -1578,7 +1599,7 @@ def parse_channel_spec(spec, plc_port):
         if not sep or not head.strip():
             break
         if port is None and resolved is None and tail.isdigit():
-            port, text = int(tail), head
+            port, text = valid_port(int(tail), f"port in '{spec}':"), head
             continue
         if resolved is None and scope_type(tail):
             resolved, text = scope_type(tail), head
@@ -1867,7 +1888,15 @@ def cmd_newscope(args):
             fail(f"{template} has no RecordTime element to set")
         record_node.text = str(ticks)
 
-    requested = [c.strip() for c in args.channels.split(",")] if args.channels else []
+    valid_port(args.port, "--port")
+    requested = ([c.strip() for c in args.channels.split(",")]
+                 if args.channels is not None else [])
+    if args.channels is not None and not any(requested):
+        # Otherwise this falls through to "unchanged from template" and ok:true,
+        # and the channels someone asked for are silently not in the file.
+        fail(f"--channels '{args.channels}' names no symbols",
+             "Give comma-separated symbols, or leave --channels out to keep the "
+             "template's own.")
     # A symbol listed twice would otherwise cost target bandwidth twice for one
     # signal. Keep first-seen order; it drives the tab order below.
     specs = {}
@@ -2014,9 +2043,20 @@ def cmd_newscope(args):
         "record_seconds": (int(record_ticks) / TICKS_PER_MS / 1000.0
                            if record_ticks.isdigit() and int(record_ticks) > 0
                            else None),
-        "note": "Written from a schema derived from real Beckhoff sample files, "
-                "but never opened in TwinCAT. Verify before relying on it.",
+        "note": "Written from a schema derived from real Beckhoff sample files. "
+                "A generated file has opened in Scope View, but none from this "
+                "version has been shown to record. Verify on the target before "
+                "relying on it.",
     }
+    suspect_ports = [s for s, spec in specs.items()
+                     if unlikely_plc_port(s, spec["port"])]
+    if suspect_ports:
+        out["ports_suspect"] = suspect_ports
+        out["ports_note"] = (
+            f"{len(suspect_ports)} PLC channel(s) are on a port below "
+            f"{PLC_FIRST_PORT}, where no TwinCAT 3 PLC runtime answers. A typo "
+            f"for {PLC_FIRST_PORT} writes a file that opens and records nothing."
+        )
     if defaulted:
         # Silence here is what produced 53 channels of LREAL on a machine whose
         # symbols were half bits and enums.
@@ -2030,6 +2070,16 @@ def cmd_newscope(args):
         )
     emit(out)
     return 0
+
+
+def _first_few(items):
+    return ", ".join(items[:3]) + (", ..." if len(items) > 3 else "")
+
+
+def _is_own_leaf(name, symbol):
+    """Is this name the symbol's own last segment, as newscope would derive it?"""
+    parts = _segments(symbol)
+    return bool(parts) and name.lower() == _safe_segment(parts[-1]).lower()
 
 
 def cmd_checkscope(args):
@@ -2085,8 +2135,9 @@ def cmd_checkscope(args):
         if not port:
             problems.append(f"{symbol}: no TargetPort, so nothing says which "
                             "runtime to ask for this symbol")
-        elif not port.isdigit():
-            problems.append(f"{symbol}: TargetPort '{port}' is not a number")
+        elif not port.isdigit() or not 1 <= int(port) <= 65535:
+            problems.append(f"{symbol}: TargetPort '{port}' is not an ADS port "
+                            "(1-65535)")
         if not declared_type:
             problems.append(f"{symbol}: no DataType, so nothing says how to "
                             "read the variable")
@@ -2109,6 +2160,12 @@ def cmd_checkscope(args):
                 f"{symbol}: a PLC-looking symbol on the NC port ({NC_PORT}). "
                 "Intentional for a symbol outside the PLC runtime; otherwise it "
                 "will not resolve."
+            )
+        elif port.isdigit() and unlikely_plc_port(symbol, int(port)):
+            warnings.append(
+                f"{symbol}: port {port} is below {PLC_FIRST_PORT}, where no "
+                f"TwinCAT 3 PLC runtime answers. A typo for {PLC_FIRST_PORT}? "
+                "Intentional only for a symbol served by another ADS device."
             )
 
         resolved = scope_type(declared_type)
@@ -2143,20 +2200,30 @@ def cmd_checkscope(args):
     # <Name> is the column header of an exported CSV. Duplicates there are not
     # cosmetic: the export becomes columns nobody can tell apart, after the
     # recording is over and the machine has moved on.
+    # All of each at once: reporting the first of five lets someone fix that
+    # one, rerun, and meet the next.
+    unnamed = acq_names.pop("", [])
+    if unnamed:
+        problems.append(f"{len(unnamed)} acquisition(s) have no Name "
+                        f"({_first_few(unnamed)}) - each would export as an "
+                        "unnamed column")
     for name, owners in acq_names.items():
-        if not name:
-            problems.append(f"acquisition for {owners[0]} has no Name - it would "
-                            "export as an unnamed column")
-        elif len(owners) > 1:
+        if len(owners) > 1:
             problems.append(
                 f"{len(owners)} acquisitions share the name '{name}' "
-                f"({', '.join(owners[:3])}{', ...' if len(owners) > 3 else ''}). "
+                f"({_first_few(owners)}). "
                 "Exported to CSV they become columns that cannot be told apart."
             )
-        elif name.lower() in PLACEHOLDER_NAMES:
+        # Not an elif: fifty-three channels still called Signal share a name
+        # *and* kept the placeholder, and the second only surfaces once the
+        # first is fixed. A symbol whose own leaf is Signal is not a leftover -
+        # that is the name newscope derives for it.
+        leftovers = [o for o in owners if not _is_own_leaf(name, o)]
+        if name.lower() in PLACEHOLDER_NAMES and leftovers:
             warnings.append(
-                f"{owners[0]}: acquisition is still named '{name}', the template "
-                "placeholder. That name is the CSV column header on export."
+                f"{len(leftovers)} acquisition(s) still named '{name}', the "
+                f"template placeholder ({_first_few(leftovers)}). That name is "
+                "the CSV column header on export."
             )
 
     # A display channel reaches its data through AcquisitionGUID. If that

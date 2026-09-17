@@ -43,10 +43,14 @@ requesting twenty channels does not produce twenty traces sharing one axis. See
 - `UseTaskSampleTime` is `false` with `BaseSampleTime` set explicitly, so the templates
   demonstrate the units. **`BaseSampleTime` is in 100 ns ticks** — 10000 is 1 ms. For real
   work, prefer `UseTaskSampleTime` = `true`; see `references/recording-load.md`.
-- `DataType` is `LREAL` with `VariableSize` 8. Change both together or the values are garbage.
+- `DataType` is `REAL64` with `VariableSize` 8 — Scope's own type names, not IEC ones (`LREAL`
+  is refused by `checkscope`). Change both together or the values are garbage.
 
 ## Verification status
 
-These were written from a schema derived by reading real Beckhoff sample projects. **They have
-not been opened in TwinCAT.** They are structurally faithful and unproven — if you load one
-successfully, or it fails, that is worth reporting back.
+These were written from a schema derived by reading real Beckhoff sample projects. **Neither
+template has been opened in TwinCAT as shipped.** A file `newscope` generated from
+`axis-diagnosis.tcscopex` has: it opened cleanly and recorded nothing, and the port, type and
+name fixes that came out of it have not been back to a machine
+(`evals/field-review-1fa0e9b.md`). If you load one, whether it works or fails, that is worth
+reporting back.

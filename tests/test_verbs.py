@@ -474,6 +474,12 @@ def recordability_checks():
               "NC symbol on port 851" in problems, problems[:90])
         check("checkscope rejects channels that would export as one column",
               "share the name 'Signal'" in problems, problems[:90])
+        # Two separate mistakes in one field. Reporting the shared name and
+        # stopping means the placeholder is met on the next run instead.
+        check("a shared name and an unreplaced placeholder are both reported",
+              "share the name 'Signal'" in problems
+              and any("still named 'Signal'" in w for w in bad.get("warnings", [])),
+              str(bad.get("warnings"))[:90])
 
         # An absent field is the same failure as a wrong one: nothing says
         # which runtime to ask, how to read the variable, or how much of it.
@@ -521,7 +527,10 @@ def recordability_checks():
                 ("a window that rounds to nothing", ("--record-time", "0.00000001")),
                 ("an entry with no symbol", ("--channels", ":BOOL")),
                 ("an unknown type name", ("--channels", "MAIN.a:LREALX")),
-                ("one symbol declared two ways", ("--channels", "MAIN.a:BOOL,MAIN.a:LREAL"))):
+                ("one symbol declared two ways", ("--channels", "MAIN.a:BOOL,MAIN.a:LREAL")),
+                ("a channel list that names nothing", ("--channels", ",,,")),
+                ("a port outside the ADS range", ("--port", "99999")),
+                ("a per-channel port outside it", ("--channels", "MAIN.a:BOOL:0"))):
             refused = run("newscope", tpl, "-o", Path(tmp) / "refused.tcscopex",
                           "--netid", "1.2.3.4.1.1", *args_in, expect_ok=False)
             check(f"newscope refuses {label}, in JSON",
@@ -539,6 +548,64 @@ def recordability_checks():
         check("checkscope rejects a width that contradicts the type",
               any("VariableSize says 8" in p for p in size_check.get("problems", [])),
               str(size_check.get("problems"))[:90])
+
+        # 85 for 851 is one keystroke, looks like a port, and records nothing.
+        # Neither verb used to say anything about it at all.
+        typo = Path(tmp) / "typo.tcscopex"
+        mistyped = run("newscope", tpl, "-o", typo, "--netid", "1.2.3.4.1.1",
+                       "--port", "85", "--channels", "MAIN.fbIO.Value:LREAL")
+        typo_chk = run("checkscope", typo)
+        check("a PLC port below the first runtime is called out by both verbs",
+              mistyped.get("ports_suspect") == ["MAIN.fbIO.Value"]
+              and any("port 85 is below" in w for w in typo_chk.get("warnings", [])),
+              str(mistyped.get("ports_note"))[:70])
+
+        # And the other direction: a channel really called Signal is not a
+        # leftover, because Signal is the alias newscope derives for it.
+        own_leaf = Path(tmp) / "own-leaf.tcscopex"
+        run("newscope", tpl, "-o", own_leaf, "--netid", "1.2.3.4.1.1",
+            "--channels", "MAIN.fbIO.Signal:BOOL")
+        leaf_chk = run("checkscope", own_leaf)
+        check("a symbol whose own leaf is Signal is not called a leftover",
+              leaf_chk.get("ok") is True
+              and not any("placeholder" in w for w in leaf_chk.get("warnings", [])),
+              str(leaf_chk.get("warnings"))[:70])
+
+        # Nameless acquisitions all share one key, so only the first used to be
+        # reported - fix it, rerun, meet the next one.
+        blanked = Path(tmp) / "nameless.tcscopex"
+        unnamed_text = text
+        for leaf in names:
+            unnamed_text = unnamed_text.replace(f"<Name>{leaf}</Name>", "<Name></Name>")
+        blanked.write_bytes(b"\xef\xbb\xbf" + unnamed_text.encode("utf-8"))
+        nameless = run("checkscope", blanked, expect_ok=False)
+        check("every nameless acquisition is reported, not just the first",
+              any(p.startswith(f"{len(names)} acquisition(s) have no Name")
+                  for p in nameless.get("problems", [])),
+              str(nameless.get("problems"))[:90])
+
+        # The two type tables have to stay in step: an IEC name checkscope
+        # suggests must be one newscope accepts, and a type that is not a real
+        # number belongs in the state band rather than on a shared axis.
+        iec = ("BOOL", "SINT", "USINT", "BYTE", "INT", "UINT", "WORD", "DINT",
+               "UDINT", "DWORD", "LINT", "ULINT", "LWORD", "REAL", "LREAL")
+        typed = Path(tmp) / "every-type.tcscopex"
+        all_types = run("newscope", tpl, "-o", typed, "--netid", "1.2.3.4.1.1",
+                        "--channels",
+                        ",".join(f"MAIN.fbT.v{i}:{name}"
+                                 for i, name in enumerate(iec)))
+        typed_chk = run("checkscope", typed)
+        check("every IEC type name newscope takes maps to one checkscope knows",
+              all_types.get("ok") is True and typed_chk.get("ok") is True
+              and not any("not one this tool recognises" in w
+                          for w in typed_chk.get("warnings", [])),
+              str(typed_chk.get("warnings"))[:70])
+        digital = [b["channels"] for c in all_types.get("charts", [])
+                   for b in c.get("bands", []) if b["band"] == "Digital / state"]
+        check("every type that is not a real number bands as state",
+              len(digital) == 1 and len(digital[0]) == len(iec) - 2,
+              str([(c["chart"], [b["band"] for b in c["bands"]])
+                   for c in all_types.get("charts", [])])[:90])
 
     # The templates ship what everyone copies, so they have to be right too.
     for name in ("axis-diagnosis.tcscopex", "minimal-single-channel.tcscopex"):
