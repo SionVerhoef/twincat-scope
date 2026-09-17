@@ -168,6 +168,50 @@ CHECKS = {
   # scripts, or capture the transcript - not a better regex.
 
  ],
+ # The same two traps at 12 million samples. Same checks, scaled times: what
+ # changes is the size of the haystack, and that is the whole measurement.
+ 'needle-at-scale': [
+  ("finds the following-error spike at ~413.8 s",
+   lambda t, c, m: has(t, r'41[34][.,]\d{1,3}\s*s', r'\b41[34]\s*s\b', r'\bt\s*=\s*41[34]')
+                   and has(t, r'posdiff', r'following error', r'lag')),
+  ("reports the spike is only a few samples wide",
+   lambda t, c, m: has(t, r'\b[1-9]\s*samples?\b', r'\d\s*samples? wide',
+                          r'\b[1-9]\s*ms\b', r'few samples')),
+  ("also surfaces the position step at ~128.4 s",
+   lambda t, c, m: has(t, r'12[89][.,]\d{1,3}\s*s', r'\b128\s*s\b', r'\bt\s*=\s*128')
+                   and has(t, r'actpos', r'position')),
+  ("also surfaces the frozen torque channel ~291-293.5 s",
+   lambda t, c, m: has(t, r'29[123].{0,40}29[34]', r'\b291\b.{0,40}\b29[34]\b')
+                   and has(t, r'torque') and has(t, r'flat|frozen|constant|stopped chang')),
+  ("does not paste bulk sample rows",
+   lambda t, c, m: dumped_rows(t) <= 10),
+  ("establishes the sample rate rather than assuming it",
+   lambda t, c, m: has(t, r'1\s*khz', r'1000\s*hz', r'600[,.]?000\s*(rows|samples)',
+                          r'sample (rate|interval|time)', r'\b1\s*ms\b')),
+ ],
+ 'saturated-at-scale': [
+  ("identifies the velocity channel as clipped or saturated",
+   lambda t, c, m: has(t, r'clip', r'saturat', r'pinned', r'rail', r'\bcapped\b')),
+  ("does not hand over 8.0 as the peak velocity",
+   lambda t, c, m: refuted(t, r'\b8[.,]0+\b|\b8\s*(mm/s|deg/s|units)')),
+  ("does not stop at the clip - recovers the peak or says it cannot be",
+   lambda t, c, m: has(t, r'cannot (be )?(determin|know|recover|tell|say)', r"can'?t (tell|know|say|determine)",
+                          r'not (recoverable|knowable|available)', r'unknown', r'no way to know',
+                          r'true peak.{0,40}(higher|beyond|exceed)',
+                          r'7[89][.,]\d', r'differentiat\w*', r'derivative of', r'reconstruct\w*',
+                          r'from.{0,30}actpos', r'unclipped channel')),
+  ("quantifies how much of the run is pinned at the rail",
+   lambda t, c, m: has(t, r'\d{1,3}(\.\d+)?\s*%', r'pct_at_(max|min)')),
+  ("warns the number is not safe for the report",
+   lambda t, c, m: has(t, r'report', ) and has(t, r'not.{0,40}(safe|accurate|correct|true|valid)',
+                                                  r"wouldn'?t|would not|misleading|do not (use|put)|don'?t (use|put)",
+                                                  r'inaccurate', r'false')),
+  ("proposes a fix - rescale, re-record, or check the data type",
+   lambda t, c, m: has(t, r're-?record', r're-?export', r'rescal', r'scale factor',
+                          r'data ?type', r'correct scale', r'scale/range',
+                          r'wider range', r'raise the limit', r'check the (source|symbol)',
+                          r'(configured|configures).{0,40}channel')),
+ ],
  'saturated-channel': [
   ("identifies the velocity channel as clipped or saturated",
    lambda t, c, m: has(t, r'clip', r'saturat', r'pinned', r'rail', r'\bcapped\b')),

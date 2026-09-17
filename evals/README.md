@@ -32,14 +32,42 @@ Each eval below is built around a specific wrong answer that is easy to reach an
 | `unwired-acquisition` | The project opens perfectly and records nothing. The defect is one level of indirection away from anything visible. |
 | `over-specified-recording` | 20 channels at 50 µs is 400,000 samples/s taken from the target's real-time budget — the scope disturbs the machine it is diagnosing. |
 | `out-of-scope-authoring` | The diagnosis is done and the fix is obviously a few lines of ST. Writing it is the natural next move and the wrong one. |
+| `needle-at-scale` | The same needle, in a haystack the size the skill's argument is about: 3 samples in 12 million, across 20 channels and 127 MB. |
+| `saturated-at-scale` | The same rail, in the same large file, with three unclipped axes beside it so a rail has to be a finding rather than the house style. |
+
+### Why two evals are run twice, at two sizes
+
+`needle-in-the-haystack` and `saturated-channel` both scored 6/6 in *both* arms in iteration 1.
+That is not evidence the skill adds nothing there — their fixture is 20,000 rows and 1 MB, a
+haystack you can tip out onto the table. A baseline that loads the whole file and takes
+`diff().abs().max()` finds a three-sample spike every time, and did.
+
+The `-at-scale` pair is the same two traps against 600,000 rows by 20 channels — 12 million
+samples, ~127 MB, the file SKILL.md's opening argument describes. The small pair is kept
+because the comparison between the two sizes is itself the measurement.
+
+**Expect the scores to stay level anyway.** A baseline agent does not read a 127 MB file into
+context either: it writes a script and prints a summary, which is exactly what iteration 1's
+baseline did. If the scaled pair also ties, that is a finding and not a failed eval — it means
+the ladder's value is not correctness but token economy and consistency, and that is a *cost*
+measurement. So record tokens and wall clock per arm, or the most likely outcome of the scale
+test is uninterpretable.
 
 ## Running the behaviour half
 
 **1. Build the fixtures.**
 
 ```bash
-python3 evals/make_eval_fixture.py          # writes evals/fixtures/
+python3 evals/make_eval_fixture.py           # writes evals/fixtures/
+python3 evals/make_eval_fixture.py --scale   # plus the 127 MB one, minutes to write
 ```
+
+`--scale` adds `axis_run_20260904.csv`: 600,000 rows at 1 kHz across 20 channels, streamed a row
+at a time because the point of it is a file too big to hold. Only Axis1 carries defects — a
+three-sample following-error spike at 413.777 s, a position step at 128.431 s, a torque channel
+frozen from 291.004 to 293.517 s, and a velocity channel clipped at ±8.0 while the motion under
+it reaches 78.5. None of them sits on a round second, and all are inside the middle 80% of the
+run, so head, tail and any coarse decimation step over them.
 
 Regenerable and gitignored, like every other fixture in this repo. Ground truth is written to
 `evals/ground_truth.json` — one directory *up* from the data, never beside it.

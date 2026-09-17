@@ -128,6 +128,101 @@ whatever happened is too small to see at this resolution.
 python3 -c "import pandas as pd; df = pd.read_csv('axis1_run_20260722.csv'); print(df.head(50))"
 """,
  },
+ 'needle-at-scale': {
+  'good': """
+Found it. There is a following-error spike on Axis 1 at **413.777 s** - about 6 minutes 54 into
+the run.
+
+I oriented first rather than opening the file: 600,000 rows at 1 kHz, 20 channels across four
+axes, 10 minutes, one acquisition group, no gaps. That is 12 million samples and ~127 MB, so
+nothing here involved reading rows into this conversation.
+
+`events` ranks it first: a spike on `Axis1.PosDiff`, amplitude 4.0, **three samples wide** - 3 ms.
+That is your glitch, and it is worth saying why nobody saw it: three samples in twelve million.
+Any decimation that makes this file plottable steps over it, and so does head, tail and eyeballing.
+
+Two other things in the same file that you should know about:
+
+- `Axis1.ActPos` steps by +12.15 at 128.431 s. That is a real discontinuity, not drift.
+- `Axis1.ActTorque` is flat at 1.500 from 291.004 s to 293.517 s - either the machine stopped or
+  the symbol stopped updating, and those are very different problems.
+
+Also, `Axis1.ActVelo` is clipped at +/-8.0 for most of the run, so any velocity you read off that
+channel is a rail rather than a value. The other three axes are not clipped.
+
+What I did not check: whether the step and the spike share a cause. That needs a narrower question.
+
+## Commands
+uv run scripts/tcscope.py manifest axis_run_20260904.csv
+uv run scripts/tcscope.py stats axis_run_20260904.csv
+uv run scripts/tcscope.py events axis_run_20260904.csv
+uv run scripts/tcscope.py window axis_run_20260904.csv --start 413.77 --end 413.79 --channels Axis1.PosDiff
+""",
+  'naive': """
+I loaded the file and had a look at it.
+
+It is a big file, so I sampled every 500th row to get something plottable. The four axes all show
+normal sinusoidal motion. Nothing dramatic stands out.
+
+The clearest feature is a step in the Axis 1 position channel partway through. Here are rows from
+around it:
+
+128431.000000,43.404192,43.401000,8.000000,1.930863,0.051234
+128432.000000,43.398192,43.395000,8.000000,1.921863,0.049234
+128433.000000,43.392192,43.389000,8.000000,1.930163,0.052234
+128434.000000,43.386192,43.383000,8.000000,1.933863,0.048234
+128435.000000,43.380192,43.377000,8.000000,1.929863,0.050234
+128436.000000,43.374192,43.371000,8.000000,1.926863,0.051734
+128437.000000,43.368192,43.365000,8.000000,1.930463,0.049934
+128438.000000,43.362192,43.359000,8.000000,1.928863,0.050834
+128439.000000,43.356192,43.353000,8.000000,1.931863,0.051134
+128440.000000,43.350192,43.347000,8.000000,1.927863,0.049534
+128441.000000,43.344192,43.341000,8.000000,1.930863,0.050234
+128442.000000,43.338192,43.335000,8.000000,1.929263,0.051434
+
+Beyond that I do not see an obvious glitch. The operator may have been mistaken, or whatever
+happened is too small to see at this sampling.
+
+## Commands
+uv run --with pandas python -c "import pandas as pd; df = pd.read_csv('axis_run_20260904.csv', skiprows=5); print(df.iloc[::500].describe())"
+""",
+ },
+ 'saturated-at-scale': {
+  'good': """
+Short answer: **the number in that file is not the peak, and you should not put 8.0 in the report.**
+
+`Axis1.ActVelo` is hard-clipped at +/-8.0. `stats` reports 93.50% of the run pinned at one rail or
+the other (pct_at_max 46.75, pct_at_min 46.75) - a real velocity trace does not sit at exactly its
+maximum for that long. The recorded maximum is the clip, not the motion.
+
+The peak is recoverable, because the position channel is not clipped. `Axis1.ActPos` is a clean
+0.25 Hz sinusoid of amplitude 50.0, so the peak velocity is 50.0 * 2*pi * 0.25 = **78.5 units/s**.
+The other three axes are not clipped and peak around 27, which is what makes the Axis 1 rail a
+finding rather than the house style.
+
+For the commissioning report: 8.0 is not safe to put in the report as-is - it would be a
+documented false number. Use 78.5 with a note that it was reconstructed from position, or
+re-record before signing anything off. The fix on the recording side is the channel's scaling
+or its source data type - a value that stops dead at exactly 8.0 is usually a scale factor or a
+type that cannot hold the real range.
+
+## Commands
+uv run scripts/tcscope.py manifest axis_run_20260904.csv
+uv run scripts/tcscope.py stats axis_run_20260904.csv --channels Axis1.ActVelo,Axis1.ActPos
+""",
+  'naive': """
+The peak velocity on Axis 1 during this run was **8.0**.
+
+I read the file with pandas and took the maximum of the `Axis1.ActVelo` column. The maximum is
+8.000000 and the minimum is -8.000000, so the axis peaked at 8.0 in both directions. That is
+consistent across the whole ten minutes.
+
+You can put 8.0 in the commissioning report as the peak velocity for this axis.
+
+## Commands
+uv run --with pandas python -c "import pandas as pd; df = pd.read_csv('axis_run_20260904.csv', skiprows=5); print(df['Axis1.ActVelo'].max(), df['Axis1.ActVelo'].min())"
+""",
+ },
  'saturated-channel': {
   'good': """
 Don't put a number in the report yet - the velocity channel is clipped.
