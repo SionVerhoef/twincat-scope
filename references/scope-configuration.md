@@ -26,9 +26,11 @@ regardless of `core.autocrlf`. `scripts/tcscope.py` writes both conventions.
 196 in an older sibling. Newer TwinCAT writes newer projects.
 
 The templates here declare `1.0.0.0`, the most conservative value observed, on the assumption
-that a newer Scope View upgrades an older project rather than rejecting it. **That assumption
-is untested.** If a template is refused, raising `Version` to match a project your
-installation writes is the first thing to try.
+that a newer Scope View upgrades an older project rather than rejecting it. **One data point
+so far:** a file generated from `axis-diagnosis.tcscopex`, which keeps its `1.0.0.0`, opened
+cleanly in one real Scope View installation (`evals/field-review-1fa0e9b.md`; that install's
+build was not recorded). If a template is refused on yours, raising `Version` to match a
+project your installation writes is the first thing to try.
 
 ## Structure
 

@@ -39,6 +39,21 @@ was called `Signal`. The review is in `evals/field-review-1fa0e9b.md`.
   finite number of ticks, an entry with no symbol, an unrecognised type, one symbol declared
   two different ways, and a template missing a field this version needs to write — which
   would otherwise be skipped silently, leaving the template's own values in the file.
+- **A port no runtime answers is caught here rather than at the machine.** `--port 85`, one
+  keystroke from 851, used to pass every check and record nothing. A port outside 1–65535 is
+  now refused outright, and a PLC symbol on a port below 851 — where no TwinCAT 3 PLC runtime
+  listens — is reported by `newscope` and warned about by `checkscope`.
+- **A channel really called `Signal` keeps its name.** The placeholder check asks whether the
+  name is the symbol's own leaf, so `MAIN.fbIO.Signal` is a name rather than a template
+  leftover. It also no longer hides behind the duplicate-name check, since fifty-three
+  channels called `Signal` are both at once, and acquisitions with no name are all reported
+  together instead of one per run.
+- **`--channels ",,,"` is refused.** An entry list that names no symbol filtered to empty and
+  fell through to the template's own channels, reported as `ok` — the channels someone asked
+  for silently not in the file.
+- **The state band follows the type table.** Which types band as state is derived from the
+  table that sizes them, rather than a second list beside it, so a type added to one cannot
+  go missing from the other and land on a shared axis.
 
 `SYMBOL:TYPE:PORT` is the whole channel grammar; the port field overrides the `Axes.` rule and
 reaches a second PLC runtime (852, 853…) per channel. Fields are read from the right and only
@@ -221,8 +236,11 @@ samples cannot be. See `evals/results-iteration-1.md`.
 
 ### Known gaps
 
-- **Nothing has been opened in TwinCAT.** The `.tcscopex` schema is derived from real Beckhoff
-  sample projects; the templates are structurally faithful and unproven.
+- **One generated file has been opened in TwinCAT, and it recorded nothing.** The `.tcscopex`
+  schema is derived from real Beckhoff sample projects and the templates are structurally
+  faithful. A file generated from one opened cleanly in Scope View and could not record; the
+  port, type, name and window fixes that came out of that session have not themselves been
+  back to a machine (`evals/field-review-1fa0e9b.md`).
 - **No `.svdx` has been converted by the real export tool here.** The CSV path is measured
   against 19 real exports, but the `.svdx` → CSV step still depends on
   `TC3ScopeExportTool.exe` behaving as documented.
