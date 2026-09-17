@@ -278,13 +278,19 @@ Both were checked against the raw bytes of the source files and are now regressi
 State this in your report if you do not get to it — the skill's own rules require saying what
 was not checked rather than implying coverage.
 
-- `plot` has never been exercised on a real file. Label readability with full symbol paths at
-  fontsize 8 is an open question.
-- `ingest` to Parquet against a real large export (only the generated fixture was used).
-- `newscope` end to end.
-- `doctor` on a machine without `TC3ScopeExportTool.exe`.
-- Whether any generated `.tcscopex` opens in TwinCAT. **Nothing in this repo has ever been
-  opened in real TwinCAT**, and the skill says so rather than implying otherwise.
+Revised after the session in `evals/field-review-1fa0e9b.md`, which closed several of these.
+
+- `ingest` to Parquet against a real large export (only the generated fixture was used), and
+  `correlate` — neither was exercised in that session.
+- Whether a generated `.tcscopex` **records**. One has been opened in Scope View: it opened
+  cleanly and recorded nothing, and the port, type, name and window fixes that came out of
+  that have not themselves been back to a machine.
+- Whether Scope themes a chart when `ForeColor`/`GridColor`/`DisplayColor` are omitted, which
+  is the dark-mode question.
+- Label readability on `plot`. The verb has now run on real exports and made a 40k-sample
+  overview readable in one image; nobody reported on full symbol paths at fontsize 8.
+- `doctor` on a machine *without* `TC3ScopeExportTool.exe`. On the one machine it has run on
+  it found the tool and reported the path correctly.
 
 ## 10. Rules for your report — please read, this one bit us
 

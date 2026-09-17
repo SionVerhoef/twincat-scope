@@ -4,9 +4,10 @@ Configuration only. A `.tcscopex` holds *what to record and how to draw it*, wit
 data — which is what makes it templatable, diffable and safe to commit. Recorded data lives in
 `.svdx` (and `.svd` before TwinCAT 3.3.3140).
 
-**Verification status:** this schema was derived by reading real Beckhoff sample projects. It
-has not been round-tripped through TwinCAT. Treat it as accurate about structure and
-unproven about acceptance.
+**Verification status:** this schema was derived by reading real Beckhoff sample projects. A
+file generated from it opened cleanly in Scope View once and then recorded nothing, for
+reasons since fixed (`evals/field-review-1fa0e9b.md`); nothing generated since has been back
+to a machine. Treat it as accurate about structure and unproven about recording.
 
 ## Byte conventions
 
@@ -130,7 +131,7 @@ this repo has watched Scope View do. Say so if you report the layout to someone.
 | `AmsNetId` | The target. A placeholder here is the single most common reason a scope records nothing. |
 | `DataType` | Scope's own vocabulary, **not IEC's**: `BIT` for a `BOOL`, `INT16` for an `INT`, `REAL64` for an `LREAL`. Those three are the ones seen in real project files; the others follow the same naming. Writing `LREAL` here is accepted by nothing and rejected by nothing — the recording is simply of the wrong bytes. |
 | `VariableSize` | Bytes, and it must match `DataType`: 1 for `BIT`, 2 for `INT16`, 8 for `REAL64`. Scope reads that many bytes from the target whatever the variable actually is, so 8 bytes off a `BOOL` is a recording of its neighbours. |
-| `Name` | The label in the Scope tree **and the column header when the recording is exported to CSV**. The templates ship `Signal`; left alone, fifty-three channels export as fifty-three columns called `Signal`. |
+| `Name` | The label in the Scope tree **and the column header when the recording is exported to CSV**. `minimal-single-channel.tcscopex` ships the placeholder `Signal`; left alone, fifty-three channels exported as fifty-three columns called `Signal`, which is what happened on a machine. `newscope` derives a short unique name per channel and keeps the full path in `Title`. |
 | `BaseSampleTime` | **100 ns ticks.** 10000 = 1 ms, 1000 = 100 µs. Only honoured when `UseTaskSampleTime` is `false`. |
 | `UseTaskSampleTime` | `true` samples at the owning task's rate — usually what you want. See `recording-load.md`. |
 | `Oversample` | For oversampling terminals. `0` unless the hardware supports it. |
@@ -191,13 +192,17 @@ Neither verb needs third-party packages, so this works on a machine with only Py
 
 ## `checkscope`
 
-Reports a **problem** (exit 1) for anything that makes the project invalid or silently empty:
-duplicate GUIDs, an unfilled `PLACEHOLDER` symbol, a dangling `AcquisitionGUID`, no
-acquisitions at all.
+Reports a **problem** (exit 1) for anything that makes the project invalid, silently empty or
+unable to record: duplicate GUIDs, an unfilled `PLACEHOLDER` symbol, a dangling
+`AcquisitionGUID`, no acquisitions at all, an NC symbol on a PLC port, a `TargetPort` that is
+not an ADS port, an IEC type name where Scope's own vocabulary belongs, a `VariableSize` that
+contradicts its `DataType`, and acquisitions that share a name or carry none — those export as
+columns nobody can tell apart.
 
 Reports a **warning** for things that are legal but probably not what you meant: a placeholder
-`AmsNetId`, no display channel wired to anything, and a total sample rate high enough to
-perturb the target.
+`AmsNetId`, a PLC symbol on a port below 851 where no runtime answers, a channel still
+carrying the template's placeholder name, no display channel wired to anything, and a total
+sample rate high enough to perturb the target.
 
 It also prints the layout — every chart, its bands and their channels — and warns when a chart
 stacks more than six bands or a band overlays more than eight channels. Both are readability,
