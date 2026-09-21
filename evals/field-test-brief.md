@@ -6,6 +6,10 @@ You are being asked to test a change on a machine that has data nobody else has.
 below can be verified from this repository except the one thing that matters most, which is
 why you are being asked.
 
+**Two parts.** **Part A (§4)** needs a machine running TwinCAT and is the priority. **Part B
+(§5–§9)** needs the 19 real exports from the earlier review; do it only if they are on the
+machine you are at. If there is time for one thing only, it is §4.1.
+
 ---
 
 ## 1. What this is
@@ -53,15 +57,25 @@ time-column behaviour — but they are 200 to 1500 rows of invented signal. The 
 carry customer machine behaviour and are not in this repo and never will be.
 
 So: this repo can prove the change is self-consistent. It cannot prove the reader still reads
-real files correctly. Only a machine holding those 19 exports can.
+real files correctly. Only a machine holding those 19 exports can. That is Part B.
+
+A second session (`evals/field-review-1fa0e9b.md`) then took the other half of the skill — the
+one that *builds* recordings — to a running machine. A generated project opened cleanly in
+Scope View, `checkscope` passed it, and it **recorded nothing**: wrong ADS port for the axis
+channels, IEC type names where Scope wants its own, a fixed 8-byte width, and every channel
+still named `Signal`. All four are fixed, and **none of the fixes has been back to a
+machine**. That is Part A.
 
 ## 3. Setting up
 
 ```bash
-git clone git@github.com:SionVerhoef/twincat-scope.git
+git clone https://github.com/SionVerhoef/twincat-scope.git
 cd twincat-scope
-uv run tests/test_verbs.py          # expect: 111/111 checks passed
+uv run tests/test_verbs.py          # expect every check to pass (158 at the time of writing)
 ```
+
+**On Windows, write `py -3` wherever this brief says `python3`.** There `python3` usually hits
+the Microsoft Store alias ("Python was not found") even with a working Python installed.
 
 `uv` handles dependencies from the script header; nothing else needs installing. If `uv` is
 absent, install it (`winget install --id=astral-sh.uv -e`) or invoke `scripts/tcscope.py` with
@@ -74,10 +88,200 @@ Verbs are invoked as:
 uv run scripts/tcscope.py manifest <file.csv>
 uv run scripts/tcscope.py events <file.csv> --channels <name>
 uv run scripts/tcscope.py window <file.csv> --start 12.0 --end 12.2
-python3 scripts/tcscope.py doctor          # works with nothing installed
+py -3 scripts/tcscope.py doctor            # works with nothing installed
 ```
 
-## 4. THE critical check
+# Part A — on the machine, with TwinCAT
+
+## 4. What only a running TwinCAT can answer
+
+Work top to bottom: the order is by what breaks most if it is wrong. Write each result down as
+you get it — two items recorded beat seven remembered.
+
+**Rule 4 applies to you** (§12). You build the file; a person at the machine decides when it
+is safe to press Record. The file below is five channels at 1 ms — 5 000 samples/s, inside
+the `typical` load band — and is kept that small on purpose.
+
+### 4.0 First: is the skill on this machine current?
+
+The last session installed the skill globally (`~/.claude/skills/twincat-scope`) at commit
+`1fa0e9b`. That copy still has every generator defect listed above, and testing it re-finds
+them. Pull it (or re-clone) and check that `git log -1` in it shows the merge of pull request
+#11 or later.
+
+### 4.1 Does a generated file record? — the one that matters
+
+Pick five symbols from Scope View's own symbol browser, so the names are known to resolve:
+**two members of one NC axis measuring the same thing** (its actual and set position) and
+**three PLC variables: one `BOOL`, one `INT` or enum, one `LREAL`**.
+
+```bash
+py -3 scripts/tcscope.py newscope templates/axis-diagnosis.tcscopex -o Test.tcscopex \
+    --netid <the target's AmsNetId> --sample-time-ms 1 --record-time 120 \
+    --channels "<axis actual>,<axis set>,<plc bool>:BOOL,<plc int>:INT,<plc lreal>:LREAL"
+py -3 scripts/tcscope.py checkscope Test.tcscopex
+```
+
+What `newscope` should report: the two axis channels on port 501 and the three PLC ones on
+851; types `REAL64`, `REAL64`, `BIT`, `INT16`, `REAL64` with sizes 8, 8, 1, 2, 8; five
+different names, none of them `Signal`. The axis channels have no declared type, so they are
+listed under `types_defaulted` — expected. `checkscope` should say `ok: true` with one
+warning, about a fixed window and no trigger.
+
+Open `Test.tcscopex` in Scope View and have someone record for a few seconds.
+
+- **PASS:** it opens, and all five channels plot real, moving data.
+- **If any channel does not:** copy Scope View's exact error text, then do 4.2 — it becomes
+  the most important thing in the session.
+
+While it is open, note the layout. Three guesses in the generator rest on it:
+
+- a) Do the axis channels and the PLC channels arrive on **separate tabs**, one per device?
+- b) Inside a tab, are different quantities drawn as **bands stacked one above another**?
+  The PLC tab is where to look: the `BOOL` and the `INT` share a state band and the `LREAL`
+  gets its own. The axis tab holds a single position band.
+- c) Do the axis's actual and set position draw as **two traces over one shared Y axis**, in
+  two different colours?
+
+Describe what one chart actually looks like. If (c) is no, drag two symbols into one chart by
+hand, save, and copy the `AxisGroup` XML Scope View wrote — that XML is the whole answer.
+
+### 4.2 Compare against a file Scope View wrote itself
+
+Do this even if 4.1 passed: a field-by-field comparison is how the last session found that the
+type vocabulary was wrong, and nobody has audited the template's other fields since.
+
+Open a `.tcscopex` from the same project that was authored in Scope View and is known to
+record. Take one `AdsAcquisition` from it and the same kind from `Test.tcscopex` — an axis
+channel against an axis channel, a `BOOL` against a `BOOL` — and list **every child element
+whose value differs**, and every element present in one and not the other. Keep element
+names and values such as types, sizes, ports and flags; replace names and addresses (§11).
+
+### 4.3 Dark theme — which colours does Scope take from the file?
+
+Generated files looked "whitish" in TwinCAT's dark theme. `newscope` writes an explicit
+`DisplayColor` on every element: light greys on `YTChart`, `AxisGroup` and `OverviewChart`,
+`Black` on most others, and a palette colour on each `Channel`.
+
+1. With TwinCAT in dark theme, open `Test.tcscopex`. Describe the chart background, the band
+   backgrounds, the axes and the traces.
+2. **What colour is each trace?** Palette colours (blue, orange, …) mean Scope draws the
+   `Channel`'s `DisplayColor`; black means it uses one of the `Black` ones.
+3. Copy the file and, in the copy, delete the `<DisplayColor>` child of every `YTChart`,
+   `AxisGroup` and `OverviewChart`. Open it in dark theme, then in light. Does it still load?
+   Does Scope now choose colours that suit each theme?
+
+Question 3 decides the fix: if Scope themes whatever the file leaves out, the generator stops
+writing those colours; if not, it needs a light and a dark palette.
+
+### 4.4 A real trigger
+
+In Scope View, configure an actual trigger on `Test.tcscopex` — a `BOOL` going true is enough
+— save it as `Test-trigger.tcscopex`, and run `checkscope` on that.
+
+- **PASS:** `trigger_configured: true`, and the fixed-window warning is gone.
+- **If it still says false:** copy the XML of the `TriggerModule` node, names replaced. That
+  is all the fix needs.
+
+Also check that `record_seconds` says 120 and that Scope View shows a 120 s window. That is
+the second, independent confirmation that `RecordTime` counts 100 ns ticks.
+
+### 4.5 `.svdx` → CSV with the real export tool
+
+Save the recording from 4.1 as an `.svdx`, then:
+
+```bash
+py -3 scripts/tcscope.py doctor
+uv run scripts/tcscope.py ingest <recording>.svdx -o rec.parquet
+```
+
+`doctor` should find `TC3ScopeExportTool.exe`; note the folder it reports below the TwinCAT
+install root. `ingest` runs it as `TC3ScopeExportTool.exe svd=<file> target=<file.csv>
+silent` — an argument form taken from documentation and **never executed**.
+
+- **PASS:** a `.csv` appears next to the `.svdx`, and `rec.parquet` is written.
+- **If it fails:** get the tool to export by hand and write down the exact command line that
+  worked. The corrected invocation is the deliverable.
+
+### 4.6 The round trip
+
+On the CSV from 4.5:
+
+```bash
+uv run scripts/tcscope.py manifest <recording>.csv
+uv run scripts/tcscope.py stats <recording>.csv
+uv run scripts/tcscope.py events <recording>.csv
+uv run scripts/tcscope.py correlate <recording>.csv --channels "<axis actual>,<axis set>"
+```
+
+- **PASS:** the columns carry the five names `newscope` chose, not `Signal`; units, sample
+  rate and duration match what Scope View showed.
+- `correlate` has never run on real data. Report what it says about actual against set
+  position — including a refusal, if the two land in different acquisition groups.
+
+### 4.7 The compiled symbol table (`.tmc`)
+
+A `checkscope --tmc` option would check every PLC symbol and its type against the compiled
+program before anyone walks to the machine. The last session did that by hand with `grep`,
+and it would have caught every defect except the port one. It has not been built, because
+nobody here has seen a `.tmc`.
+
+Find the PLC project's `.tmc`, written by the build — look beside the `.plcproj` first, and
+say where it was. **Do not copy it off the machine**: it is the program's whole symbol table.
+Report instead, names replaced:
+
+- the element path from the root down to one symbol's entry;
+- that entry's child elements for one `BOOL`, one `INT` or enum, one `LREAL`, and one member
+  of a function-block instance;
+- how an enum's underlying type is recorded, if it is.
+
+### 4.8 Does Scope keep a `<Comment>`?
+
+`newscope` knows when it guessed a type, but the guess is invisible once the file is written —
+a guessed `REAL64` and a declared one are byte-identical. The candidate place to record it is
+the empty `<Comment>` in each `AdsAcquisition`.
+
+In a copy of `Test.tcscopex`, put `tcscope:type=default` into one `AdsAcquisition`'s
+`<Comment>`. Open it in Scope View, change something trivial, save. Does the text survive in
+the saved file? Is it shown anywhere in the UI? Does the file still load?
+
+### 4.9 A parked axis — if there is time
+
+`events` reports `clipping` on an axis parked at the end of its travel, because a rest
+position and a rail look the same in the data (§8). If there is time, record about 30 s with
+an axis parked and — if the machine has one — a channel that genuinely saturates. Keep the
+CSVs on the machine. Report `stats` and `events` for those channels, names replaced.
+
+### 4.10 VS Code and Copilot — needs no TwinCAT
+
+If VS Code with GitHub Copilot is available: install the skill the way `README.md` says
+(`.github/skills/twincat-scope`), open a folder containing a `.tcscopex` or `.svdx`, and ask
+something like "why did the axis fault".
+
+- **PASS:** Copilot uses the skill without being told its name.
+- **If not:** note the VS Code and Copilot versions and any organisation policy. That is a
+  packaging problem, not a code one — do not patch the skill for it.
+
+### What to bring back from Part A
+
+Anything that failed, plus:
+
+1. Scope View's error text for any channel that did not record, and the element diff from 4.2.
+2. A description of one chart's layout, and the `AxisGroup` XML if 4.1 (c) failed.
+3. The three dark-theme answers from 4.3.
+4. The `TriggerModule` XML, if 4.4 failed.
+5. The working export-tool command line.
+6. The `.tmc` structure from 4.7.
+7. Whether `<Comment>` survived, from 4.8.
+
+Every open task waiting on a machine closes from those seven.
+
+# Part B — against the 19 real exports
+
+Only if the exports from the earlier review (`evals/field-review-af54888.md`) are on this
+machine.
+
+## 5. THE critical check
 
 **The CSV parser changed.** It now reads in 20 000-row chunks and lets numpy convert the
 strings, instead of building a Python list of lists of floats for the whole file. This halved
@@ -97,9 +301,9 @@ If any row differs, stop and report it before looking at anything else. A silent
 misalignment is the worst failure this tool can have, and it is the one this change could
 plausibly cause.
 
-## 5. What changed, and what to check
+## 6. What changed, and what to check
 
-### 5.1 `events` — rewritten (this was the critical defect)
+### 6.1 `events` — rewritten (this was the critical defect)
 
 The old detector was unusable on real motion data: it fired 170–413 events per channel, and
 because it truncated **chronologically**, the default 100 events came back from the first
@@ -169,7 +373,7 @@ single worst thing in it.
   fault you know about has gone missing. This is the change most likely to cause a false
   negative. If something is missed, try `--sigma 3 --min-step 0.001` and report the difference.
 
-### 5.2 `window` — was double-counting
+### 6.2 `window` — was double-counting
 
 It indexed raw file rows rather than distinct time instants, so on a repeat-padded group it
 printed every sample twice under one timestamp, and its `--max-rows` cap was evaluated against
@@ -179,12 +383,12 @@ verb.
 Check on a padded group: no two consecutive rows share a timestamp, and row count matches the
 group's `n_samples` over the same span.
 
-### 5.3 `stats` — one new field
+### 6.3 `stats` — one new field
 
 `n_samples` per channel, so a standard deviation can be audited against how many points it was
 computed over. `stats` was already de-duplicating correctly; this only makes it visible.
 
-### 5.4 `checkscope` — acquisition load is now graded
+### 6.4 `checkscope` — acquisition load is now graded
 
 The old warning threshold (100 000 samples/s, later 20 000) sat above every real project anyone
 had built — the densest of the 7 measured projects is 16 250 — so it never fired and graded
@@ -201,7 +405,7 @@ Output gains `load_band` and `load_bands_samples_per_second`. Re-run `checkscope
 projects and confirm the bands land sensibly — the expectation is the two densest fall in
 `high` and the rest below.
 
-### 5.5 Scale — now measured
+### 6.5 Scale — now measured
 
 `tests/make_scale_fixture.py` generates a large export (never committed);
 `tests/bench_scale.py` reports wall clock and peak RSS per verb. Measured on a small Linux
@@ -225,7 +429,7 @@ python3 tests/make_scale_fixture.py --rows 500000 -o scale.csv
 python3 tests/bench_scale.py scale.csv
 ```
 
-## 6. Acceptance criteria
+## 7. Acceptance criteria
 
 These came from the previous review. Eight are met in-repo; **one can only be checked by you**,
 and one was implemented differently — read that one carefully.
@@ -250,7 +454,7 @@ occupy**. On your real files, where events are spread throughout, the original w
 hold in practice — please check whether it does, since that is the case the criterion was
 written for.
 
-## 7. Known limitations — already understood, not bugs to re-report
+## 8. Known limitations — already understood, not bugs to re-report
 
 - **`clipping` fires on an axis parked at the end of its travel.** A rest position and a rail
   are identical in the data. Requiring the signal to leave the rail and return was tried and
@@ -263,7 +467,7 @@ written for.
   breaks on a wider separator set than a byte-level split — a naive stream desyncs columns
   silently, which is precisely the failure class this tool exists to avoid.
 
-## 8. Verified correct — do NOT "fix" these
+## 9. Verified correct — do NOT "fix" these
 
 Both were checked against the raw bytes of the source files and are now regression-tested.
 
@@ -273,26 +477,21 @@ Both were checked against the raw bytes of the source files and are now regressi
 - **`unit: "(None)"`.** The literal string TwinCAT writes in the Unit metadata row. Do not
   coerce it to `null`. Round-tripping what the source says beats guessing what it meant.
 
-## 9. Not yet tested by anyone
+## 10. Not yet tested by anyone
 
 State this in your report if you do not get to it — the skill's own rules require saying what
 was not checked rather than implying coverage.
 
-Revised after the session in `evals/field-review-1fa0e9b.md`, which closed several of these.
+First, every item of Part A you did not reach — name them. Beyond Part A:
 
-- `ingest` to Parquet against a real large export (only the generated fixture was used), and
-  `correlate` — neither was exercised in that session.
-- Whether a generated `.tcscopex` **records**. One has been opened in Scope View: it opened
-  cleanly and recorded nothing, and the port, type, name and window fixes that came out of
-  that have not themselves been back to a machine.
-- Whether Scope themes a chart when `ForeColor`/`GridColor`/`DisplayColor` are omitted, which
-  is the dark-mode question.
+- `ingest` to Parquet against a real *large* export; only the generated scale fixture has
+  been used.
 - Label readability on `plot`. The verb has now run on real exports and made a 40k-sample
   overview readable in one image; nobody reported on full symbol paths at fontsize 8.
 - `doctor` on a machine *without* `TC3ScopeExportTool.exe`. On the one machine it has run on
   it found the tool and reported the path correctly.
 
-## 10. Rules for your report — please read, this one bit us
+## 11. Rules for your report — please read, this one bit us
 
 **This repository is public, and it was recently scrubbed of customer machine data.** It had
 been carrying a real AMS net ID as the copy-paste example in `SKILL.md` and three other files,
@@ -312,11 +511,18 @@ So, when reporting:
   never were.
 - Describe channels by role rather than name: "a velocity channel", "the position channel on
   the slow group".
+- **Project files, the `.tmc` and every recording stay on the machine.** Report element names
+  and values such as types, sizes, ports and flags; replace symbol paths, channel names and
+  net IDs.
+- **Describe rather than screenshot.** A screenshot carries every channel name in its legend
+  and axis labels. Showing one to the maintainer privately is fine; it never goes in the repo.
+- **Tool paths below the TwinCAT install root only.** A path under a user profile names a
+  person.
 
 Report as a file in the repo (`evals/field-review-<sha>.md`, following the existing one's
 shape) or as a message — either is fine, but keep it anonymised in both.
 
-## 11. Safety rules this skill operates under
+## 12. Safety rules this skill operates under
 
 These are not negotiable and apply to you while testing:
 
