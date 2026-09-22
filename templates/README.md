@@ -43,14 +43,22 @@ requesting twenty channels does not produce twenty traces sharing one axis. See
 - `UseTaskSampleTime` is `false` with `BaseSampleTime` set explicitly, so the templates
   demonstrate the units. **`BaseSampleTime` is in 100 ns ticks** — 10000 is 1 ms. For real
   work, prefer `UseTaskSampleTime` = `true`; see `references/recording-load.md`.
-- `DataType` is `REAL64` with `VariableSize` 8 — Scope's own type names, not IEC ones (`LREAL`
-  is refused by `checkscope`). Change both together or the values are garbage.
+- `DataType` is `REAL64` with `VariableSize` 8 — Scope's own type names, not IEC ones. Scope
+  reads `LREAL` as `VOID` and refuses the channel, and `checkscope` refuses both. Change type
+  and size together or the values are garbage.
+- `TargetPort` is 851 in both, and that is right for their symbols: `MAIN.fbAxis.NcToPlc.…`
+  is the PLC's own copy of the axis data. Only symbols under `Axes.` live in the NC runtime on
+  501, and `newscope` routes those itself.
+- Every axis carries an `AxisStyle` for the dark theme, where real projects keep one.
+  `newscope --theme` restyles the whole file; the template's own colours do not survive.
 
 ## Verification status
 
 These were written from a schema derived by reading real Beckhoff sample projects. **Neither
-template has been opened in TwinCAT as shipped.** A file `newscope` generated from
-`axis-diagnosis.tcscopex` has: it opened cleanly and recorded nothing, and the port, type and
-name fixes that came out of it have not been back to a machine
-(`evals/field-review-1fa0e9b.md`). If you load one, whether it works or fails, that is worth
-reporting back.
+template has been opened in TwinCAT as shipped.** Files `newscope` generated from
+`axis-diagnosis.tcscopex` have: the first opened and recorded nothing
+(`evals/field-review-1fa0e9b.md`); a later one, with the type, name and port fixes, recorded
+five NC axis channels (`evals/field-review-1fa0e9b-rounds.md`). The `AxisStyle` elements and
+theme colours were added after that and have not been opened. If you load one, whether it
+works or fails, that is worth reporting back — and open it by adding it to an existing
+Measurement project, not by double-clicking it.

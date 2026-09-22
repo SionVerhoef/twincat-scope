@@ -5,9 +5,11 @@ data — which is what makes it templatable, diffable and safe to commit. Record
 `.svdx` (and `.svd` before TwinCAT 3.3.3140).
 
 **Verification status:** this schema was derived by reading real Beckhoff sample projects. A
-file generated from it opened cleanly in Scope View once and then recorded nothing, for
-reasons since fixed (`evals/field-review-1fa0e9b.md`); nothing generated since has been back
-to a machine. Treat it as accurate about structure and unproven about recording.
+file generated from it first opened and recorded nothing (`evals/field-review-1fa0e9b.md`);
+with the type, name and port fixes described below, one **recorded** five NC axis channels
+(`evals/field-review-1fa0e9b-rounds.md`). That covers `REAL64` NC channels only — bit,
+integer and PLC-side channels, triggers and the `AxisStyle` colours have not been seen
+working.
 
 ## Byte conventions
 
@@ -27,11 +29,15 @@ regardless of `core.autocrlf`. `scripts/tcscope.py` writes both conventions.
 196 in an older sibling. Newer TwinCAT writes newer projects.
 
 The templates here declare `1.0.0.0`, the most conservative value observed, on the assumption
-that a newer Scope View upgrades an older project rather than rejecting it. **One data point
-so far:** a file generated from `axis-diagnosis.tcscopex`, which keeps its `1.0.0.0`, opened
-cleanly in one real Scope View installation (`evals/field-review-1fa0e9b.md`; that install's
-build was not recorded). If a template is refused on yours, raising `Version` to match a
-project your installation writes is the first thing to try.
+that a newer Scope View upgrades an older project rather than rejecting it. **So far:** files
+generated from `axis-diagnosis.tcscopex`, which keep its `1.0.0.0`, opened cleanly in TE130x
+Scope View in both field sessions (builds not recorded), and one recorded. If a template is
+refused on yours, raising `Version` to match a project your installation writes is the first
+thing to try.
+
+**Open a generated file by adding it to an existing Measurement project.** Double-clicked on
+its own, one started a new-scope-project wizard and hung; added to a project, it opened at
+once.
 
 ## Structure
 
@@ -46,6 +52,8 @@ ScopeProject                     AssemblyName="TwinCAT.Measurement.Scope.API.Mod
     │       ├── AxisGroup    ONE PER STACKED BAND     Suffix .svagroup
     │       │   └── SubMember
     │       │       ├── TimeAxis / ValueAxis              Suffix .svaxis
+    │       │       │   └── SubMember
+    │       │       │       └── AxisStyle    axis text and grid colours
     │       │       ├── MarkerContainer                   Suffix .svmc
     │       │       └── Channel  ONE PER PLOTTED SIGNAL   Suffix .svchannel
     │       │           └── SubMember
@@ -112,13 +120,33 @@ So group by what the axis has to do:
 `ChartStyle/StackedAxes` says whether a chart's bands are drawn one above another. `newscope`
 sets it `true` whenever it writes more than one band and `false` for a single-band chart,
 which has nothing to stack. Channels sharing a band are also given different `DisplayColor`
-values — a signed 32-bit ARGB integer — because two traces of the same colour on one axis is
-the same failure by another route.
+values, because two traces of the same colour on one axis is the same failure by another
+route.
 
-**Untested in TwinCAT, like the rest of this schema.** The element hierarchy was read from
-real projects; that multiple `YTChart` siblings arrive as multiple tabs, and that
-`StackedAxes` is what stacks the bands, is the reading of that structure and not something
-this repo has watched Scope View do. Say so if you report the layout to someone.
+**Seen in Scope View once:** a generated file's one-tab, four-band layout arrived exactly as
+written — `Position` {ActPos, SetPos}, `Following error`, `Velocity`, `Torque / current`
+(`evals/field-review-1fa0e9b-rounds.md`). Several `YTChart` siblings arriving as several tabs
+is still the reading of the structure, not an observation.
+
+## Colours
+
+Every colour is absolute: a signed 32-bit ARGB integer (`-921103` is `0xFFF1F1F1`) or a .NET
+colour name (`Black`). No value that follows the IDE theme has been seen, so a file is styled
+for one background. Where each one lives:
+
+| Element | Its `DisplayColor` is |
+|---|---|
+| `YTChart`, `AxisGroup`, `OverviewChart` | the panel behind the traces |
+| `TimeAxis` / `ValueAxis` → `SubMember/AxisStyle` | axis text; `GridColor` is the grid. `ColorMode` is `CustomColor` in every real file seen |
+| `Channel` and its `ChannelStyle` | the trace. Which of the two Scope draws with is not established, so `newscope` writes both |
+
+Real projects carry an `AxisStyle` on **every** axis, time and value alike; files from older
+versions of `newscope` carry none, and `checkscope` says so. `newscope --theme dark` (default)
+writes a `#252526` background with `#F1F1F1` axis text — the values a real dark-styled project
+uses — and `--theme light` a near-white one. The trace palette is stepped per background and
+checked for contrast against it and for colour-blind separation between neighbours. A dark
+chart still reads in a light IDE; a light one in a dark IDE was reported from the field as
+glaring. **Not yet opened in Scope View.**
 
 ## `AdsAcquisition` fields that matter
 
@@ -126,11 +154,11 @@ this repo has watched Scope View do. Say so if you report the layout to someone.
 |---|---|
 | `SymbolName` | The PLC symbol path, e.g. `MAIN.fbAxis.NcToPlc.ActPos`. Used when `SymbolBased` is `true`. |
 | `SymbolBased` | `true` = resolve by name (portable). `false` = use `IndexGroup`/`IndexOffset`, which are addresses and break when the program is rebuilt. Prefer `true`. |
-| `IndexGroup` / `IndexOffset` | Direct addresses. Leave `0` when symbol-based. **Never copy these between machines.** |
+| `IndexGroup` / `IndexOffset` | Direct addresses. Leave `0` when symbol-based. NC axis channels recorded that way, although real files carry non-zero values on their NC acquisitions — Scope does not need them as inputs. **Never copy these between machines.** |
 | `TargetPort` | `851` for the first PLC runtime. `852`, `853`… for further ones. **NC axis symbols (`Axes.…`) are served by the NC runtime on `501`.** One port written across every channel resolves the PLC symbols and fails every axis symbol with "Symbolname could not be found" — a message that sends you looking at the name, which is not the problem. |
 | `AmsNetId` | The target. A placeholder here is the single most common reason a scope records nothing. |
-| `DataType` | Scope's own vocabulary, **not IEC's**: `BIT` for a `BOOL`, `INT16` for an `INT`, `REAL64` for an `LREAL`. Those three are the ones seen in real project files; the others follow the same naming. Writing `LREAL` here is accepted by nothing and rejected by nothing — the recording is simply of the wrong bytes. |
-| `VariableSize` | Bytes, and it must match `DataType`: 1 for `BIT`, 2 for `INT16`, 8 for `REAL64`. Scope reads that many bytes from the target whatever the variable actually is, so 8 bytes off a `BOOL` is a recording of its neighbours. |
+| `DataType` | Scope's own vocabulary, **not IEC's**: `BIT` for a `BOOL`, `INT16` for an `INT`, `REAL64` for an `LREAL`. Seen in real project files: `BIT`, `INT8`, `INT16`, `UINT32`, `REAL64`; the others follow the same naming. Scope reads an IEC name such as `LREAL` as `VOID`, **writes `VOID` back when the project is saved**, and refuses the channel: "The datatype is not supported: 'VOID'". A `VOID` in a file is that failure's fingerprint. |
+| `VariableSize` | Bytes, and it must match `DataType`: 1 for `BIT`/`INT8`, 2 for `INT16`, 4 for `UINT32`, 8 for `REAL64`. Scope reads that many bytes from the target whatever the variable actually is, so 8 bytes off a `BOOL` is a recording of its neighbours. |
 | `Name` | The label in the Scope tree **and the column header when the recording is exported to CSV**. `minimal-single-channel.tcscopex` ships the placeholder `Signal`; left alone, fifty-three channels exported as fifty-three columns called `Signal`, which is what happened on a machine. `newscope` derives a short unique name per channel and keeps the full path in `Title`. |
 | `BaseSampleTime` | **100 ns ticks.** 10000 = 1 ms, 1000 = 100 µs. Only honoured when `UseTaskSampleTime` is `false`. |
 | `UseTaskSampleTime` | `true` samples at the owning task's rate — usually what you want. See `recording-load.md`. |
@@ -158,8 +186,15 @@ instead of part of a symbol name. No TwinCAT symbol path seen here contains a co
 nothing in the format promises that, and a symbol that does contain one cannot be written in
 this grammar.
 
-A channel given no type is written as `REAL64` and **listed in the output as defaulted**,
-because a default is a guess and guessing wrong on a `BOOL` records nothing usable. `--port`
+Under `Axes.`, the NC runtime's own field names say their type, because Beckhoff fixes them:
+`ActPos`, `SetPos`, `PosDiff`, `ActVelo`, `SetVelo`, `ActAcc`, `SetAcc`, `ActTorque`, the
+`…Modulo` positions and `Position` are `REAL64`; `ErrState`, `ErrorCode`, `ErrorID`,
+`AxisState` and `CoupleState` are `UINT32`. Every real file seen agrees, and `newscope`
+writes them that way with `type_source: nc-field`.
+
+Any other channel given no type is written as `REAL64` and **listed in the output as
+defaulted**, because a default is a guess and guessing wrong on a `BOOL` records nothing
+usable. `--port`
 sets the PLC port for every channel that does not name its own; anything under `Axes.` goes
 to the NC runtime on 501 unless a channel overrides it.
 
@@ -195,17 +230,19 @@ Neither verb needs third-party packages, so this works on a machine with only Py
 Reports a **problem** (exit 1) for anything that makes the project invalid, silently empty or
 unable to record: duplicate GUIDs, an unfilled `PLACEHOLDER` symbol, a dangling
 `AcquisitionGUID`, no acquisitions at all, an NC symbol on a PLC port, a `TargetPort` that is
-not an ADS port, an IEC type name where Scope's own vocabulary belongs, a `VariableSize` that
+not an ADS port, an IEC type name where Scope's own vocabulary belongs, a `VOID` type (Scope
+has opened this file and could not read the type it was given), a `VariableSize` that
 contradicts its `DataType`, and acquisitions that share a name or carry none — those export as
 columns nobody can tell apart.
 
 Reports a **warning** for things that are legal but probably not what you meant: a placeholder
 `AmsNetId`, a PLC symbol on a port below 851 where no runtime answers, a channel still
-carrying the template's placeholder name, no display channel wired to anything, and a total
-sample rate high enough to perturb the target.
+carrying the template's placeholder name, no display channel wired to anything, a total
+sample rate high enough to perturb the target, and axes with no `AxisStyle`.
 
 It also prints the layout — every chart, its bands and their channels — and warns when a chart
 stacks more than six bands or a band overlays more than eight channels. Both are readability,
-not validity: the file is fine, the picture is not.
+not validity: the file is fine, the picture is not. `theme` says which background the charts
+are styled for: `dark`, `light`, `mixed`, or `null` when they use named colours.
 
 Run it every time before handing a file to a human.

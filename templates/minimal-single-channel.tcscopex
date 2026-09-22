@@ -95,12 +95,34 @@
               <ScalingMode>MinMax</ScalingMode>
               <Inverted>false</Inverted>
               <Logarithmic>false</Logarithmic>
-              <SubMember />
+              <SubMember>
+                <AxisStyle AssemblyName="TwinCAT.Measurement.Scope.API.Model">
+                  <ChannelRelatedGuid>00000000-0000-0000-0000-000000000000</ChannelRelatedGuid>
+                  <ColorMode>CustomColor</ColorMode>
+                  <Comment />
+                  <DisplayColor>-921103</DisplayColor>
+                  <Grid>true</Grid>
+                  <GridColor>-12698046</GridColor>
+                  <GridDivisions>10</GridDivisions>
+                  <GridLineWidth>1</GridLineWidth>
+                  <Guid>f0000000-0000-0000-0000-000000000001</Guid>
+                  <LineWidth>1</LineWidth>
+                  <Name>Axis Style</Name>
+                  <Precision>6</Precision>
+                  <ShowName>False</ShowName>
+                  <SortPriority>100</SortPriority>
+                  <SubGrid>false</SubGrid>
+                  <SubGridDivisions>5</SubGridDivisions>
+                  <Title>AxisStyle</Title>
+                  <UseScientificNotation>true</UseScientificNotation>
+                  <Visible>true</Visible>
+                </AxisStyle>
+              </SubMember>
               <Guid>33333333-3333-3333-3333-333333333333</Guid>
               <Title>Time Axis</Title>
               <Name>Time Axis</Name>
               <Comment />
-              <DisplayColor>Black</DisplayColor>
+              <DisplayColor>-921103</DisplayColor>
               <SortPriority>100</SortPriority>
               <IsFileBased>false</IsFileBased>
               <Suffix>.svaxis</Suffix>
@@ -112,11 +134,33 @@
               <ScalingMode>AutoGrowOnly</ScalingMode>
               <Inverted>false</Inverted>
               <Logarithmic>false</Logarithmic>
-              <SubMember />
+              <SubMember>
+                <AxisStyle AssemblyName="TwinCAT.Measurement.Scope.API.Model">
+                  <ChannelRelatedGuid>00000000-0000-0000-0000-000000000000</ChannelRelatedGuid>
+                  <ColorMode>CustomColor</ColorMode>
+                  <Comment />
+                  <DisplayColor>-921103</DisplayColor>
+                  <Grid>true</Grid>
+                  <GridColor>-12698046</GridColor>
+                  <GridDivisions>10</GridDivisions>
+                  <GridLineWidth>1</GridLineWidth>
+                  <Guid>f0000000-0000-0000-0000-000000000002</Guid>
+                  <LineWidth>1</LineWidth>
+                  <Name>Axis Style</Name>
+                  <Precision>6</Precision>
+                  <ShowName>False</ShowName>
+                  <SortPriority>100</SortPriority>
+                  <SubGrid>false</SubGrid>
+                  <SubGridDivisions>5</SubGridDivisions>
+                  <Title>AxisStyle</Title>
+                  <UseScientificNotation>true</UseScientificNotation>
+                  <Visible>true</Visible>
+                </AxisStyle>
+              </SubMember>
               <Guid>44444444-4444-4444-4444-444444444444</Guid>
               <Title>Value Axis</Title>
               <Name>Value Axis</Name>
-              <DisplayColor>Black</DisplayColor>
+              <DisplayColor>-921103</DisplayColor>
               <SortPriority>100</SortPriority>
               <IsFileBased>false</IsFileBased>
               <Suffix>.svaxis</Suffix>
@@ -183,7 +227,7 @@
                   <Guid>77777777-7777-7777-7777-777777777777</Guid>
                   <Title>ChannelStyle</Title>
                   <Name>Channel Style</Name>
-                  <DisplayColor>Black</DisplayColor>
+                  <DisplayColor>-13006875</DisplayColor>
                   <SortPriority>100</SortPriority>
                   <IsFileBased>false</IsFileBased>
                   <Suffix>.svstyle</Suffix>
@@ -193,7 +237,7 @@
               <Guid>88888888-8888-8888-8888-888888888888</Guid>
               <Title>Channel</Title>
               <Name>Signal</Name>
-              <DisplayColor>-16744448</DisplayColor>
+              <DisplayColor>-13006875</DisplayColor>
               <SortPriority>10</SortPriority>
               <IsFileBased>false</IsFileBased>
               <Suffix>.svchannel</Suffix>
@@ -203,7 +247,7 @@
           <Guid>99999999-9999-9999-9999-999999999999</Guid>
           <Title>AxisGroup</Title>
           <Name>Axis Group</Name>
-          <DisplayColor>-1118482</DisplayColor>
+          <DisplayColor>-14342874</DisplayColor>
           <SortPriority>10</SortPriority>
           <IsFileBased>false</IsFileBased>
           <Suffix>.svagroup</Suffix>
@@ -214,7 +258,7 @@
           <Guid>aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa</Guid>
           <Title>OverviewChart</Title>
           <Name>Overview Chart</Name>
-          <DisplayColor>-1118482</DisplayColor>
+          <DisplayColor>-14342874</DisplayColor>
           <SortPriority>100</SortPriority>
           <IsFileBased>false</IsFileBased>
           <Suffix>.svochart</Suffix>
@@ -244,7 +288,7 @@
       <Guid>cccccccc-cccc-cccc-cccc-cccccccccccc</Guid>
       <Title>YTChart</Title>
       <Name>YT Chart</Name>
-      <DisplayColor>-1973016</DisplayColor>
+      <DisplayColor>-14342874</DisplayColor>
       <SortPriority>10</SortPriority>
       <IsFileBased>false</IsFileBased>
       <Suffix>.svchart</Suffix>
