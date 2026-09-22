@@ -371,12 +371,34 @@
               <ScalingMode>MinMax</ScalingMode>
               <Inverted>false</Inverted>
               <Logarithmic>false</Logarithmic>
-              <SubMember />
+              <SubMember>
+                <AxisStyle AssemblyName="TwinCAT.Measurement.Scope.API.Model">
+                  <ChannelRelatedGuid>00000000-0000-0000-0000-000000000000</ChannelRelatedGuid>
+                  <ColorMode>CustomColor</ColorMode>
+                  <Comment />
+                  <DisplayColor>-921103</DisplayColor>
+                  <Grid>true</Grid>
+                  <GridColor>-12698046</GridColor>
+                  <GridDivisions>10</GridDivisions>
+                  <GridLineWidth>1</GridLineWidth>
+                  <Guid>514e228e-e1b1-4820-86f0-baf73a3772c7</Guid>
+                  <LineWidth>1</LineWidth>
+                  <Name>Axis Style</Name>
+                  <Precision>6</Precision>
+                  <ShowName>False</ShowName>
+                  <SortPriority>100</SortPriority>
+                  <SubGrid>false</SubGrid>
+                  <SubGridDivisions>5</SubGridDivisions>
+                  <Title>AxisStyle</Title>
+                  <UseScientificNotation>true</UseScientificNotation>
+                  <Visible>true</Visible>
+                </AxisStyle>
+              </SubMember>
               <Guid>ad3f98e0-5f9c-4878-be7c-4d1eb72bba9b</Guid>
               <Title>Time Axis</Title>
               <Name>Time Axis</Name>
               <Comment />
-              <DisplayColor>Black</DisplayColor>
+              <DisplayColor>-921103</DisplayColor>
               <SortPriority>100</SortPriority>
               <IsFileBased>false</IsFileBased>
               <Suffix>.svaxis</Suffix>
@@ -388,11 +410,33 @@
               <ScalingMode>AutoGrowOnly</ScalingMode>
               <Inverted>false</Inverted>
               <Logarithmic>false</Logarithmic>
-              <SubMember />
+              <SubMember>
+                <AxisStyle AssemblyName="TwinCAT.Measurement.Scope.API.Model">
+                  <ChannelRelatedGuid>00000000-0000-0000-0000-000000000000</ChannelRelatedGuid>
+                  <ColorMode>CustomColor</ColorMode>
+                  <Comment />
+                  <DisplayColor>-921103</DisplayColor>
+                  <Grid>true</Grid>
+                  <GridColor>-12698046</GridColor>
+                  <GridDivisions>10</GridDivisions>
+                  <GridLineWidth>1</GridLineWidth>
+                  <Guid>75898997-e5a9-4b1c-b5a9-d8f2271289d9</Guid>
+                  <LineWidth>1</LineWidth>
+                  <Name>Axis Style</Name>
+                  <Precision>6</Precision>
+                  <ShowName>False</ShowName>
+                  <SortPriority>100</SortPriority>
+                  <SubGrid>false</SubGrid>
+                  <SubGridDivisions>5</SubGridDivisions>
+                  <Title>AxisStyle</Title>
+                  <UseScientificNotation>true</UseScientificNotation>
+                  <Visible>true</Visible>
+                </AxisStyle>
+              </SubMember>
               <Guid>003e6d5c-a474-4307-b21e-0182bfe58c39</Guid>
               <Title>Value Axis</Title>
               <Name>Value Axis</Name>
-              <DisplayColor>Black</DisplayColor>
+              <DisplayColor>-921103</DisplayColor>
               <SortPriority>100</SortPriority>
               <IsFileBased>false</IsFileBased>
               <Suffix>.svaxis</Suffix>
@@ -459,7 +503,7 @@
                   <Guid>52f73b48-c2b6-4390-9cf7-9b7fb6892d71</Guid>
                   <Title>ChannelStyle</Title>
                   <Name>Channel Style</Name>
-                  <DisplayColor>Black</DisplayColor>
+                  <DisplayColor>-13006875</DisplayColor>
                   <SortPriority>100</SortPriority>
                   <IsFileBased>false</IsFileBased>
                   <Suffix>.svstyle</Suffix>
@@ -469,7 +513,7 @@
               <Guid>86fbdb88-9494-46e0-949b-b010b1316ced</Guid>
               <Title>MAIN.fbAxis.NcToPlc.ActPos</Title>
               <Name>ActPos</Name>
-              <DisplayColor>-14714956</DisplayColor>
+              <DisplayColor>-13006875</DisplayColor>
               <SortPriority>10</SortPriority>
               <IsFileBased>false</IsFileBased>
               <Suffix>.svchannel</Suffix>
@@ -525,7 +569,7 @@
                   <Guid>51af293b-9bf3-43a9-8884-39d5805c6234</Guid>
                   <Title>ChannelStyle</Title>
                   <Name>Channel Style</Name>
-                  <DisplayColor>Black</DisplayColor>
+                  <DisplayColor>-16743680</DisplayColor>
                   <SortPriority>100</SortPriority>
                   <IsFileBased>false</IsFileBased>
                   <Suffix>.svstyle</Suffix>
@@ -535,7 +579,7 @@
               <Guid>10be63cd-be1c-4951-b7f2-a1df7fab0688</Guid>
               <Title>MAIN.fbAxis.NcToPlc.SetPos</Title>
               <Name>SetPos</Name>
-              <DisplayColor>-2742488</DisplayColor>
+              <DisplayColor>-16743680</DisplayColor>
               <SortPriority>10</SortPriority>
               <IsFileBased>false</IsFileBased>
               <Suffix>.svchannel</Suffix>
@@ -545,7 +589,7 @@
           <Guid>3ced293b-4153-4096-8aa7-39f08e28cf6a</Guid>
           <Title>Position</Title>
           <Name>Position</Name>
-          <DisplayColor>-1118482</DisplayColor>
+          <DisplayColor>-14342874</DisplayColor>
           <SortPriority>10</SortPriority>
           <IsFileBased>false</IsFileBased>
           <Suffix>.svagroup</Suffix>
@@ -561,12 +605,34 @@
               <ScalingMode>MinMax</ScalingMode>
               <Inverted>false</Inverted>
               <Logarithmic>false</Logarithmic>
-              <SubMember />
+              <SubMember>
+                <AxisStyle AssemblyName="TwinCAT.Measurement.Scope.API.Model">
+                  <ChannelRelatedGuid>00000000-0000-0000-0000-000000000000</ChannelRelatedGuid>
+                  <ColorMode>CustomColor</ColorMode>
+                  <Comment />
+                  <DisplayColor>-921103</DisplayColor>
+                  <Grid>true</Grid>
+                  <GridColor>-12698046</GridColor>
+                  <GridDivisions>10</GridDivisions>
+                  <GridLineWidth>1</GridLineWidth>
+                  <Guid>22ad2399-ac3b-4999-82ba-0d0fe0bdb209</Guid>
+                  <LineWidth>1</LineWidth>
+                  <Name>Axis Style</Name>
+                  <Precision>6</Precision>
+                  <ShowName>False</ShowName>
+                  <SortPriority>100</SortPriority>
+                  <SubGrid>false</SubGrid>
+                  <SubGridDivisions>5</SubGridDivisions>
+                  <Title>AxisStyle</Title>
+                  <UseScientificNotation>true</UseScientificNotation>
+                  <Visible>true</Visible>
+                </AxisStyle>
+              </SubMember>
               <Guid>34e04cdd-3efb-4d31-9ee0-bb463b2c5b5a</Guid>
               <Title>Time Axis</Title>
               <Name>Time Axis</Name>
               <Comment />
-              <DisplayColor>Black</DisplayColor>
+              <DisplayColor>-921103</DisplayColor>
               <SortPriority>100</SortPriority>
               <IsFileBased>false</IsFileBased>
               <Suffix>.svaxis</Suffix>
@@ -578,11 +644,33 @@
               <ScalingMode>AutoGrowOnly</ScalingMode>
               <Inverted>false</Inverted>
               <Logarithmic>false</Logarithmic>
-              <SubMember />
+              <SubMember>
+                <AxisStyle AssemblyName="TwinCAT.Measurement.Scope.API.Model">
+                  <ChannelRelatedGuid>00000000-0000-0000-0000-000000000000</ChannelRelatedGuid>
+                  <ColorMode>CustomColor</ColorMode>
+                  <Comment />
+                  <DisplayColor>-921103</DisplayColor>
+                  <Grid>true</Grid>
+                  <GridColor>-12698046</GridColor>
+                  <GridDivisions>10</GridDivisions>
+                  <GridLineWidth>1</GridLineWidth>
+                  <Guid>9082315d-757c-418b-8f73-64b2423c6aa0</Guid>
+                  <LineWidth>1</LineWidth>
+                  <Name>Axis Style</Name>
+                  <Precision>6</Precision>
+                  <ShowName>False</ShowName>
+                  <SortPriority>100</SortPriority>
+                  <SubGrid>false</SubGrid>
+                  <SubGridDivisions>5</SubGridDivisions>
+                  <Title>AxisStyle</Title>
+                  <UseScientificNotation>true</UseScientificNotation>
+                  <Visible>true</Visible>
+                </AxisStyle>
+              </SubMember>
               <Guid>c21aad21-b5fe-4e6a-887c-6f069a8078df</Guid>
               <Title>Value Axis</Title>
               <Name>Value Axis</Name>
-              <DisplayColor>Black</DisplayColor>
+              <DisplayColor>-921103</DisplayColor>
               <SortPriority>100</SortPriority>
               <IsFileBased>false</IsFileBased>
               <Suffix>.svaxis</Suffix>
@@ -649,7 +737,7 @@
                   <Guid>f83bc563-fbd7-4e6b-87aa-dd1eb73d85bd</Guid>
                   <Title>ChannelStyle</Title>
                   <Name>Channel Style</Name>
-                  <DisplayColor>Black</DisplayColor>
+                  <DisplayColor>-13006875</DisplayColor>
                   <SortPriority>100</SortPriority>
                   <IsFileBased>false</IsFileBased>
                   <Suffix>.svstyle</Suffix>
@@ -659,7 +747,7 @@
               <Guid>e0e4af17-f431-4fec-96b6-b62446bcdcce</Guid>
               <Title>MAIN.fbAxis.NcToPlc.PosDiff</Title>
               <Name>PosDiff</Name>
-              <DisplayColor>-14714956</DisplayColor>
+              <DisplayColor>-13006875</DisplayColor>
               <SortPriority>10</SortPriority>
               <IsFileBased>false</IsFileBased>
               <Suffix>.svchannel</Suffix>
@@ -669,7 +757,7 @@
           <Guid>cb132483-68de-48e6-b58f-910851cb1b44</Guid>
           <Title>Following error</Title>
           <Name>Following error</Name>
-          <DisplayColor>-1118482</DisplayColor>
+          <DisplayColor>-14342874</DisplayColor>
           <SortPriority>11</SortPriority>
           <IsFileBased>false</IsFileBased>
           <Suffix>.svagroup</Suffix>
@@ -685,12 +773,34 @@
               <ScalingMode>MinMax</ScalingMode>
               <Inverted>false</Inverted>
               <Logarithmic>false</Logarithmic>
-              <SubMember />
+              <SubMember>
+                <AxisStyle AssemblyName="TwinCAT.Measurement.Scope.API.Model">
+                  <ChannelRelatedGuid>00000000-0000-0000-0000-000000000000</ChannelRelatedGuid>
+                  <ColorMode>CustomColor</ColorMode>
+                  <Comment />
+                  <DisplayColor>-921103</DisplayColor>
+                  <Grid>true</Grid>
+                  <GridColor>-12698046</GridColor>
+                  <GridDivisions>10</GridDivisions>
+                  <GridLineWidth>1</GridLineWidth>
+                  <Guid>e42727c9-a71d-44cc-8a02-498dcb293ef1</Guid>
+                  <LineWidth>1</LineWidth>
+                  <Name>Axis Style</Name>
+                  <Precision>6</Precision>
+                  <ShowName>False</ShowName>
+                  <SortPriority>100</SortPriority>
+                  <SubGrid>false</SubGrid>
+                  <SubGridDivisions>5</SubGridDivisions>
+                  <Title>AxisStyle</Title>
+                  <UseScientificNotation>true</UseScientificNotation>
+                  <Visible>true</Visible>
+                </AxisStyle>
+              </SubMember>
               <Guid>e7c636b9-4b49-4804-a827-761bf095c420</Guid>
               <Title>Time Axis</Title>
               <Name>Time Axis</Name>
               <Comment />
-              <DisplayColor>Black</DisplayColor>
+              <DisplayColor>-921103</DisplayColor>
               <SortPriority>100</SortPriority>
               <IsFileBased>false</IsFileBased>
               <Suffix>.svaxis</Suffix>
@@ -702,11 +812,33 @@
               <ScalingMode>AutoGrowOnly</ScalingMode>
               <Inverted>false</Inverted>
               <Logarithmic>false</Logarithmic>
-              <SubMember />
+              <SubMember>
+                <AxisStyle AssemblyName="TwinCAT.Measurement.Scope.API.Model">
+                  <ChannelRelatedGuid>00000000-0000-0000-0000-000000000000</ChannelRelatedGuid>
+                  <ColorMode>CustomColor</ColorMode>
+                  <Comment />
+                  <DisplayColor>-921103</DisplayColor>
+                  <Grid>true</Grid>
+                  <GridColor>-12698046</GridColor>
+                  <GridDivisions>10</GridDivisions>
+                  <GridLineWidth>1</GridLineWidth>
+                  <Guid>e01c1adb-1fc9-48e0-ac36-ed0f9f76698a</Guid>
+                  <LineWidth>1</LineWidth>
+                  <Name>Axis Style</Name>
+                  <Precision>6</Precision>
+                  <ShowName>False</ShowName>
+                  <SortPriority>100</SortPriority>
+                  <SubGrid>false</SubGrid>
+                  <SubGridDivisions>5</SubGridDivisions>
+                  <Title>AxisStyle</Title>
+                  <UseScientificNotation>true</UseScientificNotation>
+                  <Visible>true</Visible>
+                </AxisStyle>
+              </SubMember>
               <Guid>bd135b7e-81dd-49d3-a382-b027261817e0</Guid>
               <Title>Value Axis</Title>
               <Name>Value Axis</Name>
-              <DisplayColor>Black</DisplayColor>
+              <DisplayColor>-921103</DisplayColor>
               <SortPriority>100</SortPriority>
               <IsFileBased>false</IsFileBased>
               <Suffix>.svaxis</Suffix>
@@ -773,7 +905,7 @@
                   <Guid>b7eaf640-cfdf-400f-866b-3fd1e9f6fa73</Guid>
                   <Title>ChannelStyle</Title>
                   <Name>Channel Style</Name>
-                  <DisplayColor>Black</DisplayColor>
+                  <DisplayColor>-13006875</DisplayColor>
                   <SortPriority>100</SortPriority>
                   <IsFileBased>false</IsFileBased>
                   <Suffix>.svstyle</Suffix>
@@ -783,7 +915,7 @@
               <Guid>974e2965-5e35-47e4-b285-68b7410f6484</Guid>
               <Title>MAIN.fbAxis.NcToPlc.ActVelo</Title>
               <Name>ActVelo</Name>
-              <DisplayColor>-14714956</DisplayColor>
+              <DisplayColor>-13006875</DisplayColor>
               <SortPriority>10</SortPriority>
               <IsFileBased>false</IsFileBased>
               <Suffix>.svchannel</Suffix>
@@ -793,7 +925,7 @@
           <Guid>0d23ae06-b30b-4836-9e4f-9f3048bca5dc</Guid>
           <Title>Velocity</Title>
           <Name>Velocity</Name>
-          <DisplayColor>-1118482</DisplayColor>
+          <DisplayColor>-14342874</DisplayColor>
           <SortPriority>12</SortPriority>
           <IsFileBased>false</IsFileBased>
           <Suffix>.svagroup</Suffix>
@@ -809,12 +941,34 @@
               <ScalingMode>MinMax</ScalingMode>
               <Inverted>false</Inverted>
               <Logarithmic>false</Logarithmic>
-              <SubMember />
+              <SubMember>
+                <AxisStyle AssemblyName="TwinCAT.Measurement.Scope.API.Model">
+                  <ChannelRelatedGuid>00000000-0000-0000-0000-000000000000</ChannelRelatedGuid>
+                  <ColorMode>CustomColor</ColorMode>
+                  <Comment />
+                  <DisplayColor>-921103</DisplayColor>
+                  <Grid>true</Grid>
+                  <GridColor>-12698046</GridColor>
+                  <GridDivisions>10</GridDivisions>
+                  <GridLineWidth>1</GridLineWidth>
+                  <Guid>a9c395b4-762b-4dfd-81cf-d783285873a7</Guid>
+                  <LineWidth>1</LineWidth>
+                  <Name>Axis Style</Name>
+                  <Precision>6</Precision>
+                  <ShowName>False</ShowName>
+                  <SortPriority>100</SortPriority>
+                  <SubGrid>false</SubGrid>
+                  <SubGridDivisions>5</SubGridDivisions>
+                  <Title>AxisStyle</Title>
+                  <UseScientificNotation>true</UseScientificNotation>
+                  <Visible>true</Visible>
+                </AxisStyle>
+              </SubMember>
               <Guid>61c1dd0c-ec4b-448d-9bc0-050f3d789b74</Guid>
               <Title>Time Axis</Title>
               <Name>Time Axis</Name>
               <Comment />
-              <DisplayColor>Black</DisplayColor>
+              <DisplayColor>-921103</DisplayColor>
               <SortPriority>100</SortPriority>
               <IsFileBased>false</IsFileBased>
               <Suffix>.svaxis</Suffix>
@@ -826,11 +980,33 @@
               <ScalingMode>AutoGrowOnly</ScalingMode>
               <Inverted>false</Inverted>
               <Logarithmic>false</Logarithmic>
-              <SubMember />
+              <SubMember>
+                <AxisStyle AssemblyName="TwinCAT.Measurement.Scope.API.Model">
+                  <ChannelRelatedGuid>00000000-0000-0000-0000-000000000000</ChannelRelatedGuid>
+                  <ColorMode>CustomColor</ColorMode>
+                  <Comment />
+                  <DisplayColor>-921103</DisplayColor>
+                  <Grid>true</Grid>
+                  <GridColor>-12698046</GridColor>
+                  <GridDivisions>10</GridDivisions>
+                  <GridLineWidth>1</GridLineWidth>
+                  <Guid>c3b83657-7974-47cd-b5cf-28188fc1f2e7</Guid>
+                  <LineWidth>1</LineWidth>
+                  <Name>Axis Style</Name>
+                  <Precision>6</Precision>
+                  <ShowName>False</ShowName>
+                  <SortPriority>100</SortPriority>
+                  <SubGrid>false</SubGrid>
+                  <SubGridDivisions>5</SubGridDivisions>
+                  <Title>AxisStyle</Title>
+                  <UseScientificNotation>true</UseScientificNotation>
+                  <Visible>true</Visible>
+                </AxisStyle>
+              </SubMember>
               <Guid>097e5754-2432-45e0-babb-3901cf2f1bf2</Guid>
               <Title>Value Axis</Title>
               <Name>Value Axis</Name>
-              <DisplayColor>Black</DisplayColor>
+              <DisplayColor>-921103</DisplayColor>
               <SortPriority>100</SortPriority>
               <IsFileBased>false</IsFileBased>
               <Suffix>.svaxis</Suffix>
@@ -897,7 +1073,7 @@
                   <Guid>0a1e3074-115a-4a9a-a17c-3cbc4688b969</Guid>
                   <Title>ChannelStyle</Title>
                   <Name>Channel Style</Name>
-                  <DisplayColor>Black</DisplayColor>
+                  <DisplayColor>-13006875</DisplayColor>
                   <SortPriority>100</SortPriority>
                   <IsFileBased>false</IsFileBased>
                   <Suffix>.svstyle</Suffix>
@@ -907,7 +1083,7 @@
               <Guid>0e9b647e-c70b-458f-9380-fc62facd7377</Guid>
               <Title>MAIN.fbAxis.NcToPlc.ActTorque</Title>
               <Name>ActTorque</Name>
-              <DisplayColor>-14714956</DisplayColor>
+              <DisplayColor>-13006875</DisplayColor>
               <SortPriority>10</SortPriority>
               <IsFileBased>false</IsFileBased>
               <Suffix>.svchannel</Suffix>
@@ -917,7 +1093,7 @@
           <Guid>c8a5716d-d88e-44a7-95fc-62352f8f15a3</Guid>
           <Title>Torque / current</Title>
           <Name>Torque / current</Name>
-          <DisplayColor>-1118482</DisplayColor>
+          <DisplayColor>-14342874</DisplayColor>
           <SortPriority>13</SortPriority>
           <IsFileBased>false</IsFileBased>
           <Suffix>.svagroup</Suffix>
@@ -928,7 +1104,7 @@
           <Guid>3cf1a789-cb02-4d34-bcc9-8abcf9651889</Guid>
           <Title>OverviewChart</Title>
           <Name>Overview Chart</Name>
-          <DisplayColor>-1118482</DisplayColor>
+          <DisplayColor>-14342874</DisplayColor>
           <SortPriority>100</SortPriority>
           <IsFileBased>false</IsFileBased>
           <Suffix>.svochart</Suffix>
@@ -958,7 +1134,7 @@
       <Guid>12d4d87b-dfd6-4a14-b7f2-21f73fe51dcb</Guid>
       <Title>fbAxis</Title>
       <Name>fbAxis</Name>
-      <DisplayColor>-1973016</DisplayColor>
+      <DisplayColor>-14342874</DisplayColor>
       <SortPriority>10</SortPriority>
       <IsFileBased>false</IsFileBased>
       <Suffix>.svchart</Suffix>

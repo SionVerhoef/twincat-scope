@@ -63,8 +63,11 @@ A second session (`evals/field-review-1fa0e9b.md`) then took the other half of t
 one that *builds* recordings — to a running machine. A generated project opened cleanly in
 Scope View, `checkscope` passed it, and it **recorded nothing**: wrong ADS port for the axis
 channels, IEC type names where Scope wants its own, a fixed 8-byte width, and every channel
-still named `Signal`. All four are fixed, and **none of the fixes has been back to a
-machine**. That is Part A.
+still named `Signal`. All four are fixed. A third session
+(`evals/field-review-1fa0e9b-rounds.md`) confirmed the type, name and port fixes: patches to
+the old version **recorded five NC axis channels**. What has not been back is this version's
+own output — it adds an `AxisStyle` to every axis and new colours throughout — nor any bit,
+integer or PLC channel from a generated file. That is Part A.
 
 ## 3. Setting up
 
@@ -106,8 +109,8 @@ the `typical` load band — and is kept that small on purpose.
 
 The last session installed the skill globally (`~/.claude/skills/twincat-scope`) at commit
 `1fa0e9b`. That copy still has every generator defect listed above, and testing it re-finds
-them. Pull it (or re-clone) and check that `git log -1` in it shows the merge of pull request
-#11 or later.
+them — the third session did exactly that. Pull it (or re-clone) and check that
+`py -3 scripts/tcscope.py newscope --help` lists `--theme`.
 
 ### 4.1 Does a generated file record? — the one that matters
 
@@ -124,11 +127,15 @@ py -3 scripts/tcscope.py checkscope Test.tcscopex
 
 What `newscope` should report: the two axis channels on port 501 and the three PLC ones on
 851; types `REAL64`, `REAL64`, `BIT`, `INT16`, `REAL64` with sizes 8, 8, 1, 2, 8; five
-different names, none of them `Signal`. The axis channels have no declared type, so they are
-listed under `types_defaulted` — expected. `checkscope` should say `ok: true` with one
-warning, about a fixed window and no trigger.
+different names, none of them `Signal`. If the axis symbols are `Axes.<axis>.<field>`, the
+two axis channels are typed from the NC table (`type_source: nc-field`) and nothing is listed
+under `types_defaulted`; a PLC-side copy such as `MAIN.fbAxis.NcToPlc.ActPos` is listed there
+instead — expected. `checkscope` should say `ok: true` with one warning, about a fixed window
+and no trigger.
 
-Open `Test.tcscopex` in Scope View and have someone record for a few seconds.
+Open `Test.tcscopex` by **adding it to an existing TwinCAT Measurement project** — the last
+session found that double-clicking one starts a new-project wizard that hangs — and have
+someone record for a few seconds.
 
 - **PASS:** it opens, and all five channels plot real, moving data.
 - **If any channel does not:** copy Scope View's exact error text, then do 4.2 — it becomes
@@ -157,22 +164,28 @@ channel against an axis channel, a `BOOL` against a `BOOL` — and list **every 
 whose value differs**, and every element present in one and not the other. Keep element
 names and values such as types, sizes, ports and flags; replace names and addresses (§11).
 
-### 4.3 Dark theme — which colours does Scope take from the file?
+### 4.3 Dark theme — do the new colours load, and look right?
 
-Generated files looked "whitish" in TwinCAT's dark theme. `newscope` writes an explicit
-`DisplayColor` on every element: light greys on `YTChart`, `AxisGroup` and `OverviewChart`,
-`Black` on most others, and a palette colour on each `Channel`.
+Generated files looked like near-white panels in TwinCAT's dark theme. `newscope` now writes a
+dark style by default (`--theme light` for the other): `#252526` on every `YTChart`,
+`AxisGroup` and `OverviewChart`; an `AxisStyle` inside every axis's `SubMember`, as real files
+have, with `#F1F1F1` axis text and a quiet `#3E3E42` grid; and a palette colour on each
+`Channel` and its `ChannelStyle` alike. The `AxisStyle` is structure Scope has never been
+given by this tool.
 
-1. With TwinCAT in dark theme, open `Test.tcscopex`. Describe the chart background, the band
-   backgrounds, the axes and the traces.
-2. **What colour is each trace?** Palette colours (blue, orange, …) mean Scope draws the
-   `Channel`'s `DisplayColor`; black means it uses one of the `Black` ones.
-3. Copy the file and, in the copy, delete the `<DisplayColor>` child of every `YTChart`,
-   `AxisGroup` and `OverviewChart`. Open it in dark theme, then in light. Does it still load?
-   Does Scope now choose colours that suit each theme?
+1. **Does `Test.tcscopex` still load, and record,** with the `AxisStyle` elements in it? If it
+   is refused, that is the finding — copy the error.
+2. With TwinCAT in dark theme, describe the chart background, the band backgrounds, the axis
+   text, the grid and the traces. Then switch to light theme and describe them again. Is
+   anything drawn in black and lost on the dark background — markers, the cursor, a legend?
+3. Select one axis's style in the property grid. **What choices does `ColorMode` offer?**
+   Every real file seen says `CustomColor`; another option may follow the theme.
+4. Copy the file and, in the copy, delete every `AxisStyle` and the `<DisplayColor>` child of
+   every `YTChart`, `AxisGroup` and `OverviewChart`. Open it in dark theme, then in light.
+   Does it still load? Does Scope now choose colours that suit each theme?
 
-Question 3 decides the fix: if Scope themes whatever the file leaves out, the generator stops
-writing those colours; if not, it needs a light and a dark palette.
+If 3 or 4 finds that Scope can follow the theme, a mode that leaves the colours out beats both
+palettes; if not, the palettes stand.
 
 ### 4.4 A real trigger
 
@@ -268,7 +281,7 @@ Anything that failed, plus:
 
 1. Scope View's error text for any channel that did not record, and the element diff from 4.2.
 2. A description of one chart's layout, and the `AxisGroup` XML if 4.1 (c) failed.
-3. The three dark-theme answers from 4.3.
+3. The dark-theme answers from 4.3.
 4. The `TriggerModule` XML, if 4.4 failed.
 5. The working export-tool command line.
 6. The `.tmc` structure from 4.7.

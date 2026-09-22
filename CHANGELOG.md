@@ -4,6 +4,39 @@
 
 First working version. Not yet published.
 
+### A generated file records, and charts styled for one background
+
+A second field session took one generated file through three rounds on a live target. An IEC
+type was read by Scope as `VOID` and refused; with `REAL64`, an axis symbol on port 851 was
+"not found"; with port 501 as well, **it recorded** — the first data a generated `.tcscopex`
+has produced. Both blockers were already fixed here; the session ran an older version. Its
+write-up, anonymised, is `evals/field-review-1fa0e9b-rounds.md`.
+
+- **`newscope --theme dark|light`**, dark by default. Generated charts rendered as near-white
+  panels in a dark IDE, from hard-coded light greys and no axis styling at all. Every axis now
+  carries an `AxisStyle` — where real projects keep one — and panels, axis text, grid and
+  traces are chosen for one background. The trace palette is checked for contrast against it,
+  and its first four for colour-blind separation between every pair, since a band's traces
+  share one axis. No value that follows the IDE theme has been seen, and whether Scope themes
+  colours a file leaves out is untested, so a file picks one. **Not yet opened in Scope View**
+  — this is new structure, not a change to what recorded.
+- **`checkscope` refuses `VOID`.** It is what Scope wrote back after failing to read `LREAL`,
+  so a `VOID` means the file has been opened, misread and saved; it drew only a soft warning.
+  `checkscope` also reports which `theme` a file is styled for, warns about axes with no
+  `AxisStyle`, and warns when a known NC field carries a type other than the table's.
+- **NC axis fields are typed from their names.** For `Axes.<axis>.<field>` on the NC port,
+  `ErrorCode`, `AxisState` and the other status fields are `UINT32` and the motion values
+  `REAL64` — every such acquisition in the nine files of one real project agrees, and the names
+  are Beckhoff's rather than a house style. `ErrorCode` was written 8 bytes wide, and every
+  axis channel was reported as a defaulted guess, which buried the defaults that matter. A
+  declared type, an explicit non-NC port or a deeper path still wins.
+- `INT8` and `UINT32` join the types seen in real files; the docs no longer claim an IEC type
+  name is "accepted by nothing and rejected by nothing".
+- **How to open a generated file:** add it to an existing TwinCAT Measurement project.
+  Double-clicked, one started a new-project wizard that hung.
+- Both templates are restyled for the dark default with their GUIDs unchanged, and keep
+  `TargetPort` 851: their symbols are the PLC's `NcToPlc` copy of the axis, not NC symbols.
+
 ### A generated file that can actually record
 
 A field session took a generated 53-channel project to a running machine. It opened in Scope
@@ -236,11 +269,12 @@ samples cannot be. See `evals/results-iteration-1.md`.
 
 ### Known gaps
 
-- **One generated file has been opened in TwinCAT, and it recorded nothing.** The `.tcscopex`
-  schema is derived from real Beckhoff sample projects and the templates are structurally
-  faithful. A file generated from one opened cleanly in Scope View and could not record; the
-  port, type, name and window fixes that came out of that session have not themselves been
-  back to a machine (`evals/field-review-1fa0e9b.md`).
+- **A generated file has recorded — NC axis channels only, and not from this exact code.**
+  Five `REAL64` NC channels recorded on the third round of a field session, from patches to an
+  older version that write the same type, name, port and addressing fields this one does
+  (`evals/field-review-1fa0e9b-rounds.md`). This version adds an `AxisStyle` per axis and new
+  colours that Scope has never read, so no file from it has been opened. Bit, integer and
+  PLC-side channels and triggers have not been seen working.
 - **No `.svdx` has been converted by the real export tool here.** The CSV path is measured
   against 19 real exports, but the `.svdx` → CSV step still depends on
   `TC3ScopeExportTool.exe` behaving as documented.

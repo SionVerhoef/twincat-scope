@@ -418,10 +418,13 @@ def recordability_checks():
                    by_symbol["MAIN.fbStation.seStep"]["variable_size"]) == ("INT16", "2"),
               str([(c["data_type"], c["variable_size"]) for c in written.values()]))
 
-        check("an undeclared type is reported as a default, not as a fact",
-              made.get("types_defaulted") == ["Axes.Mover 1 (Drive1_ChA).SetPosModulo"]
+        # An NC field's type is Beckhoff's, so it is known from the name and is
+        # not a guess to warn about.
+        check("a known NC axis field is typed from the NC table, not defaulted",
+              "types_defaulted" not in made
               and reported["Axes.Mover 1 (Drive1_ChA).SetPosModulo"]["type_source"]
-              == "default",
+              == "nc-field"
+              and (nc["data_type"], nc["variable_size"]) == ("REAL64", "8"),
               str(made.get("types_defaulted")))
 
         # <Name> is the CSV column header. Fifty-three columns called Signal is
@@ -632,6 +635,168 @@ def recordability_checks():
         check("the placeholder template is a placeholder throughout",
               "PLACEHOLDER" in text and "<Name>Signal</Name>" in text,
               "minimal-single-channel.tcscopex")
+
+
+def second_field_session_checks():
+    """What the second field session (evals/field-review-1fa0e9b-rounds.md) added.
+
+    Scope turns a type it cannot read into VOID and saves it that way; NC axis
+    fields have fixed types; and a generated chart in a dark IDE was a panel of
+    light grey with no axis styling at all.
+    """
+    import xml.etree.ElementTree as ET
+
+    tpl = ROOT / "templates" / "axis-diagnosis.tcscopex"
+    if not tpl.exists():
+        check("second field session checks", True, "skipped: no template")
+        return
+
+    axis = "Axes.Axis 1 (Drive1_ChA)"
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "nc.tcscopex"
+        made = run("newscope", tpl, "-o", out, "--netid", "1.2.3.4.1.1",
+                   "--channels", f"{axis}.ActPos,{axis}.PosDiff,{axis}.ErrorCode,"
+                                 f"{axis}.SomethingNew,MAIN.fbStation.fLevel")
+        reported = {c["symbol"]: c for c in made.get("channels", [])}
+        written = {(a.findtext("SymbolName") or "").strip():
+                   (a.findtext("DataType"), a.findtext("VariableSize"))
+                   for a in ET.fromstring(out.read_text(encoding="utf-8-sig")
+                                          ).findall(".//AdsAcquisition")}
+        check("an NC status field is written as the 4-byte type it is",
+              written.get(f"{axis}.ErrorCode") == ("UINT32", "4")
+              and reported[f"{axis}.ErrorCode"]["type_source"] == "nc-field",
+              str(written.get(f"{axis}.ErrorCode")))
+        # The table is what has been seen, not a licence to guess the rest.
+        check("an NC field outside the table, and any PLC symbol, is still a default",
+              made.get("types_defaulted") == [f"{axis}.SomethingNew",
+                                              "MAIN.fbStation.fLevel"],
+              str(made.get("types_defaulted")))
+
+        # Scope parses a type name it does not know to VOID and saves that. The
+        # file then fails to connect every such channel, and used to pass here.
+        text = out.read_text(encoding="utf-8-sig")
+        void = Path(tmp) / "void.tcscopex"
+        void.write_bytes(b"\xef\xbb\xbf" + text.replace(
+            "<DataType>REAL64</DataType>", "<DataType>VOID</DataType>").encode("utf-8"))
+        rejected = run("checkscope", void, expect_ok=False)
+        check("checkscope refuses VOID and says Scope wrote it",
+              rejected.get("ok") is False
+              and any("DataType is VOID" in p and "Scope writes back" in p
+                      for p in rejected.get("problems", [])),
+              str(rejected.get("problems"))[:90])
+
+        # The table describes Axes.<axis>.<field> on the NC port and nothing
+        # else. A PLC struct with the same leaf, a declared type, a symbol sent
+        # to another port and a deeper path all keep their own.
+        lookalike = Path(tmp) / "lookalike.tcscopex"
+        looks = run("newscope", tpl, "-o", lookalike, "--netid", "1.2.3.4.1.1",
+                    "--channels", "MAIN.fbAxis.NcToPlc.ErrorCode,"
+                                  "Axes.Axis2.ErrorCode:LREAL,"
+                                  "Axes.Axis3.ErrorCode:852,"
+                                  "Axes.Axis4.Enc.ErrorCode")
+        sources = {c["symbol"]: c["type_source"] for c in looks.get("channels", [])}
+        check("the NC table stays out of symbols it does not describe",
+              sources == {"MAIN.fbAxis.NcToPlc.ErrorCode": "default",
+                          "Axes.Axis2.ErrorCode": "declared",
+                          "Axes.Axis3.ErrorCode": "default",
+                          "Axes.Axis4.Enc.ErrorCode": "default"}, str(sources))
+        # checkscope has to know the table too, or a file from an older
+        # newscope with ErrorCode 8 bytes wide passes in silence.
+        looked = run("checkscope", lookalike, expect_ok=False)
+        check("checkscope warns about an NC field declared as the wrong type",
+              any(w.startswith("Axes.Axis2.ErrorCode: DataType REAL64")
+                  and "UINT32" in w for w in looked.get("warnings", []))
+              and not any(w.startswith("MAIN.fbAxis.NcToPlc.ErrorCode: DataType")
+                          for w in looked.get("warnings", [])),
+              str([w[:50] for w in looked.get("warnings", []) if "DataType" in w]))
+
+        # Theme, value by value. Three traces share the Position band so the
+        # palette order is exercised past its first slot; a template with no
+        # AxisStyle anywhere, and one axis with no SubMember at all, makes
+        # newscope build them rather than recolour the template's own.
+        def signed(argb):
+            return str(argb - 2 ** 32)
+
+        palettes = {
+            "dark": (0xFF252526, 0xFFF1F1F1, 0xFF3E3E42,
+                     (0xFF3987E5, 0xFF008300, 0xFFD55181)),
+            "light": (0xFFFCFCFB, 0xFF52514E, 0xFFE1E0D9,
+                      (0xFF2A78D6, 0xFF008300, 0xFFE87BA4)),
+        }
+        unstyled_tpl = Path(tmp) / "unstyled-template.tcscopex"
+        plain = ET.fromstring(tpl.read_text(encoding="utf-8-sig"))
+        for sub in plain.iter("SubMember"):
+            for style in sub.findall("AxisStyle"):
+                sub.remove(style)
+        first_time_axis = plain.find(".//AxisGroup/SubMember/TimeAxis")
+        first_time_axis.remove(first_time_axis.find("SubMember"))
+        unstyled_tpl.write_bytes(b"\xef\xbb\xbf" + ET.tostring(plain, encoding="utf-8"))
+
+        trio = f"{axis}.ActPos,{axis}.SetPos,{axis}.Position"
+        for theme, (bg, fg, grid, traces) in palettes.items():
+            styled = Path(tmp) / f"{theme}.tcscopex"
+            made_theme = run("newscope", unstyled_tpl, "-o", styled,
+                             "--netid", "1.2.3.4.1.1", "--theme", theme,
+                             "--channels", trio)
+            root = ET.fromstring(styled.read_text(encoding="utf-8-sig"))
+            panels = [node.findtext("DisplayColor") for tag in
+                      ("YTChart", "AxisGroup", "OverviewChart") for node in root.iter(tag)]
+            axes = [a for tag in ("TimeAxis", "ValueAxis") for a in root.iter(tag)]
+            styles = [a.find("SubMember/AxisStyle") for a in axes]
+            # Guarded: a missing style must fail a check, not abort the run.
+            style_guids = {s.findtext("Guid") for s in styles if s is not None}
+            check(f"--theme {theme}: every panel, axis and grid in its colours",
+                  panels and set(panels) == {signed(bg)}
+                  and axes and all(s is not None for s in styles)
+                  and {a.findtext("DisplayColor") for a in axes} == {signed(fg)}
+                  and {s.findtext("DisplayColor") for s in styles} == {signed(fg)}
+                  and {s.findtext("GridColor") for s in styles} == {signed(grid)}
+                  and {s.findtext("ColorMode") for s in styles} == {"CustomColor"},
+                  f"{len(axes)} axes, panels {set(panels)}")
+            check(f"--theme {theme}: every axis has its own AxisStyle, where real "
+                  "files keep it",
+                  len(style_guids) == len(axes)
+                  and all("SubMember" in [c.tag for c in a]
+                          and [c.tag for c in a].index("SubMember")
+                          < [c.tag for c in a].index("Guid") for a in axes),
+                  f"{len(style_guids)} of {len(axes)}")
+            band = next((g for g in root.iter("AxisGroup")
+                         if g.findtext("Name") == "Position"), None)
+            chans = band.findall("SubMember/Channel") if band is not None else []
+            check(f"--theme {theme}: traces take the palette in order, both "
+                  "colour fields",
+                  [c.findtext("DisplayColor") for c in chans]
+                  == [signed(t) for t in traces]
+                  and [c.findtext("SubMember/ChannelStyle/DisplayColor")
+                       for c in chans] == [signed(t) for t in traces],
+                  str([c.findtext("DisplayColor") for c in chans]))
+            back = run("checkscope", styled)
+            check(f"--theme {theme}: reported, and read back by checkscope",
+                  made_theme.get("theme") == theme and back.get("theme") == theme
+                  and back.get("axes_without_style") == 0,
+                  f"{made_theme.get('theme')} / {back.get('theme')}")
+
+        # A file from before this change, or from a real project without axis
+        # styling, is fine to record with; it is only told about.
+        bare = Path(tmp) / "bare.tcscopex"
+        stripped = ET.fromstring(text)
+        for sub in stripped.iter("SubMember"):
+            for style in sub.findall("AxisStyle"):
+                sub.remove(style)
+        bare.write_bytes(b"\xef\xbb\xbf" + ET.tostring(stripped, encoding="utf-8"))
+        unstyled = run("checkscope", bare)
+        check("an axis with no AxisStyle is a warning, not a broken file",
+              unstyled.get("ok") is True
+              and any("have no AxisStyle" in w for w in unstyled.get("warnings", [])),
+              str(unstyled.get("axes_without_style")))
+
+    for name in ("axis-diagnosis.tcscopex", "minimal-single-channel.tcscopex"):
+        path = ROOT / "templates" / name
+        if path.exists():
+            chk = run("checkscope", path, expect_ok=False)
+            check(f"{name} is styled for the default theme on every axis",
+                  chk.get("theme") == "dark" and chk.get("axes_without_style") == 0,
+                  f"theme={chk.get('theme')} unstyled={chk.get('axes_without_style')}")
 
 
 def shareability_checks():
@@ -913,6 +1078,7 @@ def main():
     at_rest_checks()
     layout_checks()
     recordability_checks()
+    second_field_session_checks()
     shareability_checks()
 
     print()

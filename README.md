@@ -104,10 +104,13 @@ twincat-scope/
 
 ## Status
 
-**A generated `.tcscopex` has been opened in TwinCAT exactly once, and it did not record.**
-That session found the port, data-type, channel-name and record-window defects this version
-fixes; the fixes have not been back to a machine
-(`evals/field-review-1fa0e9b.md`). Specifically:
+**A generated `.tcscopex` has recorded on a real machine** — five NC axis channels, on the
+third round of a field session (`evals/field-review-1fa0e9b-rounds.md`). The first two rounds,
+and an earlier session (`evals/field-review-1fa0e9b.md`), found the type, port and name
+defects that stood in the way. Those rounds ran patches to an older version. This one writes
+the same type, name, port and addressing fields, plus an `AxisStyle` per axis and new colours
+that Scope has never read — no file from it has been opened yet. Bit, integer and PLC-side
+channels and triggers have not been seen working either. Specifically:
 
 - The `.tcscopex` schema was derived by reading real Beckhoff sample projects, and the
   templates validate against it. `checkscope` has been run against 7 real Beckhoff-authored
@@ -124,8 +127,9 @@ fixes; the fixes have not been back to a machine
 `SKILL.md` rule 3 tells the agent never to claim something is verified when it is not. The
 same honesty applies to the skill itself.
 
-**The most useful contribution now is a `.tcscopex` opened in real Scope View**, and a
-confirmation that `.svdx` export behaves as documented.
+**The most useful contribution now is a recording from a generated file with bit, integer and
+PLC channels in it**, a look at the `--theme` colours in real Scope View, and a confirmation
+that `.svdx` export behaves as documented.
 
 ## Tests
 
