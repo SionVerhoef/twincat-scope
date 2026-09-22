@@ -13,8 +13,8 @@ on main. The last section says how far that carries over.
 Counts, widths, ports, sample rates and colour values are as measured. The index groups and
 offsets seen in real files are deliberately left out: they are addresses in one build.
 
-The reference corpus is **9 Beckhoff-authored `.tcscopex` files** from one machine project,
-built by hand in Scope View, all of which open and record. None of them are in this repo.
+The reference corpus is **9 `.tcscopex` files** from one machine project, built by hand in
+Scope View by the project's engineer, all of which open and record. None of them are in this repo.
 
 ## Verdict
 
@@ -43,16 +43,17 @@ python3 scripts/tcscope.py newscope templates/axis-diagnosis.tcscopex -o Test.tc
 
 ## Findings
 
-### R1 — an IEC type name is read as `VOID`, and saved that way
+### R1 — `LREAL` is read as `VOID`, and saved that way
 
 After the round-1 file was added to a measurement project and saved, all five acquisitions read
-back as `VOID` with `VariableSize` 8. Scope parses a type name it does not know to its enum's
-zero value, writes that back, and then refuses the channel at connect. This corrects the repo's
-earlier wording that an IEC name "is accepted by nothing and rejected by nothing".
+back as `VOID` with `VariableSize` 8. Scope parsed `LREAL`, a name not in its vocabulary, to its
+enum's zero value, wrote that back, and refused the channel at connect. Only `LREAL` was tried;
+other IEC names are expected to go the same way. This corrects the repo's earlier wording that
+an IEC name "is accepted by nothing and rejected by nothing".
 
 Already fixed on main before this write-up: both templates ship `REAL64`, and `checkscope`
 refuses IEC names. Added now: `VOID` itself is a `checkscope` problem, since it is the mark of a
-file Scope has already opened and failed on — it previously drew only a soft warning.
+file Scope has opened, failed to read and saved — it previously drew only a soft warning.
 
 ### R2 — `Axes.*` on port 851
 
@@ -88,7 +89,7 @@ Every `DataType` in the corpus:
 `LREAL` appears nowhere. These counts sum to 231; the port table above counts 241 acquisitions,
 and the session's notes do not say where the other ten went.
 
-NC fields, every occurrence agreeing: `ActPos`, `SetPos`, `ActPosModulo`, `SetPosModulo`,
+NC fields, every occurrence in these nine files agreeing: `ActPos`, `SetPos`, `ActPosModulo`, `SetPosModulo`,
 `PosDiff`, `ActVelo`, `SetVelo`, `ActAcc`, `SetAcc`, `ActTorque` and `Position` are `REAL64`/8;
 `ErrState`, `ErrorCode`, `ErrorID`, `AxisState` and `CoupleState` are `UINT32`/4.
 
@@ -115,13 +116,30 @@ The corpus carries **76 `AxisStyle` elements, one per axis**, inside each `TimeA
 `ValueAxis` `<SubMember>`, every one `ColorMode` `CustomColor`. The dark values: axis text and
 grid `-921103` (`#F1F1F1`), chart background `-14342874` (`#252526`).
 
+One of them, as quoted in the session's notes (its fields listed alphabetically there, its GUID
+left out here):
+
+| Field | Value | | Field | Value |
+|---|---|---|---|---|
+| `ChannelRelatedGuid` | null GUID | | `Name` | `Axis Style (1)` |
+| `ColorMode` | `CustomColor` | | `Precision` | `6` |
+| `Comment` | empty | | `ShowName` | `False` |
+| `DisplayColor` | `-921103` | | `SortPriority` | `100` |
+| `Grid` | `true` | | `SubGrid` | `false` |
+| `GridColor` | `-921103` | | `SubGridDivisions` | `5` |
+| `GridDivisions` | `10` | | `Title` | `AxisStyle_<n>` |
+| `GridLineWidth` | `1` | | `UseScientificNotation` | `true` |
+| `LineWidth` | `1` | | `Visible` | `true` |
+
 No value that follows the IDE theme was seen. Whether `ColorMode` has one is open — it is an enum
 seen with a single value, and one look at the property in Scope View's property grid would
-settle it.
+settle it. Whether Scope themes a colour the file leaves out was not tested either.
 
-Added now: `newscope --theme dark|light`, dark by default, writing an `AxisStyle` on every axis
-and trace colours checked for contrast against the background they sit on. Written after the
-session; **not yet seen in Scope View.**
+Added now: `newscope --theme dark|light`, dark by default, writing an `AxisStyle` with those
+fields on every axis. It departs from the quoted one in three places: `Name` and `Title` follow
+the templates' own convention, and the dark grid is a quieter `#3E3E42` rather than the axis-text
+colour. Trace colours are checked for contrast against the background they sit on. Written
+after the session; **not yet opened in Scope View.**
 
 ### R7 — do not double-click a bare `.tcscopex`
 
@@ -136,9 +154,10 @@ distinct GUIDs: `newscope` mints fresh ones on every run, a hand-copied file doe
 ### R8 — `checkscope` passed all three
 
 At `1fa0e9b` it validated wiring and load, never the acquisition payload. Rebuilt in the repo
-from main's own output with each round's fields put back, main's `checkscope` refuses round 1
-twice per channel (an NC symbol on a PLC port, an IEC type name) and round 2 once per channel,
-and passes round 3. A file Scope had re-saved with `VOID` still passed until this change.
+from main's own output with each round's type and port put back, main's `checkscope` refuses
+round 1 twice per channel (an NC symbol on a PLC port, an IEC type name) — once more for the
+shared name when its `Signal` names are restored too — and round 2 once per channel, and passes
+round 3. A file Scope had re-saved with `VOID` still passed until this change.
 
 ## What worked — do not regress it
 
@@ -155,8 +174,10 @@ and passes round 3. A file Scope had re-saved with `VOID` still passed until thi
 
 - **Main's own generator.** Rounds 2 and 3 ran patches to `1fa0e9b`. Checked in the repo since:
   main writes the same value as the round-3 file for every field that changed between rounds —
-  `DataType`, `VariableSize`, `TargetPort`, `Name`, `SymbolBased`, `IndexGroup`, `IndexOffset` —
-  and differs only in `Title`. That is strong evidence, not a recording.
+  `DataType`, `VariableSize`, `TargetPort`, `Name`, `SymbolBased`, `IndexGroup`, `IndexOffset`.
+  It differs in `Title`, and since this write-up also in every colour and in the `AxisStyle` it
+  adds to each axis, none of which Scope has read. Strong evidence for the recording fields, not
+  a recording.
 - **Anything but `REAL64` NC channels.** Round 3 recorded five of them. No bit, integer or
   PLC-side channel was in these rounds.
 - The theme and `AxisStyle` change, triggers, and `.svdx` conversion.

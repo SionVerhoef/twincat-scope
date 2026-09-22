@@ -107,9 +107,10 @@ twincat-scope/
 **A generated `.tcscopex` has recorded on a real machine** — five NC axis channels, on the
 third round of a field session (`evals/field-review-1fa0e9b-rounds.md`). The first two rounds,
 and an earlier session (`evals/field-review-1fa0e9b.md`), found the type, port and name
-defects that stood in the way. Those rounds ran patches to an older version; this one writes
-the same fields but has not itself been run on a machine, and bit, integer and PLC-side
-channels, triggers and the chart colours have not been seen working. Specifically:
+defects that stood in the way. Those rounds ran patches to an older version. This one writes
+the same type, name, port and addressing fields, plus an `AxisStyle` per axis and new colours
+that Scope has never read — no file from it has been opened yet. Bit, integer and PLC-side
+channels and triggers have not been seen working either. Specifically:
 
 - The `.tcscopex` schema was derived by reading real Beckhoff sample projects, and the
   templates validate against it. `checkscope` has been run against 7 real Beckhoff-authored

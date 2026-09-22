@@ -151,8 +151,8 @@ are stood at the machine:
   is reached. A PLC symbol on a port below 851 answers nowhere; both verbs say so, because
   `--port 85` is a file that opens and records nothing.
 - **The type has to be Scope's, not IEC's.** Give it per channel — `SYMBOL:BOOL`, `:INT`,
-  `:LREAL` — and it is written as `BIT`/`INT16`/`REAL64` with the matching width. Scope reads
-  an IEC name as `VOID` and refuses the channel. Known NC axis fields (`Axes.….ActPos`,
+  `:LREAL` — and it is written as `BIT`/`INT16`/`REAL64` with the matching width. Scope read
+  `LREAL` itself as `VOID` and refused the channel. Known NC axis fields (`Axes.<axis>.ActPos`,
   `….ErrorCode`) get their NC type without being asked. Any other channel with no type
   declared is written as `REAL64` and reported as *defaulted*; on a `BOOL` that reads 8 bytes
   from a 1-byte variable and records nothing usable.
@@ -168,16 +168,17 @@ error, velocity, acceleration, torque, then states — and gives channels sharin
 different colours. It prints the layout it chose; check it before handing the file over.
 `--layout flat` returns to a single axis for channels that genuinely share a scale.
 
-Colours are fixed in the file, and no value that follows the IDE theme is known, so
-`--theme dark` (the default) or `--theme light` picks one background with axis text, grid and
-traces chosen to read on it. A dark chart still reads in a light IDE; a light one in a dark
-IDE was reported from the field as glaring.
+Colours are written into the file. No value that follows the IDE theme has been seen, and
+whether Scope themes a colour the file leaves out is untested, so `--theme dark` (the default)
+or `--theme light` picks one background with axis text, grid and traces chosen to read on it.
+A light chart in a dark IDE was reported from the field as glaring; that a dark chart reads
+well in a light IDE is the reasoning behind the default, not an observation.
 
 Always `checkscope` before handing a file over. It catches the failures that look like
 success: a display channel whose `AcquisitionGUID` points at nothing opens perfectly and
 plots an empty chart; an NC symbol on a PLC port never resolves, and neither does any symbol
-on a port no runtime serves; an IEC type name is read by Scope as `VOID` and refused, and a
-`VOID` already in the file means Scope has opened it and failed; a width that contradicts its
+on a port no runtime serves; an IEC type name is refused (Scope read `LREAL` as `VOID`), and a
+`VOID` already in the file is the mark of Scope having failed to read one; a width that contradicts its
 type records the wrong bytes; and channels sharing one name, or left with the template's
 placeholder, export as columns nobody can tell apart. It reports the layout and the theme too,
 and says when a chart is too crowded to read.
@@ -220,13 +221,14 @@ IEC type names, and every channel named `Signal` (`evals/field-review-1fa0e9b.md
 took one generated file through three rounds (`evals/field-review-1fa0e9b-rounds.md`). An IEC
 type was read as `VOID` and refused; with `REAL64`, an axis symbol on 851 was "not found"; with
 port 501 as well, **the file recorded** — five `REAL64` NC axis channels, symbolic addressing,
-index group and offset left at 0. So a generated file is now known to open, to show its tabs
-and bands as laid out, to keep symbol names with spaces and parentheses intact, and to record.
+index group and offset left at 0. That file opened, showed its one tab and four bands as laid
+out, kept symbol names with spaces and parentheses intact, and recorded.
 
 Precisely what that covers: those rounds ran patches to an older version rather than this
-code. This version writes the same value for every field that changed between the rounds, but
-it has not itself been run on a machine. Bit, integer and PLC-side channels from a generated
-file, the `--theme` colours, and triggers have not been seen working.
+code. This version writes the same type, name, port and addressing fields, but it also writes
+an `AxisStyle` on every axis and new colours throughout, which Scope has never read — **no file
+from this version has been opened**. Bit, integer and PLC-side channels from a generated file,
+the `--theme` colours, and triggers have not been seen working.
 
 Rule 3 applies to this skill's own claims, so precisely: the CSV reader **was** measured
 against 19 genuine `TC3ScopeExportTool.exe` exports from a Beckhoff CX/AX8000 machine

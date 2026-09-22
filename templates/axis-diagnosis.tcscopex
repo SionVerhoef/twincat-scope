@@ -569,7 +569,7 @@
                   <Guid>51af293b-9bf3-43a9-8884-39d5805c6234</Guid>
                   <Title>ChannelStyle</Title>
                   <Name>Channel Style</Name>
-                  <DisplayColor>-2533082</DisplayColor>
+                  <DisplayColor>-16743680</DisplayColor>
                   <SortPriority>100</SortPriority>
                   <IsFileBased>false</IsFileBased>
                   <Suffix>.svstyle</Suffix>
@@ -579,7 +579,7 @@
               <Guid>10be63cd-be1c-4951-b7f2-a1df7fab0688</Guid>
               <Title>MAIN.fbAxis.NcToPlc.SetPos</Title>
               <Name>SetPos</Name>
-              <DisplayColor>-2533082</DisplayColor>
+              <DisplayColor>-16743680</DisplayColor>
               <SortPriority>10</SortPriority>
               <IsFileBased>false</IsFileBased>
               <Suffix>.svchannel</Suffix>

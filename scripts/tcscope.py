@@ -36,9 +36,10 @@ Status: the CSV reader was measured against 19 genuine TC3ScopeExportTool.exe
 exports from a Beckhoff CX/AX8000 machine (TwinCAT 3.1, EU locale) covering
 both the TAB and ',' dialects, and is tested against structural copies of all
 five layouts those files use. The .tcscopex writer is modelled on real Beckhoff
-sample files. A file it generated opened in Scope View once and recorded
-nothing; the fixes from that session have not been back to a machine. Both say
-so rather than implying otherwise.
+sample files. Its first file to reach a machine recorded nothing; with the type,
+name and port fixes, one recorded five NC axis channels - from patches to an
+older version, without the AxisStyle and colours this one writes. Both say so
+rather than implying otherwise.
 """
 
 import argparse
@@ -1533,10 +1534,11 @@ def unlikely_plc_port(symbol, port):
 
 # <DataType> is Scope's own vocabulary, not IEC's, and <VariableSize> is the
 # width in bytes that goes with it. An IEC name is not read as its Scope
-# equivalent: Scope parses it to VOID, writes VOID back on save, and refuses to
-# connect the channel ("The datatype is not supported: 'VOID'"). A real name at
-# the wrong width - REAL64 on a BOOL - is the quieter failure: 8 bytes read
-# from a 1-byte variable.
+# equivalent: Scope parsed LREAL to VOID, wrote VOID back on save, and refused
+# to connect the channel ("The datatype is not supported: 'VOID'"). Only LREAL
+# has been seen doing that; other IEC names are expected to go the same way. A
+# real name at the wrong width - REAL64 on a BOOL - is the quieter failure:
+# 8 bytes read from a 1-byte variable.
 #
 # OBSERVED_SCOPE_TYPES are the ones seen in real project files. The rest follow
 # the same naming and are not confirmed, which is why checkscope warns about an
@@ -1570,9 +1572,9 @@ DEFAULT_SCOPE_TYPE = "REAL64"
 
 # The NC runtime's symbols are the exception. Their names are Beckhoff's rather
 # than a house convention, so the name does say the type - and every Axes.*
-# acquisition in the real project files read so far agrees with this table.
+# acquisition in the nine files of one real project agrees with this table.
 # Without it an axis's ErrorCode would be written 8 bytes wide over a 4-byte
-# value. Keyed on the lowercased leaf; anything missing still defaults.
+# value. Keyed on the lowercased field; anything missing still defaults.
 NC_FIELD_TYPES = {
     **dict.fromkeys(("actpos", "setpos", "actposmodulo", "setposmodulo",
                      "posdiff", "actvelo", "setvelo", "actacc", "setacc",
@@ -1636,14 +1638,12 @@ def parse_channel_spec(spec, plc_port):
              f"({', '.join(sorted(SCOPE_TYPE_SIZES))}). A symbol that itself "
              "contains a colon cannot be written here.")
 
-    nc_leaf = (_segments(symbol)[-1].lower()
-               if is_nc_symbol(symbol) and _segments(symbol) else None)
+    nc_type = nc_field_type(symbol, port)
     if resolved:
         data_type, size = resolved
         source = "declared"
-    elif nc_leaf in NC_FIELD_TYPES:
-        data_type = NC_FIELD_TYPES[nc_leaf]
-        size = SCOPE_TYPE_SIZES[data_type]
+    elif nc_type:
+        data_type, size = nc_type, SCOPE_TYPE_SIZES[nc_type]
         source = "nc-field"
     else:
         data_type = DEFAULT_SCOPE_TYPE
@@ -1654,6 +1654,21 @@ def parse_channel_spec(spec, plc_port):
             "port_source": "declared" if port is not None else "derived",
             "data_type": data_type, "variable_size": size,
             "type_source": source}
+
+
+def nc_field_type(symbol, port=None):
+    """The NC table's type for `Axes.<axis>.<field>`, or None.
+
+    Only that exact shape, and only on the NC port. A PLC list that happens to
+    be called Axes, a deeper path, or a symbol sent elsewhere with an explicit
+    port owns its own types, and guessing them from a leaf would hide a
+    default behind a confident-looking source.
+    """
+    parts = _segments(symbol)
+    if (len(parts) != 3 or not is_nc_symbol(symbol)
+            or (port is not None and port != NC_PORT)):
+        return None
+    return NC_FIELD_TYPES.get(parts[2].lower())
 
 
 def _safe_segment(text):
@@ -1780,29 +1795,31 @@ WRAPPER_SEGMENTS = {"nctoplc", "plctonc", "nctoplcaxis", "plctoncaxis",
 # --------------------------------------------------------------------------
 #
 # Scope stores absolute colours - a signed 32-bit ARGB integer, or a .NET colour
-# name - and no real file has shown a value that follows the IDE theme, so a
-# file is styled for one background. That is less of a loss than it sounds:
-# the chart carries its own background, axis text and grid, so what has to
-# agree is those three with each other. A dark chart reads fine in a light IDE,
-# the way an oscilloscope screen does. The light greys this tool used to write
-# were the glare reported from a dark-theme IDE.
+# name. No real file has shown a value that follows the IDE theme, and whether
+# Scope themes a colour the file leaves out has not been tested, so every
+# colour here is written and the file is styled for one background. The chart
+# carries its own background, axis text and grid, so the reasoning is that a
+# dark chart should still read in a light IDE, the way an oscilloscope screen
+# does - reasoning, not an observation. What was observed is the other way
+# round: the light greys this tool used to write were glaring in a dark IDE.
 #
 # Dark's background and axis text are the values a real dark-styled project
-# uses. The traces are one categorical palette stepped per background, checked
-# for contrast against the background they sit on and for colour-blind
-# separation between neighbours - channels sharing a band take them in order,
-# so neighbours are what matters. On the light background three traces fall
-# under 3:1; Scope's legend names every channel, so colour is never the only
-# thing telling them apart.
+# uses. The traces are one categorical palette stepped per background and
+# checked against it: at least 3:1 on dark, while on light the third, fourth
+# and fifth fall under it. Every trace in a band shares one axis, so every
+# pair in it has to be told apart, not just neighbours. The first four pass
+# that, colour-blind simulation included, on both backgrounds - the order was
+# chosen for it; with five or more in one band some pairs are close, and only
+# the channel name separates them.
 THEMES = {
     "dark": {"background": 0xFF252526, "foreground": 0xFFF1F1F1,
              "grid": 0xFF3E3E42,
-             "traces": (0xFF3987E5, 0xFFD95926, 0xFF199E70, 0xFFC98500,
-                        0xFFD55181, 0xFF008300, 0xFF9085E9, 0xFFE66767)},
+             "traces": (0xFF3987E5, 0xFF008300, 0xFFD55181, 0xFFC98500,
+                        0xFF199E70, 0xFFD95926, 0xFF9085E9, 0xFFE66767)},
     "light": {"background": 0xFFFCFCFB, "foreground": 0xFF52514E,
               "grid": 0xFFE1E0D9,
-              "traces": (0xFF2A78D6, 0xFFEB6834, 0xFF1BAF7A, 0xFFEDA100,
-                         0xFFE87BA4, 0xFF008300, 0xFF4A3AA7, 0xFFE34948)},
+              "traces": (0xFF2A78D6, 0xFF008300, 0xFFE87BA4, 0xFFEDA100,
+                         0xFF1BAF7A, 0xFFEB6834, 0xFF4A3AA7, 0xFFE34948)},
 }
 DEFAULT_THEME = "dark"
 MODEL_ASSEMBLY = "TwinCAT.Measurement.Scope.API.Model"
@@ -1824,16 +1841,29 @@ def _axis_style(axis):
     """The axis's AxisStyle, created where real files keep it if it is missing.
 
     Every axis in a real project carries one inside its <SubMember>, and it is
-    where the axis text and grid colours live. The fields and their values are
-    the ones real files carry; newscope only changes the colours.
+    where the axis text and grid colours live. The fields and values are those
+    of a real one, recorded in evals/field-review-1fa0e9b-rounds.md; newscope
+    only changes the colours.
     """
+    # Whitespace means nothing to Scope, but these files get read by people
+    # comparing them against a working one, so new nodes are indented to match.
+    ws = (axis.text or "\n").lstrip("\r\n")
     sub = axis.find("SubMember")
     if sub is None:
-        sub = ET.SubElement(axis, "SubMember")
+        # Where real files keep it: ahead of the axis's own Guid.
+        sub = ET.Element("SubMember")
+        sub.tail = "\n" + ws
+        guid = axis.find("Guid")
+        axis.insert(list(axis).index(guid) if guid is not None else len(axis), sub)
     style = sub.find("AxisStyle")
     if style is not None:
         return style
 
+    siblings = list(sub)
+    if siblings:
+        siblings[-1].tail = "\n" + ws + "  "
+    else:
+        sub.text = "\n" + ws + "  "
     style = ET.SubElement(sub, "AxisStyle", AssemblyName=MODEL_ASSEMBLY)
     for tag, value in (
             ("ChannelRelatedGuid", NULL_GUID), ("ColorMode", "CustomColor"),
@@ -1846,11 +1876,7 @@ def _axis_style(axis):
             ("Title", "AxisStyle"), ("UseScientificNotation", "true"),
             ("Visible", "true")):
         ET.SubElement(style, tag).text = value
-    # Indent it like its neighbours. Whitespace means nothing to Scope, but
-    # these files get read by people comparing them against a working one.
-    ws = (axis.text or "\n").lstrip("\r\n")
     ET.indent(style, space="  ", level=len(ws) // 2 + 1)
-    sub.text = "\n" + ws + "  "
     style.tail = "\n" + ws
     return style
 
@@ -2184,10 +2210,13 @@ def cmd_newscope(args):
         "record_seconds": (int(record_ticks) / TICKS_PER_MS / 1000.0
                            if record_ticks.isdigit() and int(record_ticks) > 0
                            else None),
-        "note": "A file with these fields has recorded NC axis channels on a "
-                "real target. Bit and integer channels, triggers and the chart "
-                "colours have not been seen working yet. Open it by adding it to "
-                "an existing Measurement project, not by double-clicking it.",
+        "note": "An older version's file with the same type, name and port "
+                "fields recorded five NC axis channels on a real target. This "
+                "version's output - its AxisStyle and colours included - has "
+                "not been opened in Scope View, and bit, integer and PLC-side "
+                "channels and triggers have not been seen working. Open it by "
+                "adding it to an existing Measurement project, not by "
+                "double-clicking it.",
     }
     suspect_ports = [s for s, spec in specs.items()
                      if unlikely_plc_port(s, spec["port"])]
@@ -2314,20 +2343,19 @@ def cmd_checkscope(args):
             problems.append(
                 f"{symbol}: DataType '{declared_type}' is an IEC type name. Scope "
                 f"uses its own vocabulary - did you mean "
-                f"'{IEC_TO_SCOPE[declared_type.upper()]}'? Scope reads an IEC "
-                "name as VOID and will not connect the channel."
+                f"'{IEC_TO_SCOPE[declared_type.upper()]}'? Scope read LREAL "
+                "as VOID and would not connect the channel."
             )
         elif declared_type.upper() == VOID_TYPE:
-            # Not a type anyone writes. It is what Scope saves back after
-            # failing to read the one it was given, so this file has already
-            # been opened, and this channel refused with "The datatype is not
-            # supported: 'VOID'".
+            # Not a type anyone writes. It is what Scope saved back after
+            # failing to read LREAL, so this file has been opened and saved by
+            # Scope, and connecting refuses the channel with "The datatype is
+            # not supported: 'VOID'".
             problems.append(
                 f"{symbol}: DataType is VOID - what Scope writes back when it "
-                "could not read the type it was given, usually an IEC name "
-                "such as LREAL. The channel will not connect. Set the Scope "
-                f"type, e.g. {DEFAULT_SCOPE_TYPE} for an LREAL, or regenerate "
-                "the file."
+                "could not read the type it was given, as it did with LREAL. "
+                "Connecting refuses the channel. Set the Scope type, e.g. "
+                f"{DEFAULT_SCOPE_TYPE} for an LREAL, or regenerate the file."
             )
         elif resolved is None and declared_type:
             warnings.append(
@@ -2344,6 +2372,15 @@ def cmd_checkscope(args):
                 f"VariableSize says {declared_size}. Scope reads the declared "
                 "width from the target, so the recording would be of the wrong "
                 "bytes rather than of this variable."
+            )
+        # A warning: the table is one project's files, not a Beckhoff spec.
+        expected = nc_field_type(symbol, int(port) if port.isdigit() else None)
+        if resolved and expected and resolved[0] != expected:
+            warnings.append(
+                f"{symbol}: DataType {resolved[0]}, but this NC field is "
+                f"{expected} in the real project files seen. An older newscope wrote "
+                f"NC status fields as {DEFAULT_SCOPE_TYPE}; regenerate unless "
+                "you know otherwise."
             )
 
         channels.append({"symbol": symbol, "ams_net_id": netid, "rate_hz": rate,
@@ -2464,7 +2501,8 @@ def cmd_checkscope(args):
         warnings.append(
             f"{unstyled} of {len(axes)} axes have no AxisStyle, so their text "
             "and grid colours are Scope's defaults rather than chosen for the "
-            "chart background. `newscope --theme dark|light` writes them."
+            "chart background. Regenerating from your channel list with "
+            "`newscope --channels ... --theme dark|light` adds them."
         )
 
     if unrated:
@@ -2648,7 +2686,8 @@ def build_parser():
     q.add_argument("--theme", choices=tuple(THEMES), default=DEFAULT_THEME,
                    help="chart background the colours are chosen for. Scope "
                         "stores fixed colours and no value that follows the IDE "
-                        "theme is known; a dark chart still reads in a light IDE.")
+                        "theme is known. Dark by default: a light chart in a dark "
+                        "IDE was reported as glaring.")
     q.set_defaults(func=cmd_newscope)
 
     q = sub.add_parser("checkscope", help="validate a .tcscopex")

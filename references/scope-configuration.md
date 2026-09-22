@@ -30,8 +30,9 @@ regardless of `core.autocrlf`. `scripts/tcscope.py` writes both conventions.
 
 The templates here declare `1.0.0.0`, the most conservative value observed, on the assumption
 that a newer Scope View upgrades an older project rather than rejecting it. **So far:** files
-generated from `axis-diagnosis.tcscopex`, which keep its `1.0.0.0`, opened cleanly in TE130x
-Scope View in both field sessions (builds not recorded), and one recorded. If a template is
+generated from `axis-diagnosis.tcscopex`, which keep its `1.0.0.0`, loaded in TE130x Scope
+View in both field sessions (builds not recorded) — every error came later, at connect — and
+one recorded. If a template is
 refused on yours, raising `Version` to match a project your installation writes is the first
 thing to try.
 
@@ -131,12 +132,14 @@ is still the reading of the structure, not an observation.
 ## Colours
 
 Every colour is absolute: a signed 32-bit ARGB integer (`-921103` is `0xFFF1F1F1`) or a .NET
-colour name (`Black`). No value that follows the IDE theme has been seen, so a file is styled
-for one background. Where each one lives:
+colour name (`Black`). No value that follows the IDE theme has been seen, and whether Scope
+themes a colour the file leaves out is untested, so `newscope` writes them all and a file is
+styled for one background. What each one is taken to colour — **read from the structure and
+from where real dark-styled files put their colours, not watched in Scope View**:
 
-| Element | Its `DisplayColor` is |
+| Element | Its `DisplayColor`, as read |
 |---|---|
-| `YTChart`, `AxisGroup`, `OverviewChart` | the panel behind the traces |
+| `YTChart`, `AxisGroup`, `OverviewChart` | the panel behind the traces. The light greys `newscope` used to write here were the reported glare, which fits; `OverviewChart` has not been seen |
 | `TimeAxis` / `ValueAxis` → `SubMember/AxisStyle` | axis text; `GridColor` is the grid. `ColorMode` is `CustomColor` in every real file seen |
 | `Channel` and its `ChannelStyle` | the trace. Which of the two Scope draws with is not established, so `newscope` writes both |
 
@@ -144,9 +147,11 @@ Real projects carry an `AxisStyle` on **every** axis, time and value alike; file
 versions of `newscope` carry none, and `checkscope` says so. `newscope --theme dark` (default)
 writes a `#252526` background with `#F1F1F1` axis text — the values a real dark-styled project
 uses — and `--theme light` a near-white one. The trace palette is stepped per background and
-checked for contrast against it and for colour-blind separation between neighbours. A dark
-chart still reads in a light IDE; a light one in a dark IDE was reported from the field as
-glaring. **Not yet opened in Scope View.**
+checked for contrast against it; its first four are also checked for colour-blind separation
+between every pair, because every trace in a band shares one axis. With five or more in a band
+some pairs are close, and the channel name is what separates them. A light chart in a dark IDE
+was reported from the field as glaring; that a dark one reads well in a light IDE is the
+reasoning behind the default. **Not yet opened in Scope View.**
 
 ## `AdsAcquisition` fields that matter
 
@@ -157,7 +162,7 @@ glaring. **Not yet opened in Scope View.**
 | `IndexGroup` / `IndexOffset` | Direct addresses. Leave `0` when symbol-based. NC axis channels recorded that way, although real files carry non-zero values on their NC acquisitions — Scope does not need them as inputs. **Never copy these between machines.** |
 | `TargetPort` | `851` for the first PLC runtime. `852`, `853`… for further ones. **NC axis symbols (`Axes.…`) are served by the NC runtime on `501`.** One port written across every channel resolves the PLC symbols and fails every axis symbol with "Symbolname could not be found" — a message that sends you looking at the name, which is not the problem. |
 | `AmsNetId` | The target. A placeholder here is the single most common reason a scope records nothing. |
-| `DataType` | Scope's own vocabulary, **not IEC's**: `BIT` for a `BOOL`, `INT16` for an `INT`, `REAL64` for an `LREAL`. Seen in real project files: `BIT`, `INT8`, `INT16`, `UINT32`, `REAL64`; the others follow the same naming. Scope reads an IEC name such as `LREAL` as `VOID`, **writes `VOID` back when the project is saved**, and refuses the channel: "The datatype is not supported: 'VOID'". A `VOID` in a file is that failure's fingerprint. |
+| `DataType` | Scope's own vocabulary, **not IEC's**: `BIT` for a `BOOL`, `INT16` for an `INT`, `REAL64` for an `LREAL`. Seen in real project files: `BIT`, `INT8`, `INT16`, `UINT32`, `REAL64`; the others follow the same naming. Scope read `LREAL` as `VOID`, **wrote `VOID` back when the project was saved**, and refused the channel: "The datatype is not supported: 'VOID'". Other IEC names are expected to go the same way; only `LREAL` has been tried. A `VOID` in a file is that failure's fingerprint. |
 | `VariableSize` | Bytes, and it must match `DataType`: 1 for `BIT`/`INT8`, 2 for `INT16`, 4 for `UINT32`, 8 for `REAL64`. Scope reads that many bytes from the target whatever the variable actually is, so 8 bytes off a `BOOL` is a recording of its neighbours. |
 | `Name` | The label in the Scope tree **and the column header when the recording is exported to CSV**. `minimal-single-channel.tcscopex` ships the placeholder `Signal`; left alone, fifty-three channels exported as fifty-three columns called `Signal`, which is what happened on a machine. `newscope` derives a short unique name per channel and keeps the full path in `Title`. |
 | `BaseSampleTime` | **100 ns ticks.** 10000 = 1 ms, 1000 = 100 µs. Only honoured when `UseTaskSampleTime` is `false`. |
@@ -186,11 +191,13 @@ instead of part of a symbol name. No TwinCAT symbol path seen here contains a co
 nothing in the format promises that, and a symbol that does contain one cannot be written in
 this grammar.
 
-Under `Axes.`, the NC runtime's own field names say their type, because Beckhoff fixes them:
-`ActPos`, `SetPos`, `PosDiff`, `ActVelo`, `SetVelo`, `ActAcc`, `SetAcc`, `ActTorque`, the
-`…Modulo` positions and `Position` are `REAL64`; `ErrState`, `ErrorCode`, `ErrorID`,
-`AxisState` and `CoupleState` are `UINT32`. Every real file seen agrees, and `newscope`
-writes them that way with `type_source: nc-field`.
+For `Axes.<axis>.<field>`, the NC runtime's own field names say their type, because Beckhoff
+fixes them: `ActPos`, `SetPos`, `PosDiff`, `ActVelo`, `SetVelo`, `ActAcc`, `SetAcc`,
+`ActTorque`, the `…Modulo` positions and `Position` are `REAL64`; `ErrState`, `ErrorCode`,
+`ErrorID`, `AxisState` and `CoupleState` are `UINT32`. Every such acquisition in the nine files
+of one real project agrees, and `newscope` writes them that way with `type_source: nc-field`
+— unless the entry declares a type, names a port other than 501, or has a deeper path, and
+`checkscope` warns when a file disagrees with the table. No `UINT32` channel has recorded yet.
 
 Any other channel given no type is written as `REAL64` and **listed in the output as
 defaulted**, because a default is a guess and guessing wrong on a `BOOL` records nothing

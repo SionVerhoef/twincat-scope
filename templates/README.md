@@ -50,7 +50,9 @@ requesting twenty channels does not produce twenty traces sharing one axis. See
   is the PLC's own copy of the axis data. Only symbols under `Axes.` live in the NC runtime on
   501, and `newscope` routes those itself.
 - Every axis carries an `AxisStyle` for the dark theme, where real projects keep one.
-  `newscope --theme` restyles the whole file; the template's own colours do not survive.
+  `newscope --theme` recolours the chart panels, axes, grid and traces; the other elements
+  keep the template's `Black` (chart style, marker container, trigger, acquisitions). Whether
+  Scope draws anything with those is not known — markers on a dark chart are worth a look.
 
 ## Verification status
 
