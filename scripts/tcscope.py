@@ -111,10 +111,18 @@ def need(module):
     try:
         return __import__(module)
     except ImportError:
+        # sys.argv[0] is the path as the user typed it, so the fix pastes back
+        # into the same shell. The trap this message exists for: 'uv run python
+        # <script>' runs uv's bare interpreter and skips the script's inline
+        # dependencies, so the victim believes they are already following the
+        # advice. Name the wrong spelling or they will loop on it.
+        invoked = sys.argv[0] or "scripts/tcscope.py"
         fail(
             f"{module} is not available",
             "Run this through uv, which installs dependencies automatically: "
-            f"uv run {Path(__file__).name} ...",
+            f"uv run {invoked} ... Note that 'uv run python {invoked}' does "
+            "not: putting 'python' in between skips the script's inline "
+            "dependencies and fails exactly like this.",
         )
 
 
@@ -901,6 +909,48 @@ def cmd_ingest(args):
     return 0
 
 
+def _id_ranges(ids):
+    """[0, 1, 2, 5] -> '0-2,5'. Compact, and unambiguous to expand back."""
+    parts = []
+    start = prev = ids[0]
+    for gid in ids[1:]:
+        if gid == prev + 1:
+            prev = gid
+            continue
+        parts.append(f"{start}-{prev}" if prev > start else str(start))
+        start = prev = gid
+    parts.append(f"{start}-{prev}" if prev > start else str(start))
+    return ",".join(parts)
+
+
+def _collapse_identical_groups(groups):
+    """Fold group entries that differ only in their id into one.
+
+    A per-display-channel export writes one acquisition group per channel, so a
+    40-channel file arrives as 40 blocks that differ only in the id - and the
+    one block that disagrees is the finding, buried under 39 copies. Twins
+    merge into a single entry whose "groups" field names the ids it stands
+    for; a group with no twin keeps its own "group" entry, so a single-group
+    file reads the way it always did.
+    """
+    buckets = []  # (fields-minus-id, [ids]) in first-seen order
+    for group in groups:
+        key = {k: v for k, v in group.items() if k != "group"}
+        for fields, ids in buckets:
+            if fields == key:
+                ids.append(group["group"])
+                break
+        else:
+            buckets.append((key, [group["group"]]))
+    out = []
+    for fields, ids in buckets:
+        if len(ids) == 1:
+            out.append({"group": ids[0], **fields})
+        else:
+            out.append({"groups": _id_ranges(ids), "count": len(ids), **fields})
+    return out
+
+
 def cmd_manifest(args):
     if args.dump_header:
         with open(args.input, "rb") as fh:
@@ -948,6 +998,7 @@ def cmd_manifest(args):
             entry["display_offset"] = ch["display_offset"]
         channels.append(entry)
 
+    merged = _collapse_identical_groups(groups)
     out = {
         "ok": True,
         "file": str(args.input),
@@ -960,11 +1011,15 @@ def cmd_manifest(args):
         "estimated_rate_hz": lead["estimated_rate_hz"],
         "gaps": sum(g["gaps"] for g in groups),
         "timing": timing,
-        "groups": groups,
+        "groups": merged,
         "channels": channels,
         "delimiter": rec.info.get("delimiter"),
         "decimal": rec.info.get("decimal"),
     }
+    if len(merged) < len(groups):
+        out["groups_note"] = (
+            "Groups that differ only in their id are merged into one entry; "
+            "its 'groups' field lists the ids it stands for.")
     if rec.info.get("copies_collapsed"):
         out["copies_collapsed"] = rec.info["copies_collapsed"]
         out["copies_note"] = (

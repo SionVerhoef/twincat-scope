@@ -136,6 +136,11 @@ route.
 `YTChart` siblings arrived as three tabs (`evals/field-review-1fa0e9b-rounds.md`,
 `evals/field-review-fe9b487.md`).
 
+**Change a layout by regenerating, not by editing the XML.** A generated file came back from
+the field with every band disabled and hand-written band names, showing nothing until someone
+enabled the bands in Scope View — most likely edited after `newscope` wrote it. If you must
+edit one, copy an element that is enabled, and run `checkscope` again afterwards.
+
 ## Colours
 
 Every colour is absolute: a signed 32-bit ARGB integer (`-921103` is `0xFFF1F1F1`) or a .NET
@@ -277,6 +282,15 @@ sample rate high enough to perturb the target, axes with no `AxisStyle`, and acq
 bands or channels with `Enabled` false. Disabling is a Scope View feature, so that is not a
 failure — but a file with every band disabled showed nothing until they were enabled by hand,
 and whether a disabled acquisition still records has not been established.
+
+When the PLC project is at hand, add `--tmc <PLC>.tmc` — the compiled symbol table the build
+writes beside the `.plcproj` (repeat it for a second PLC runtime). Every PLC symbol is then
+looked up in the compiled program: a typo, a renamed variable, a whole block or an unindexed
+array is a problem, and so is a type read at the wrong width — an undeclared `DINT` written
+as `REAL64`. Enums are read at their base type. A type the `.tmc` does not describe, such as
+one from a library, is a warning, never a guess. The reader was written from the structure of
+one real `.tmc` and has not yet been run against one; treat a surprising result as a finding
+about the reader.
 
 It also prints the layout — every chart, its bands and their channels — and warns when a chart
 stacks more than six bands or a band overlays more than eight channels. Both are readability,
