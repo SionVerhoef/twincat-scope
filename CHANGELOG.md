@@ -4,6 +4,13 @@
 
 First working version. Not yet published.
 
+### Restyling a project keeps its targets
+
+- **`newscope` without `--channels` no longer resets every channel's target.** It rewrote
+  every AmsNetId to `0.0.0.0.0.0` and every PLC port to 851, so a channel on 852 moved in
+  silence. It now changes the NetID or the port only when `--netid` or `--port` is given,
+  and lists every change under `retargeted`.
+
 ### Rails that are not rails, and copies in any column order
 
 Round 7 of the field test (`evals/field-review-44d4951.md`): a 48.7 s recording at 125 Hz with
