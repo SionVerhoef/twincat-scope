@@ -712,13 +712,71 @@ def write_hand_export(path, rows=200):
                ("Idle (1)", [3.0] * rows),      # a suffix with no base: a name
                # Same name, no suffix, same data: Scope did not call either a
                # copy, so neither is one.
-               ("Twin", [4.0] * rows), ("Twin", [4.0] * rows)]
+               ("Twin", [4.0] * rows), ("Twin", [4.0] * rows),
+               # Field round 7: a copy can come before its original. Matching
+               # in one pass kept it as an original and left 41 channels of 40.
+               ("Early (1)", [float(i // 20) for i in range(rows)]),
+               ("Early", [float(i // 20) for i in range(rows)])]
     lines = ["Name,Scope Project", "File,rec.svdx",
              "StartTime,23.09.2026 10:00:00", "EndTime,23.09.2026 10:00:02", "",
              ",".join(["Name"] + [name for name, _ in columns])]
     for i in range(rows):
         lines.append(",".join([f"{i * 8.0:.1f}"] + [f"{v[i]:g}" for _, v in columns]))
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_still_export(path, rows=6000, seed=7):
+    """The shapes field round 7 recorded at 8 ms, in the flat layout.
+
+    StillPos: an axis standing still, dithering over a few dozen quantisation
+    steps of 2.47e-5 mm, with one simultaneous micrometre correction - what
+    clipped at 1-11 % and fired a "step" on every still axis in the field.
+    StepEnum: a step enum held at one value for most of the recording, which
+    clipped at the highest severities there. ClippedVelo: a genuinely saturated
+    signal, which must still say so. SetPos: exactly constant.
+    """
+    import math
+    import random
+    rng = random.Random(seed)
+    q = 2.47e-5
+    lines = ["Name,Synthetic scope export", "File," + path.name,
+             "StartTime,2026-09-23 10:00:00", "SampleTime,8.000000", "",
+             "Time,StillPos,StepEnum,ClippedVelo,SetPos"]
+    for i in range(rows):
+        still = 500.0 + q * (rng.randint(0, 40) + (30 if i > 1480 else 0))
+        enum = 0.0 if i < 300 else (10.0 if i < 4560 else 200.0)
+        velo = max(-60.0, min(60.0, 100.0 * math.sin(i / 150.0)))
+        lines.append(f"{i * 8.0:.1f},{still:.7f},{enum:g},{velo:.6f},500")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def still_channel_checks():
+    """Field round 7, bead htl: rails that are not rails.
+
+    A moved-then-parked axis did not clip in the field - it settles a few
+    micrometres off its extreme. What did: axes standing still with dither, and
+    step enums holding one step. A genuinely saturated channel must still clip.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        csv = Path(tmp) / "still.csv"
+        write_still_export(csv)
+        ev = run("events", csv, "--max-events", 1000)
+        events = ev.get("events", [])
+
+        def kinds(name):
+            return sorted({e["kind"] for e in events if e["channel"] == name})
+
+        check("an axis standing still with dither draws no clipping and no step",
+              not {"clipping", "step", "spike"} & set(kinds("StillPos"))
+              and "StillPos" in ev.get("still_channels", []),
+              f"{kinds('StillPos')} still={ev.get('still_channels')}")
+        check("a step enum holding one step is not a rail or a frozen signal",
+              not {"clipping", "flatline"} & set(kinds("StepEnum")),
+              str(kinds("StepEnum")))
+        check("a genuinely saturated signal still reports clipping",
+              "clipping" in kinds("ClippedVelo")
+              and "ClippedVelo" not in ev.get("still_channels", []),
+              str(kinds("ClippedVelo")))
 
 
 def export_copy_checks():
@@ -772,10 +830,12 @@ def export_copy_checks():
         hand_man = run("manifest", hand)
         names = [c["name"] for c in hand_man.get("channels", [])]
         check("a hand export's copies collapse on Scope's (n) suffix, said as such",
-              names == ["seStep", "bFlag", "seStep (3)", "Idle (1)", "Twin", "Twin"]
+              names == ["seStep", "bFlag", "seStep (3)", "Idle (1)", "Twin", "Twin",
+                        "Early"]
               and hand_man.get("copies_collapsed")
               == [{"kept": "seStep", "dropped": ["seStep (1)", "seStep (2)"],
-                   "matched_on": "name"}],
+                   "matched_on": "name"},
+                  {"kept": "Early", "dropped": ["Early (1)"], "matched_on": "name"}],
               f"{names} {hand_man.get('copies_collapsed')}")
 
 
@@ -1394,6 +1454,7 @@ def main():
     second_field_session_checks()
     prefix_house_checks()
     export_copy_checks()
+    still_channel_checks()
     shareability_checks()
 
     print()

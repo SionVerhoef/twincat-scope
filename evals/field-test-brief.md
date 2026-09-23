@@ -70,8 +70,10 @@ the old version **recorded five NC axis channels**. A fourth
 passed — NC axis and PLC bit, integer and real channels all recorded, `AxisStyle` accepted —
 and 4.2, 4.5 and 4.7 were answered. A fifth (`evals/field-review-3e4c44d.md`) closed 4.4,
 4.5, 4.6 and 4.8 and the omission test in 4.3, and a sixth (`evals/field-review-6872161.md`)
-answered `ColorMode` — no theme-following option exists. **Still open from Part A:** a parked
-axis (4.9) and VS Code with Copilot installed (4.10) — and all of Part B.
+answered `ColorMode` — no theme-following option exists. A seventh
+(`evals/field-review-44d4951.md`) recorded parked and still axes for 4.9. **Still open from
+Part A:** VS Code with Copilot installed (4.10), and in 4.9 an axis parked exactly at a limit
+and a genuine saturation — and all of Part B.
 
 ## 3. Setting up
 

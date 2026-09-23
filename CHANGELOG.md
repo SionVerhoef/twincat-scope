@@ -4,6 +4,25 @@
 
 First working version. Not yet published.
 
+### Rails that are not rails, and copies in any column order
+
+Round 7 of the field test (`evals/field-review-44d4951.md`): a 48.7 s recording at 125 Hz with
+axes moving, parked and standing still.
+
+- **An axis standing still no longer reports clipping or steps.** At rest a position
+  dithered over 49–80 quantisation levels; three of four still axes clipped at 1–11 % and all
+  four fired a micrometre "step" together. A real-valued channel spanning fewer than 100 of
+  its own quantisation steps is now treated as still, and `events` lists it under
+  `still_channels`.
+- **A step enum held at one value is no longer a rail.** It clipped at severities up to 73,
+  the highest in the recording. Integer channels are exempt from clipping and flatline, as
+  bits were.
+- **A moved-then-parked axis did not clip** — it settles a few micrometres off its extreme —
+  so the known limitation in `references/data-triage.md` is rewritten to what was measured.
+- **Copies in Scope View's own export are matched in any column order.** A `<name> (1)` ahead
+  of its `<name>` was kept as an original, leaving 41 channels of 40.
+- A re-save in Scope View keeps an 8 ms sample time on a 4 ms task.
+
 ### Flags back on 0/1, and Scope View's own CSV export
 
 Round 6 of the field test (`evals/field-review-6872161.md`).
