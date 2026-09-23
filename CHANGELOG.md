@@ -4,6 +4,29 @@
 
 First working version. Not yet published.
 
+### Bands that do not flatten each other, and disabled elements said out loud
+
+A follow-up field session regenerated a 32-channel function-block recording, in a
+prefix-style house, with the current version. Names were now unique, but the layout had three
+faults, and an older hand-edited file had a fourth.
+
+- **Bits and integers get separate bands.** A step enum and a counter shared the digital
+  axis with seven 0/1 flags, and a step running to 200 draws every flag as a flat line. Bits
+  now band as `Digital / state`; integers as `Step / count`, even when their name says
+  "state".
+- **"Loading" is not a load.** A length named for a loading zone matched `load` and was filed
+  under torque.
+- **`newscope` no longer writes a band `checkscope` calls crowded.** Past eight traces a band
+  is split into even parts, so eleven flags become 6 + 5. `--layout flat` still means one
+  axis.
+- **`checkscope` warns about disabled acquisitions, bands and channels.** A file came back
+  with every band `Enabled=false`, showing nothing until they were enabled by hand; `newscope`
+  never writes `Enabled`, so it was edited afterwards. A warning, not a failure: disabling is
+  a Scope View feature. `SKILL.md` now says to change a layout by regenerating.
+
+Names such as `…TravelActual` or `…Target1` still land in `Other`: nothing in them says
+position, and a guess would misfile the channels whose names mean something else.
+
 ### A generated file records, and charts styled for one background
 
 A second field session took one generated file through three rounds on a live target. An IEC

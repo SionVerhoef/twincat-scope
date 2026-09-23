@@ -216,11 +216,16 @@ It also lays them out, rather than piling every trace onto one axis:
   `MAIN.fbAxis1.NcToPlc.ActPos` is grouped under `fbAxis1`. Two devices whose paths end in
   the same segment keep their full paths as titles rather than merging into one tab.
 - **One band per quantity inside that tab**, ordered position, following error, velocity,
-  acceleration, torque/current, pressure, temperature, digital state, other. The quantity is
-  read from the leaf name, so `PosDiff` is a following error rather than a position and
-  `bPosReached` is a state rather than either. Where the name says nothing — a house that
-  writes `seStep` and `sbBlocked` matches no keyword at all — the **declared type** decides:
-  bits and integers band as state rather than piling into `Other` on one axis.
+  acceleration, torque/current, pressure, temperature, digital state, step / count, other.
+  The quantity is read from the leaf name, so `PosDiff` is a following error rather than a
+  position and `bPosReached` is a state rather than either. Where the name says nothing — a
+  house that writes `seStep` and `sbBlocked` matches no keyword at all — the **declared type**
+  decides: bits band as digital state, and integers as step / count, rather than piling into
+  `Other` on one axis. The two stay apart even when the name says "state": a step number
+  running to 200 draws every 0/1 flag beside it as a flat line.
+- **No band past eight traces.** A band that would hold more is split into even parts —
+  `Digital / state`, `Digital / state (2)` — because that is where `checkscope` starts warning,
+  and a generator should not write what its own checker complains about.
 - **Tabs appear in the order the symbols were asked for**, because that ordering is
   information.
 
@@ -245,7 +250,10 @@ columns nobody can tell apart.
 Reports a **warning** for things that are legal but probably not what you meant: a placeholder
 `AmsNetId`, a PLC symbol on a port below 851 where no runtime answers, a channel still
 carrying the template's placeholder name, no display channel wired to anything, a total
-sample rate high enough to perturb the target, and axes with no `AxisStyle`.
+sample rate high enough to perturb the target, axes with no `AxisStyle`, and acquisitions,
+bands or channels with `Enabled` false. Disabling is a Scope View feature, so that is not a
+failure — but a file with every band disabled showed nothing until they were enabled by hand,
+and whether a disabled acquisition still records has not been established.
 
 It also prints the layout — every chart, its bands and their channels — and warns when a chart
 stacks more than six bands or a band overlays more than eight channels. Both are readability,

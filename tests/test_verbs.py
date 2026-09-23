@@ -440,10 +440,12 @@ def recordability_checks():
               str(made.get("record_seconds")))
 
         # Prefix-style names match no quantity keyword; the type still says
-        # what they are, so they do not all pile onto one axis.
+        # what they are, so they do not pile onto one axis - and a step enum
+        # does not share one with a 0/1 flag it would flatten.
         bands = {c["chart"]: [b["band"] for b in c["bands"]] for c in made["charts"]}
-        check("a bit and an enum band as state, whatever they are called",
-              bands.get("fbStation") == ["Digital / state"], str(bands))
+        check("a bit and an enum band by type, whatever they are called, apart",
+              bands.get("fbStation") == ["Digital / state", "Step / count"],
+              str(bands))
 
         chk = run("checkscope", out)
         check("checkscope passes a file that could record", chk.get("ok") is True,
@@ -589,7 +591,8 @@ def recordability_checks():
 
         # The two type tables have to stay in step: an IEC name checkscope
         # suggests must be one newscope accepts, and a type that is not a real
-        # number belongs in the state band rather than on a shared axis.
+        # number belongs in a state band rather than on a shared axis - bits in
+        # one, integers in another.
         iec = ("BOOL", "SINT", "USINT", "BYTE", "INT", "UINT", "WORD", "DINT",
                "UDINT", "DWORD", "LINT", "ULINT", "LWORD", "REAL", "LREAL")
         typed = Path(tmp) / "every-type.tcscopex"
@@ -603,10 +606,15 @@ def recordability_checks():
               and not any("not one this tool recognises" in w
                           for w in typed_chk.get("warnings", [])),
               str(typed_chk.get("warnings"))[:70])
-        digital = [b["channels"] for c in all_types.get("charts", [])
-                   for b in c.get("bands", []) if b["band"] == "Digital / state"]
-        check("every type that is not a real number bands as state",
-              len(digital) == 1 and len(digital[0]) == len(iec) - 2,
+        by_band = {b["band"]: b["channels"] for c in all_types.get("charts", [])
+                   for b in c.get("bands", [])}
+        integers = [s for band, chans in by_band.items()
+                    if band.startswith("Step / count") for s in chans]
+        check("bits band as state, and every other integer type beside them",
+              [s.rsplit(":", 1)[0] for s in by_band.get("Digital / state", [])]
+              == ["MAIN.fbT.v0"]
+              and len(integers) == len(iec) - 3
+              and not any(s in ("MAIN.fbT.v13", "MAIN.fbT.v14") for s in integers),
               str([(c["chart"], [b["band"] for b in c["bands"]])
                    for c in all_types.get("charts", [])])[:90])
 
@@ -635,6 +643,105 @@ def recordability_checks():
         check("the placeholder template is a placeholder throughout",
               "PLACEHOLDER" in text and "<Name>Signal</Name>" in text,
               "minimal-single-channel.tcscopex")
+
+
+def prefix_house_checks():
+    """A 32-channel function-block recording in a prefix-style house.
+
+    The shape of a real follow-up session's channel list, every name a
+    stand-in: one step enum per nested block, so the leaf `seStep` repeats;
+    seven bits and two integers in one block; counters beside flags; and a
+    length whose name contains "Loading". On the version before this check it
+    put a step number on the same axis as seven 0/1 flags, filed the length
+    under torque, and wrote a band its own checkscope called crowded.
+    """
+    import xml.etree.ElementTree as ET
+
+    tpl = ROOT / "templates" / "axis-diagnosis.tcscopex"
+    if not tpl.exists():
+        check("prefix-style house layout", True, "skipped: no template")
+        return
+
+    ctl = "GVL.fbCell.fbControl"
+    startup = [f"{ctl}.fbStartup.{leaf}" for leaf in (
+        "seStep:INT", "sbReady1:BOOL", "sbReady2:BOOL", "sbHold1:BOOL",
+        "sbHold2:BOOL", "sbCheckOk:BOOL", "sbIdle:BOOL", "sbSingle:BOOL",
+        "onIndex:INT", "sfLoadingOffset:LREAL")]
+    tracks = [f"{ctl}.fbTrack{n}.{leaf}" for n in (1, 2) for leaf in (
+        "seStep:INT", "snCount:INT", "sbAtMark:BOOL", "sbInWindow:BOOL",
+        "sfTravelActual:LREAL", "sfEdgeFront:LREAL", "sfTarget1:LREAL",
+        "seDir1:INT", "ofPos1:LREAL", "ofPos2:LREAL")]
+    entries = [f"{ctl}.seStep:INT", *startup, *tracks, "GVL.fbRecipe.bUpdating:BOOL"]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "house.tcscopex"
+        made = run("newscope", tpl, "-o", out, "--netid", "1.2.3.4.1.1",
+                   "--channels", ",".join(entries))
+        names = [c["name"] for c in made.get("channels", [])]
+        check("32 channels sharing leaves still get 32 names",
+              len(names) == 32 and len(set(names)) == 32, str(len(set(names))))
+
+        types = {c["symbol"]: c["data_type"] for c in made.get("channels", [])}
+        charts = {c["chart"]: {b["band"]: b["channels"] for b in c["bands"]}
+                  for c in made.get("charts", [])}
+        # A step number running 0..200 flattens every 0/1 trace on its axis.
+        mixed = [f"{chart}/{band}" for chart, bands in charts.items()
+                 for band, chans in bands.items()
+                 if {types.get(s) == "BIT" for s in chans} == {True, False}
+                 and any(types.get(s) != "BIT" and types.get(s, "").startswith(("INT", "UINT"))
+                         for s in chans)]
+        check("bits never share an axis with multi-valued integers", not mixed,
+              str(mixed))
+        startup_bands = charts.get("fbStartup", {})
+        check("a length named ...Loading... is not filed as a load",
+              not any("sfLoadingOffset" in s
+                      for s in startup_bands.get("Torque / current", [])),
+              str({b: len(c) for b, c in startup_bands.items()}))
+        check("step enums and counters get a band of their own",
+              sorted(s.rsplit(".", 1)[1]
+                     for s in startup_bands.get("Step / count", []))
+              == ["onIndex", "seStep"]
+              and f"{ctl}.fbTrack1.snCount" in charts.get("fbTrack1", {}).get(
+                  "Step / count", []),
+              str({b: len(c) for b, c in startup_bands.items()}))
+
+        chk = run("checkscope", out)
+        check("checkscope has nothing to say about newscope's own layout",
+              chk.get("ok") is True
+              and not any("one value axis" in w or "stacks" in w
+                          for w in chk.get("warnings", [])),
+              str([w[:60] for w in chk.get("warnings", [])]))
+
+        # Past the crowding threshold on bits alone, the band is split rather
+        # than written in a shape checkscope would then warn about.
+        flags = Path(tmp) / "flags.tcscopex"
+        many = run("newscope", tpl, "-o", flags, "--netid", "1.2.3.4.1.1",
+                   "--channels", ",".join(f"GVL.fbIO.ib{i}:BOOL" for i in range(11)))
+        sizes = [len(b["channels"]) for c in many.get("charts", []) for b in c["bands"]]
+        check("eleven flags are split into balanced bands, none crowded",
+              sizes == [6, 5]
+              and not any("one value axis" in w
+                          for w in run("checkscope", flags).get("warnings", [])),
+              str(sizes))
+
+        # A disabled band was the other thing that came back from the field:
+        # every AxisGroup Enabled=false, nothing shown until someone clicked.
+        # Disabling is a real Scope View feature, so this warns, never fails.
+        text = out.read_text(encoding="utf-8-sig")
+        root = ET.fromstring(text)
+        for group in root.iter("AxisGroup"):
+            group.find("Enabled").text = "false"
+        next(root.iter("AdsAcquisition")).find("Enabled").text = "false"
+        off = Path(tmp) / "disabled.tcscopex"
+        off.write_bytes(b"\xef\xbb\xbf" + ET.tostring(root, encoding="utf-8"))
+        disabled = run("checkscope", off)
+        warned = " | ".join(disabled.get("warnings", []))
+        bands_total = sum(1 for _ in root.iter("AxisGroup"))
+        check("checkscope warns about disabled bands and acquisitions, and still passes",
+              disabled.get("ok") is True
+              and f"{bands_total} of {bands_total} bands are disabled" in warned
+              and "1 of 32 acquisitions are disabled" in warned,
+              warned[:120])
 
 
 def second_field_session_checks():
@@ -1079,6 +1186,7 @@ def main():
     layout_checks()
     recordability_checks()
     second_field_session_checks()
+    prefix_house_checks()
     shareability_checks()
 
     print()

@@ -164,9 +164,16 @@ Everything sharing an axis shares one auto-scaled range, so twenty channels on o
 nineteen flat lines and a following error of a few microns disappears under a position of a
 metre. It writes **one chart tab per device** and, inside each tab, **one stacked band per
 quantity** — position (set and actual together, since that gap is the measurement), following
-error, velocity, acceleration, torque, then states — and gives channels sharing a band
-different colours. It prints the layout it chose; check it before handing the file over.
-`--layout flat` returns to a single axis for channels that genuinely share a scale.
+error, velocity, acceleration, torque, then bits, then step numbers and counters (apart from
+the bits, which a step running to 200 would flatten) — and gives channels sharing a band
+different colours. A band that would hold more than eight traces is split into even parts. It
+prints the layout it chose; check it before handing the file over. `--layout flat` returns to
+a single axis for channels that genuinely share a scale.
+
+**Change the layout by regenerating, not by editing the XML.** A generated file came back from
+the field with every band disabled and hand-written band names, showing nothing until someone
+enabled the bands in Scope View — most likely edited after `newscope` wrote it. If you must
+edit one, copy an element that is enabled, and run `checkscope` again afterwards.
 
 Colours are written into the file. No value that follows the IDE theme has been seen, and
 whether Scope themes a colour the file leaves out is untested, so `--theme dark` (the default)
@@ -181,7 +188,7 @@ on a port no runtime serves; an IEC type name is refused (Scope read `LREAL` as 
 `VOID` already in the file is the mark of Scope having failed to read one; a width that contradicts its
 type records the wrong bytes; and channels sharing one name, or left with the template's
 placeholder, export as columns nobody can tell apart. It reports the layout and the theme too,
-and says when a chart is too crowded to read.
+says when a chart is too crowded to read, and warns about anything disabled.
 
 `py -3` is the Windows launcher, and TwinCAT runs on Windows; on Linux or macOS (and in this repo's CI) the same commands are `python3`.
 
