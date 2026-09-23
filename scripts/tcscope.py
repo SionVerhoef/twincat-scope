@@ -1758,6 +1758,10 @@ def short_aliases(symbols):
 
 BAND_OTHER = "Other"
 BAND_DIGITAL = "Digital / state"
+# Integers that are not measurements - step numbers, modes, counters. Not with
+# the bits: a step running 0..200 on the same axis as 0/1 flags draws every
+# flag as a flat line, which is the failure the bands exist to prevent.
+BAND_INTEGER = "Step / count"
 
 # Matched against the leaf of the symbol path, lowercased, first hit wins - so
 # the specific entries must come before the general ones. "PosDiff" contains
@@ -1772,7 +1776,8 @@ QUANTITY_BANDS = (
     ("Velocity",        r"velo|speed|rpm|drehzahl|omega"),
     ("Acceleration",    r"accel|decel|jerk|acc(?![a-z])"),
     ("Torque / current", r"torque|trq|moment|current|curr|amps|ampere|force"
-                         r"|kraft|load|iq(?![a-z])"),
+                         # Not "loading": a loading zone or band is a place.
+                         r"|kraft|load(?!ing)|iq(?![a-z])"),
     ("Temperature",     r"temperatur|temp(?![a-z])"),
     ("Pressure",        r"pressure|druck|druk|vacuum|vakuum"),
 )
@@ -1781,7 +1786,7 @@ QUANTITY_BANDS = (
 # then what position is judged by, then the effort that produced it.
 BAND_ORDER = ("Position", "Following error", "Velocity", "Acceleration",
               "Torque / current", "Pressure", "Temperature",
-              BAND_DIGITAL, BAND_OTHER)
+              BAND_DIGITAL, BAND_INTEGER, BAND_OTHER)
 
 # Path segments that describe a struct rather than a device. Stripping them
 # means MAIN.fbAxis1.NcToPlc.ActPos is grouped under fbAxis1, not NcToPlc,
@@ -1945,12 +1950,12 @@ def quantity_of(symbol, data_type=None):
         return BAND_DIGITAL
     parts = _segments(symbol)
     leaf = parts[-1].lower() if parts else ""
+    integer = data_type in DIGITAL_SCOPE_TYPES
     for band, pattern in QUANTITY_BANDS:
         if re.search(pattern, leaf):
-            return band
-    if data_type in DIGITAL_SCOPE_TYPES:
-        return BAND_DIGITAL
-    return BAND_OTHER
+            # An integer called eState is a state, but not a 0/1 one.
+            return BAND_INTEGER if integer and band == BAND_DIGITAL else band
+    return BAND_INTEGER if integer else BAND_OTHER
 
 
 def device_of(symbol):
@@ -1993,9 +1998,25 @@ def plan_layout(symbols, flat=False, types=None):
     # dicts keep insertion order, so tabs appear in the order the symbols were
     # asked for. The caller's ordering is information; alphabetising discards it.
     return [{"chart": titles[device],
-             "bands": [{"band": band, "channels": bands[band]}
-                       for band in BAND_ORDER if band in bands]}
+             "bands": [part for band in BAND_ORDER if band in bands
+                       for part in _split_band(band, bands[band])]}
             for device, bands in charts.items()]
+
+
+def _split_band(band, channels):
+    """One band, or several of even size once it is too crowded to read.
+
+    checkscope warns past CHANNELS_PER_BAND_WARN traces on one axis, and a
+    generator whose own output draws that warning is arguing with itself.
+    Eleven flags become 6 + 5, not 8 + 3.
+    """
+    parts = math.ceil(len(channels) / CHANNELS_PER_BAND_WARN)
+    if parts <= 1:
+        return [{"band": band, "channels": channels}]
+    size = math.ceil(len(channels) / parts)
+    return [{"band": band if i == 0 else f"{band} ({i + 1})",
+             "channels": channels[i * size:(i + 1) * size]}
+            for i in range(parts)]
 
 
 def cmd_newscope(args):
@@ -2491,6 +2512,29 @@ def cmd_checkscope(args):
                 "group them by quantity instead."
             )
 
+    # Disabling is a Scope View feature, so this warns rather than fails. But a
+    # file came back from the field with every band disabled, showing nothing
+    # until someone enabled them by hand - newscope never writes Enabled, so
+    # something edited it afterwards, and nothing said so.
+    disabled = {}
+    for tag, what, consequence in (
+            ("AdsAcquisition", "acquisitions",
+             "Whether Scope still records a disabled acquisition has not been "
+             "established; enable any that should be recorded."),
+            ("AxisGroup", "bands",
+             "A file with its bands disabled showed nothing until they were "
+             "enabled by hand in Scope View."),
+            ("Channel", "display channels",
+             "Enable any that should be drawn.")):
+        nodes = list(root.iter(tag))
+        off = [(n.findtext("Name") or n.findtext("SymbolName") or "?").strip()
+               for n in nodes
+               if (n.findtext("Enabled") or "").strip().lower() == "false"]
+        disabled[what] = len(off)
+        if off:
+            warnings.append(f"{len(off)} of {len(nodes)} {what} are disabled "
+                            f"({_first_few(off)}). {consequence}")
+
     # Cosmetic, never a problem - a file records the same in any colour. But
     # an axis with no AxisStyle leaves its text and grid to Scope's defaults,
     # which need not suit the chart background this file sets.
@@ -2573,6 +2617,7 @@ def cmd_checkscope(args):
           "charts": layout,
           "theme": theme,
           "axes_without_style": unstyled,
+          "disabled": disabled,
           "total_samples_per_second": total_rate,
           "load_band": load_band,
           "load_bands_samples_per_second": {
