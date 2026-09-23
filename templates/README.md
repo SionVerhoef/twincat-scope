@@ -59,8 +59,8 @@ requesting twenty channels does not produce twenty traces sharing one axis. See
 These were written from a schema derived by reading real Beckhoff sample projects. **Neither
 template has been opened in TwinCAT as shipped.** Files `newscope` generated from
 `axis-diagnosis.tcscopex` have: the first opened and recorded nothing
-(`evals/field-review-1fa0e9b.md`); a later one, with the type, name and port fixes, recorded
-five NC axis channels (`evals/field-review-1fa0e9b-rounds.md`). The `AxisStyle` elements and
-theme colours were added after that and have not been opened. If you load one, whether it
-works or fails, that is worth reporting back — and open it by adding it to an existing
-Measurement project, not by double-clicking it.
+(`evals/field-review-1fa0e9b.md`); with the type, name and port fixes, and later with the
+`AxisStyle` elements and dark theme as shipped here, they recorded NC axis and PLC channels
+unedited (`evals/field-review-1fa0e9b-rounds.md`, `evals/field-review-fe9b487.md`). If you
+load one, whether it works or fails, that is worth reporting back — and open it by adding it
+to an existing Measurement project, not by double-clicking it.

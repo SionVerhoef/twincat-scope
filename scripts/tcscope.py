@@ -37,8 +37,8 @@ exports from a Beckhoff CX/AX8000 machine (TwinCAT 3.1, EU locale) covering
 both the TAB and ',' dialects, and is tested against structural copies of all
 five layouts those files use. The .tcscopex writer is modelled on real Beckhoff
 sample files. Its first file to reach a machine recorded nothing; with the type,
-name and port fixes, one recorded five NC axis channels - from patches to an
-older version, without the AxisStyle and colours this one writes. Both say so
+name and port fixes, its own unedited output has recorded NC axis and PLC
+channels. Triggers and .svdx conversion have not been seen working. Both say so
 rather than implying otherwise.
 """
 
@@ -1800,13 +1800,11 @@ WRAPPER_SEGMENTS = {"nctoplc", "plctonc", "nctoplcaxis", "plctoncaxis",
 # --------------------------------------------------------------------------
 #
 # Scope stores absolute colours - a signed 32-bit ARGB integer, or a .NET colour
-# name. No real file has shown a value that follows the IDE theme, and whether
-# Scope themes a colour the file leaves out has not been tested, so every
-# colour here is written and the file is styled for one background. The chart
-# carries its own background, axis text and grid, so the reasoning is that a
-# dark chart should still read in a light IDE, the way an oscilloscope screen
-# does - reasoning, not an observation. What was observed is the other way
-# round: the light greys this tool used to write were glaring in a dark IDE.
+# name - and draws them as written: a dark-styled file stayed dark with the IDE
+# in dark theme and in light, and read well in both. Whether Scope themes a
+# colour the file leaves out has not been tested, so every colour here is
+# written and the file is styled for one background. The light greys this tool
+# used to write were glaring in a dark IDE, which is why dark is the default.
 #
 # Dark's background and axis text are the values a real dark-styled project
 # uses. The traces are one categorical palette stepped per background and
@@ -2231,13 +2229,11 @@ def cmd_newscope(args):
         "record_seconds": (int(record_ticks) / TICKS_PER_MS / 1000.0
                            if record_ticks.isdigit() and int(record_ticks) > 0
                            else None),
-        "note": "An older version's file with the same type, name and port "
-                "fields recorded five NC axis channels on a real target. This "
-                "version's output - its AxisStyle and colours included - has "
-                "not been opened in Scope View, and bit, integer and PLC-side "
-                "channels and triggers have not been seen working. Open it by "
-                "adding it to an existing Measurement project, not by "
-                "double-clicking it.",
+        "note": "Files from this version have recorded NC axis and PLC bit, "
+                "integer and real channels on a real target, unedited. Triggers "
+                "have not been seen working. Open it by adding it to an "
+                "existing Measurement project, not by double-clicking it, and "
+                "a person presses Record.",
     }
     suspect_ports = [s for s, spec in specs.items()
                      if unlikely_plc_port(s, spec["port"])]

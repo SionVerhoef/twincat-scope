@@ -175,11 +175,10 @@ the field with every band disabled and hand-written band names, showing nothing 
 enabled the bands in Scope View — most likely edited after `newscope` wrote it. If you must
 edit one, copy an element that is enabled, and run `checkscope` again afterwards.
 
-Colours are written into the file. No value that follows the IDE theme has been seen, and
-whether Scope themes a colour the file leaves out is untested, so `--theme dark` (the default)
-or `--theme light` picks one background with axis text, grid and traces chosen to read on it.
-A light chart in a dark IDE was reported from the field as glaring; that a dark chart reads
-well in a light IDE is the reasoning behind the default, not an observation.
+Colours are written into the file, and Scope draws them as written: a dark-styled file stayed
+dark with the IDE in dark theme and in light, and read well in both. So `--theme dark` (the
+default) or `--theme light` picks one background with axis text, grid and traces chosen to
+read on it. Whether Scope would theme a colour the file leaves out is still untested.
 
 Always `checkscope` before handing a file over. It catches the failures that look like
 success: a display channel whose `AcquisitionGUID` points at nothing opens perfectly and
@@ -221,7 +220,7 @@ can share a project because `newscope` mints fresh GUIDs every run; a hand-copie
 
 The `.tcscopex` schema here was derived by reading real Beckhoff sample projects, and the
 templates are validated against that schema. It is not written in an environment that has a
-Beckhoff toolchain; what has been watched working in TwinCAT came from two field sessions.
+Beckhoff toolchain; what has been watched working in TwinCAT came from field sessions.
 
 The first opened a generated project and **recorded nothing**: axis channels on the PLC port,
 IEC type names, and every channel named `Signal` (`evals/field-review-1fa0e9b.md`). The second
@@ -231,11 +230,12 @@ port 501 as well, **the file recorded** — five `REAL64` NC axis channels, symb
 index group and offset left at 0. That file opened, showed its one tab and four bands as laid
 out, kept symbol names with spaces and parentheses intact, and recorded.
 
-Precisely what that covers: those rounds ran patches to an older version rather than this
-code. This version writes the same type, name, port and addressing fields, but it also writes
-an `AxisStyle` on every axis and new colours throughout, which Scope has never read — **no file
-from this version has been opened**. Bit, integer and PLC-side channels from a generated file,
-the `--theme` colours, and triggers have not been seen working.
+Those rounds ran patches to an older version. A later session ran this skill's own output,
+unedited (`evals/field-review-fe9b487.md`): the same five NC channels, now with an `AxisStyle`
+on every axis and the dark theme, **opened and recorded**; and a file mixing two NC axis
+channels with a PLC `BOOL`, `INT` and `LREAL` on 851 **recorded all five** across three tabs.
+Triggers, `.svdx` conversion and the round trip back through these verbs have not been seen
+working.
 
 Rule 3 applies to this skill's own claims, so precisely: the CSV reader **was** measured
 against 19 genuine `TC3ScopeExportTool.exe` exports from a Beckhoff CX/AX8000 machine
