@@ -228,6 +228,13 @@ It also lays them out, rather than piling every trace onto one axis:
 - **No band past eight traces.** A band that would hold more is split into even parts —
   `Digital / state`, `Digital / state (2)` — because that is where `checkscope` starts warning,
   and a generator should not write what its own checker complains about.
+- **A lone parent is drawn beside what it drives.** A block with one channel and blocks
+  beneath it — `GVL.fbCell.fbControl.seStep` above `…fbControl.fbStartup.*` — gets no tab of
+  its own; the channel is drawn first in its band in each descendant's tab, as extra display
+  channels on one acquisition, so it costs the target nothing more. A one-segment path (`GVL`,
+  `MAIN`) is a namespace, not a block, and a lone block with nothing beneath it has no one to
+  lend context to; both keep their tab. `checkscope` counts acquisitions drawn in several tabs
+  and warns only when one is drawn twice in the same tab.
 - **Tabs appear in the order the symbols were asked for**, because that ordering is
   information.
 
