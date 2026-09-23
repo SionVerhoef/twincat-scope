@@ -23,7 +23,10 @@ cost, the cost is cut where it was known to be paid:
   the broken invocation.
 - The stale claim in `export-tool.md` that no real `.svdx` had been converted is corrected:
   two were, first time (`evals/field-review-3e4c44d.md`); what remains unproven is variety.
-- CI's branding guard no longer spells the name it guards against; the pattern is encoded.
+- CI's business-name guard is removed rather than encoded. It fired only after a push had
+  already published the leak, it never fired in practice, and a hidden pattern with a
+  comment explaining the hiding is an invitation to decode it. The anonymisation rules are
+  the actual defence; the certification-claim and absolute-path checks stay.
 
 ### Rails that are not rails, and copies in any column order
 
