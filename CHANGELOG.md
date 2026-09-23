@@ -10,6 +10,12 @@ First working version. Not yet published.
   held while it was split, over half the peak. A 20 M-sample export now peaks at 384 MB, not
   630 MB, at the same speed. Lines split exactly as before, so the header row is found where
   the sniffer found it; a check runs the split at chunk sizes down to one character.
+### Restyling a project keeps its targets
+
+- **`newscope` without `--channels` no longer resets every channel's target.** It rewrote
+  every AmsNetId to `0.0.0.0.0.0` and every PLC port to 851, so a channel on 852 moved in
+  silence. It now changes the NetID or the port only when `--netid` or `--port` is given,
+  and lists every change under `retargeted`.
 
 ### Rails that are not rails, and copies in any column order
 

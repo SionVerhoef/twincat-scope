@@ -1227,6 +1227,60 @@ def shareability_checks():
           "; ".join(f"{k} in {v[0]}" for k, v in list(offenders.items())[:3]))
 
 
+def retarget_checks():
+    """Restyling a project with no --channels keeps its own targets.
+
+    It used to rewrite every AmsNetId to the --netid default and every PLC
+    channel to port 851, so a channel on 852 moved with no word said and the
+    output claimed the channels were unchanged.
+    """
+    import xml.etree.ElementTree as ET
+    tpl = ROOT / "templates" / "axis-diagnosis.tcscopex"
+    if not tpl.exists():
+        check("newscope keeps a template's targets", True, "skipped: no template")
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        own = Path(tmp) / "own-targets.tcscopex"
+        root = ET.fromstring(tpl.read_text(encoding="utf-8-sig"))
+        acqs = root.findall(".//AdsAcquisition")
+        for acq in acqs:
+            acq.find("AmsNetId").text = "1.2.3.4.1.1"
+        acqs[0].find("TargetPort").text = "852"
+        own.write_bytes(b"\xef\xbb\xbf" + ET.tostring(root, encoding="utf-8"))
+
+        def targets(path):
+            back = ET.fromstring(path.read_text(encoding="utf-8-sig"))
+            return [(a.findtext("AmsNetId"), a.findtext("TargetPort"))
+                    for a in back.iter("AdsAcquisition")]
+
+        before = targets(own)
+        kept = Path(tmp) / "kept.tcscopex"
+        made = run("newscope", own, "-o", kept, "--theme", "light")
+        check("newscope without --channels, --netid or --port keeps every target",
+              made.get("ok") and targets(kept) == before
+              and made.get("retargeted") == [],
+              f"{targets(kept)[:2]} from {before[:2]}")
+
+        ported = Path(tmp) / "ported.tcscopex"
+        made = run("newscope", own, "-o", ported, "--port", "851")
+        check("newscope --port alone moves the ports and keeps the NetIDs",
+              made.get("ok")
+              and targets(ported) == [("1.2.3.4.1.1", "851")] * len(before)
+              and made.get("retargeted") == [
+                  {"symbol": acqs[0].findtext("SymbolName"), "field": "TargetPort",
+                   "from": "852", "to": "851"}],
+              str(made.get("retargeted")))
+
+        moved = Path(tmp) / "moved.tcscopex"
+        made = run("newscope", own, "-o", moved, "--netid", "127.0.0.1.1.1")
+        check("newscope --netid alone moves the NetIDs, keeps 852, and says so",
+              made.get("ok")
+              and targets(moved) == [("127.0.0.1.1.1", p) for _, p in before]
+              and len(made.get("retargeted", [])) == len(before)
+              and made.get("ams_net_id") == "127.0.0.1.1.1",
+              f"{targets(moved)[:1]}, {len(made.get('retargeted', []))} reported")
+
+
 def layout_checks():
     """Where a channel lands on screen, which is not the same as being wired.
 
@@ -1485,6 +1539,7 @@ def main():
     export_copy_checks()
     still_channel_checks()
     shareability_checks()
+    retarget_checks()
 
     print()
     failed = [name for name, ok, _ in results if not ok]
