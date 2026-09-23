@@ -436,12 +436,13 @@ container, 20 channels in two groups:
 
 | Samples | File | Per verb | Peak RSS |
 |---|---|---|---|
-| 0.4 M | 5.7 MB | ~1 s | 66 MB |
-| 2 M | 28.6 MB | ~4 s | 186 MB |
-| 10 M | 143.6 MB | 15–16 s | 340 MB |
-| 20 M | 288.3 MB | 31–42 s | 630 MB |
+| 0.4 M | 5.7 MB | ~1 s | 108 MB |
+| 2 M | 28.6 MB | ~4 s | 125 MB |
+| 10 M | 143.6 MB | 15–24 s | 215 MB |
+| 20 M | 288.3 MB | 31–33 s | 384 MB |
 
-Peak memory tracks the **file size**, not the sample count: roughly 25 MB + 2.2 × file size.
+Peak memory tracks the **samples**, not the file: roughly 100 MB + 2 × the float64 array. The
+CSV is read a chunk at a time, split exactly as `str.splitlines()` splits the whole file.
 Also measured: one 13.6 s `ingest` turns that 143.6 MB CSV into 11 MB of Parquet, after which
 the same verbs run in 1.8–3.3 s instead of 15–16 s.
 
@@ -485,10 +486,9 @@ written for.
   documented limitation rather than shipping an unvalidated heuristic. **If you can suggest a
   discriminator that survives the real files, that is the single most useful thing you could
   add.** A candidate is the speed at which the signal enters and leaves the rail.
-- **Peak RSS is still ~2.2 × file size**, because the decoded text and its line list are alive
-  at once. Streaming needs an exact byte offset out of `sniff_csv` first, and `str.splitlines()`
-  breaks on a wider separator set than a byte-level split — a naive stream desyncs columns
-  silently, which is precisely the failure class this tool exists to avoid.
+- **Peak RSS is still ~2 × the array**, because the parsed blocks and the array they are
+  joined into are alive at once. Copying block by block and freeing each was tried and saved
+  nothing: the allocator kept the memory.
 
 ## 9. Verified correct — do NOT "fix" these
 

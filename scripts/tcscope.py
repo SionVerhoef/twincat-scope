@@ -544,28 +544,52 @@ def _chunk_array(np, block, delim, decimal, ncols):
                         dtype=float).reshape(-1, ncols)
 
 
+STREAM_CHARS = 2_000_000
+
+
+def _stream_lines(path):
+    """The file's lines, exactly as text.splitlines() on the whole file gives them.
+
+    The same decoding and the same separators sniff_csv indexed with, so
+    data_row still means what it said there - a split that disagreed by one
+    line would misalign every column in silence. Only one chunk of text is
+    alive at a time: holding the whole decoded file and its line list at once
+    was over half the peak on a big export.
+
+    The last piece of every chunk is carried into the next, even when it looks
+    complete: a '\\r' at a chunk's end may be the first half of '\\r\\n'.
+    """
+    carry = ""
+    with open(path, encoding="utf-8-sig", errors="replace", newline="") as fh:
+        while True:
+            chunk = fh.read(STREAM_CHARS)
+            if not chunk:
+                break
+            pieces = (carry + chunk).splitlines(keepends=True)
+            carry = pieces.pop()
+            yield from "".join(pieces).splitlines()
+    yield from carry.splitlines()
+
+
 def load_csv(path):
     """Read a Scope CSV export into a Recording."""
     np = need("numpy")
     info = sniff_csv(path)
     delim, decimal, ncols = info["delimiter"], info["decimal"], info["columns"]
 
-    with open(path, "rb") as fh:
-        text = fh.read().decode("utf-8-sig", errors="replace")
-    # The same line list sniff_csv indexed into, so data_row still means what it
-    # said there. `text` is released before parsing begins: on a 143 MB export
-    # it and the line list are together 318 MB of the peak.
-    lines = text.splitlines()
-    del text
-    del lines[:info["data_row"]]
-
-    blocks = []
-    for start in range(0, len(lines), CHUNK_ROWS):
-        block = _chunk_array(np, lines[start:start + CHUNK_ROWS],
-                             delim, decimal, ncols)
-        if block is not None:
-            blocks.append(block)
-    del lines
+    blocks, batch = [], []
+    for index, line in enumerate(_stream_lines(path)):
+        if index < info["data_row"]:
+            continue
+        batch.append(line)
+        if len(batch) == CHUNK_ROWS:
+            block = _chunk_array(np, batch, delim, decimal, ncols)
+            if block is not None:
+                blocks.append(block)
+            batch = []
+    block = _chunk_array(np, batch, delim, decimal, ncols) if batch else None
+    if block is not None:
+        blocks.append(block)
     if not blocks:
         fail(f"no parsable data rows in {path}")
 
@@ -2224,8 +2248,12 @@ def cmd_newscope(args):
             fail(f"{template} has no RecordTime element to set")
         record_node.text = str(ticks)
 
-    valid_port(args.port, "--port")
-    requested = ([c.strip() for c in args.channels.split(",")]
+    # Left out, --netid and --port mean "keep the template's own" when there are
+    # no --channels, and these defaults only for the channels written new.
+    netid = args.netid if args.netid is not None else "0.0.0.0.0.0"
+    plc_port = (valid_port(args.port, "--port") if args.port is not None
+                else PLC_FIRST_PORT)
+    requested =([c.strip() for c in args.channels.split(",")]
                  if args.channels is not None else [])
     if args.channels is not None and not any(requested):
         # Otherwise this falls through to "unchanged from template" and ok:true,
@@ -2237,7 +2265,7 @@ def cmd_newscope(args):
     # signal. Keep first-seen order; it drives the tab order below.
     specs = {}
     for entry in (c for c in requested if c):
-        spec = parse_channel_spec(entry, args.port)
+        spec = parse_channel_spec(entry, plc_port)
         seen = specs.get(spec["symbol"])
         if seen is None:
             specs[spec["symbol"]] = spec
@@ -2249,13 +2277,23 @@ def cmd_newscope(args):
     channels = list(specs)
     aliases = short_aliases(channels)
     layout = None
+    retargeted = []
 
     if not channels:
+        # Only what was asked for. Rewriting both unasked moved a channel on 852
+        # to 851 in silence, in a file that then recorded nothing.
         for node in acquisitions:
             symbol = (node.findtext("SymbolName") or "").strip()
-            set_fields(node, (("AmsNetId", args.netid),
-                              ("TargetPort", str(port_for(symbol, args.port)))),
-                       required=True)
+            pairs = []
+            if args.netid is not None:
+                pairs.append(("AmsNetId", netid))
+            if args.port is not None:
+                pairs.append(("TargetPort", str(port_for(symbol, plc_port))))
+            before = {tag: (node.findtext(tag) or "").strip() for tag, _ in pairs}
+            set_fields(node, pairs, required=True)
+            retargeted += [{"symbol": symbol, "field": tag,
+                            "from": before[tag], "to": value}
+                           for tag, value in pairs if before[tag] != value]
     else:
         acq_parent = parent_of(acquisitions[0])
         if acq_parent is None:
@@ -2303,7 +2341,7 @@ def cmd_newscope(args):
             acq_guid_of[symbol] = acq_guid
             set_fields(acq, (
                 ("SymbolName", symbol),
-                ("AmsNetId", args.netid),
+                ("AmsNetId", netid),
                 ("TargetPort", str(channel["port"])),
                 ("DataType", channel["data_type"]),
                 ("VariableSize", str(channel["variable_size"])),
@@ -2380,7 +2418,8 @@ def cmd_newscope(args):
         "charts": layout if layout is not None else "unchanged from template",
         "theme": args.theme,
         "guids": guids,
-        "ams_net_id": args.netid,
+        "ams_net_id": (netid if channels or args.netid is not None
+                       else "unchanged from template"),
         "record_seconds": (int(record_ticks) / TICKS_PER_MS / 1000.0
                            if record_ticks.isdigit() and int(record_ticks) > 0
                            else None),
@@ -2389,6 +2428,8 @@ def cmd_newscope(args):
                 "by adding it to an existing Measurement project, not by "
                 "double-clicking it, and a person presses Record.",
     }
+    if not channels:
+        out["retargeted"] = retargeted
     if args.sample_time_ms is not None:
         # Measured in the field: 10 ms on a 4 ms task was saved as 8 ms. This
         # tool does not know the task cycle, so it says so instead of guessing.
@@ -3044,10 +3085,14 @@ def build_parser():
                         "any other undeclared channel is written as "
                         f"{DEFAULT_SCOPE_TYPE}, which is wrong for a BOOL or an "
                         "enum and is reported as a default rather than a fact.")
-    q.add_argument("--netid", default="0.0.0.0.0.0", help="target AmsNetId")
-    q.add_argument("--port", type=int, default=851,
-                   help=f"ADS port for PLC symbols. Symbols under 'Axes.' are "
-                        f"served by the NC runtime and always go to {NC_PORT}.")
+    q.add_argument("--netid",
+                   help="target AmsNetId (0.0.0.0.0.0 for new channels). Left "
+                        "out with no --channels, the template's own is kept.")
+    q.add_argument("--port", type=int,
+                   help=f"ADS port for PLC symbols ({PLC_FIRST_PORT} for new "
+                        f"channels). Symbols under 'Axes.' are served by the NC "
+                        f"runtime and always go to {NC_PORT}. Left out with no "
+                        f"--channels, the template's own ports are kept.")
     q.add_argument("--sample-time-ms", type=float)
     q.add_argument("--record-time", type=float,
                    help="length of the recording window in seconds. The window "

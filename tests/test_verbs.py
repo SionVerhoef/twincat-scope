@@ -73,6 +73,34 @@ def first(events, channel, kind):
     return None
 
 
+def stream_split_checks():
+    """load_csv's streamed lines are exactly text.splitlines() of the whole file.
+
+    The one internal function checked directly: no CLI output can show a
+    one-line disagreement at a chunk boundary until it misaligns a column, and
+    sniff_csv's data_row is only right if both split identically. A tiny chunk
+    puts a boundary inside every awkward case.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("tcscope", TCSCOPE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    text = ("﻿Name\tTime\r\nµs;1,5\r\n\r\nx\ry\n\x0bz\x1cw v\x85u\r\r\n"
+            "€€€\r\n" + "1\t2\r\n" * 5 + "tail no newline")
+    raw = text.encode("utf-8") + b"\xff\r\nlast"
+    want = raw.decode("utf-8-sig", errors="replace").splitlines()
+    mismatched = []
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "split.csv"
+        path.write_bytes(raw)
+        for size in (1, 2, 3, 7, 10_000):
+            mod.STREAM_CHARS = size
+            if list(mod._stream_lines(path)) != want:
+                mismatched.append(size)
+    check("streamed CSV lines match splitlines() at every chunk size",
+          not mismatched, f"differs at chunk size {mismatched}")
+
+
 def real_fixture_checks():
     """Everything that only a genuine Scope layout can exercise.
 
@@ -1199,6 +1227,60 @@ def shareability_checks():
           "; ".join(f"{k} in {v[0]}" for k, v in list(offenders.items())[:3]))
 
 
+def retarget_checks():
+    """Restyling a project with no --channels keeps its own targets.
+
+    It used to rewrite every AmsNetId to the --netid default and every PLC
+    channel to port 851, so a channel on 852 moved with no word said and the
+    output claimed the channels were unchanged.
+    """
+    import xml.etree.ElementTree as ET
+    tpl = ROOT / "templates" / "axis-diagnosis.tcscopex"
+    if not tpl.exists():
+        check("newscope keeps a template's targets", True, "skipped: no template")
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        own = Path(tmp) / "own-targets.tcscopex"
+        root = ET.fromstring(tpl.read_text(encoding="utf-8-sig"))
+        acqs = root.findall(".//AdsAcquisition")
+        for acq in acqs:
+            acq.find("AmsNetId").text = "1.2.3.4.1.1"
+        acqs[0].find("TargetPort").text = "852"
+        own.write_bytes(b"\xef\xbb\xbf" + ET.tostring(root, encoding="utf-8"))
+
+        def targets(path):
+            back = ET.fromstring(path.read_text(encoding="utf-8-sig"))
+            return [(a.findtext("AmsNetId"), a.findtext("TargetPort"))
+                    for a in back.iter("AdsAcquisition")]
+
+        before = targets(own)
+        kept = Path(tmp) / "kept.tcscopex"
+        made = run("newscope", own, "-o", kept, "--theme", "light")
+        check("newscope without --channels, --netid or --port keeps every target",
+              made.get("ok") and targets(kept) == before
+              and made.get("retargeted") == [],
+              f"{targets(kept)[:2]} from {before[:2]}")
+
+        ported = Path(tmp) / "ported.tcscopex"
+        made = run("newscope", own, "-o", ported, "--port", "851")
+        check("newscope --port alone moves the ports and keeps the NetIDs",
+              made.get("ok")
+              and targets(ported) == [("1.2.3.4.1.1", "851")] * len(before)
+              and made.get("retargeted") == [
+                  {"symbol": acqs[0].findtext("SymbolName"), "field": "TargetPort",
+                   "from": "852", "to": "851"}],
+              str(made.get("retargeted")))
+
+        moved = Path(tmp) / "moved.tcscopex"
+        made = run("newscope", own, "-o", moved, "--netid", "127.0.0.1.1.1")
+        check("newscope --netid alone moves the NetIDs, keeps 852, and says so",
+              made.get("ok")
+              and targets(moved) == [("127.0.0.1.1.1", p) for _, p in before]
+              and len(made.get("retargeted", [])) == len(before)
+              and made.get("ams_net_id") == "127.0.0.1.1.1",
+              f"{targets(moved)[:1]}, {len(made.get('retargeted', []))} reported")
+
+
 # Written from the structure a real PLC .tmc was seen to have, names invented:
 # symbols under DataAreas/DataArea/Symbol, a block's members as SubItem, an enum
 # with EnumInfo and its width in BaseType. Both array forms appear, since a
@@ -1525,6 +1607,7 @@ def main():
                               for w in chk_restart.get("warnings", [])),
                   str(chk_restart.get("warnings")))
 
+    stream_split_checks()
     real_fixture_checks()
     at_rest_checks()
     layout_checks()
@@ -1534,6 +1617,7 @@ def main():
     export_copy_checks()
     still_channel_checks()
     shareability_checks()
+    retarget_checks()
     tmc_checks()
 
     print()
