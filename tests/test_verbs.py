@@ -645,6 +645,99 @@ def recordability_checks():
               "minimal-single-channel.tcscopex")
 
 
+def write_folded_export(path, rows=200):
+    """A TAB-dialect export shaped like the field's round-5 recording.
+
+    newscope draws a parent block's lone step in each child's tab, one
+    acquisition behind three display channels. Scope exports one column per
+    display channel, naming the copies "<name> (1)", "<name> (2)", each in a
+    group of its own. Also here: a flag with a display offset of 2, which Scope
+    records in the Offset header while the values stay raw; another block's
+    step that only shares the short name; and the same symbol recorded with
+    one value different, which is a second recording, not a copy.
+    """
+    from make_real_fixtures import TAB_KEYS, decimal_comma
+
+    parent = "GVL.fbCell.fbControl.seStep"
+    step = [0.0 if i < 50 else 10.0 for i in range(rows)]
+    other = list(step)
+    other[120] = 7.0
+    groups = [  # (Name, SymbolName, Data-Type, Offset, values)
+        ("seStep", parent, "INT16", "0", step),
+        ("bFlag", "GVL.fbCell.fbA.bFlag", "BIT", "2", [float(i % 2) for i in range(rows)]),
+        ("seStep (1)", parent, "INT16", "0", step),
+        ("seStep (2)", parent, "INT16", "0", step),
+        ("seStep", "GVL.fbOther.seStep", "INT16", "0", [3.0] * rows),
+        ("seStep (3)", parent, "INT16", "0", other),
+        # Two idle blocks hold the same step all recording long: identical
+        # data, same short name, different signals.
+        ("seStep", "GVL.fbIdle.seStep", "INT16", "0", [3.0] * rows),
+    ]
+    meta = {"Name": 0, "SymbolName": 1, "Data-Type": 2, "Offset": 3}
+    fixed = {"NetId": "1.2.3.4.1.1", "Port": "851", "SampleTime[ms]": "8,000000",
+             "SymbolBased": "True", "VariableSize": "2", "ScaleFactor": "1,000000",
+             "BitMask": "0", "Unit": "(None)", "IndexGroup": "0", "IndexOffset": "0",
+             "SymbolComment": "", "StartTime": "0", "EndTime": "0"}
+    lines = ["TwinCAT Scope Export", f"File\t{path.name}", "StartTime\t23-9-2026 10:00:00",
+             "EndTime\t23-9-2026 10:00:02", "Version\t3.1.4024.35", ""]
+    for key in TAB_KEYS:
+        row = []
+        for spec in groups:
+            row += [key, spec[meta[key]] if key in meta else fixed[key]]
+        lines.append("\t".join(row))
+    for i in range(rows):
+        row = []
+        for spec in groups:
+            row += [decimal_comma(f"{i * 8.0:.6f}"), decimal_comma(f"{spec[4][i]:.6f}")]
+        lines.append("\t".join(row))
+    path.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
+    return parent
+
+
+def export_copy_checks():
+    """One acquisition drawn in three tabs exports as three columns.
+
+    Measured in the field (round 5): 40 acquisitions, 42 columns. Left alone,
+    every verb would count the parent step three times - events tripled, and
+    perfect correlations between a channel and itself.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        csv = Path(tmp) / "folded.csv"
+        parent = write_folded_export(csv)
+        man = run("manifest", csv)
+        chans = man.get("channels", [])
+        symbols = [c["symbol_name"] for c in chans]
+        check("identical copies of one acquisition are read as one channel",
+              symbols.count(parent) == 2 and len(chans) == 5
+              and len(man.get("groups", [])) == 5,
+              str([(c["name"], c["symbol_name"]) for c in chans]))
+        check("the collapse is reported, naming what was dropped",
+              man.get("copies_collapsed") == [{"kept": "seStep",
+                                               "dropped": ["seStep (1)", "seStep (2)"]}],
+              str(man.get("copies_collapsed")))
+        # Only exact copies: another block's step, and the same symbol with one
+        # sample different, are real channels and must survive.
+        check("a shared short name, identical data or a differing recording is not a copy",
+              "GVL.fbOther.seStep" in symbols and "GVL.fbIdle.seStep" in symbols
+              and symbols.count(parent) == 2,
+              str(symbols))
+        flag = next((c for c in chans if c["symbol_name"] == "GVL.fbCell.fbA.bFlag"), {})
+        check("a display offset is reported, and never applied to the values",
+              flag.get("display_offset") == 2.0
+              and not any("display_offset" in c for c in chans if c is not flag)
+              and run("stats", csv, "--channels", "bFlag").get("channels", [{}])[0].get("max") == 1.0,
+              str(flag))
+
+        pq = Path(tmp) / "folded.parquet"
+        run("ingest", csv, "-o", pq)
+        back = run("manifest", pq)
+        check("ingest keeps the collapse and the offset through Parquet",
+              len(back.get("channels", [])) == 5
+              and back.get("copies_collapsed") == man.get("copies_collapsed")
+              and any(c.get("display_offset") == 2.0 for c in back.get("channels", [])),
+              str(back.get("copies_collapsed")))
+
+
 def prefix_house_checks():
     """A 32-channel function-block recording in a prefix-style house.
 
@@ -733,6 +826,28 @@ def prefix_house_checks():
               len(drawn) == 3 and chk.get("acquisitions") == 32
               and chk.get("acquisitions_in_several_tabs") == 1,
               f"drawn {len(drawn)}, acquisitions {chk.get('acquisitions')}")
+        # Flags in one band get lanes of their own, by display offset - the
+        # field showed the export stays raw 0/1. Integers are not offset.
+        def offsets(chart_name, band_name):
+            chart = next((c for c in house.iter("YTChart")
+                          if c.findtext("Name") == chart_name), None)
+            band = next((g for g in chart.iter("AxisGroup")
+                         if g.findtext("Name") == band_name), None) if chart is not None else None
+            return [c.findtext("SubMember/AcquisitionInterpreter/Offset")
+                    for c in (band.findall("SubMember/Channel") if band is not None else [])]
+        check("flags in one band are drawn in lanes of their own",
+              offsets("fbStartup", "Digital / state")
+              == ["0", "1.5", "3", "4.5", "6", "7.5", "9"]
+              and set(offsets("fbStartup", "Step / count")) == {"0"},
+              str(offsets("fbStartup", "Digital / state")))
+        timed = run("newscope", tpl, "-o", Path(tmp) / "timed.tcscopex",
+                    "--netid", "1.2.3.4.1.1", "--sample-time-ms", "10",
+                    "--channels", "GVL.fbA.bX:BOOL")
+        check("newscope says Scope snaps a sample time to the task cycle",
+              "multiple of the cycle" in timed.get("sample_time_note", "")
+              and "sample_time_note" not in made,
+              str(timed.get("sample_time_note"))[:60])
+
         # Nothing below it to give context to, so it keeps its own tab.
         check("a lone channel with no child blocks keeps its tab",
               list(charts.get("fbRecipe", {}).values()) == [["GVL.fbRecipe.bUpdating"]],
@@ -1238,6 +1353,7 @@ def main():
     recordability_checks()
     second_field_session_checks()
     prefix_house_checks()
+    export_copy_checks()
     shareability_checks()
 
     print()

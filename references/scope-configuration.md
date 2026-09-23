@@ -8,8 +8,15 @@ data — which is what makes it templatable, diffable and safe to commit. Record
 file generated from it first opened and recorded nothing (`evals/field-review-1fa0e9b.md`);
 with the type, name and port fixes described below, files generated unedited **record** — NC
 axis channels on 501, and PLC `BIT`, `INT16` and `REAL64` channels on 851, with an
-`AxisStyle` on every axis (`evals/field-review-fe9b487.md`). Triggers have not been seen
-working.
+`AxisStyle` on every axis (`evals/field-review-fe9b487.md`) — and a trigger configured in
+Scope View on a generated file was detected by `checkscope` and recorded
+(`evals/field-review-3e4c44d.md`).
+
+**What Scope rewrites on first save** is listed in `evals/field-review-3e4c44d.md`: it drops
+`IsFileBased`/`Suffix`, fills unit and style blocks, and keeps one time-axis `AxisStyle` per
+tab. None of it affects loading or recording, and a saved file is the one to diff against.
+Scope also fills an empty PLC acquisition's `<Comment>` with the variable's declaration
+comment, so that field is not free for PLC channels.
 
 ## Byte conventions
 
@@ -167,7 +174,7 @@ aside, and Scope accepted it on every axis.
 | `DataType` | Scope's own vocabulary, **not IEC's**: `BIT` for a `BOOL`, `INT16` for an `INT`, `REAL64` for an `LREAL`. Seen in real project files: `BIT`, `INT8`, `INT16`, `UINT32`, `REAL64`; the others follow the same naming. Scope read `LREAL` as `VOID`, **wrote `VOID` back when the project was saved**, and refused the channel: "The datatype is not supported: 'VOID'". Other IEC names are expected to go the same way; only `LREAL` has been tried. A `VOID` in a file is that failure's fingerprint. |
 | `VariableSize` | Bytes, and it must match `DataType`: 1 for `BIT`/`INT8`, 2 for `INT16`, 4 for `UINT32`, 8 for `REAL64`. Scope reads that many bytes from the target whatever the variable actually is, so 8 bytes off a `BOOL` is a recording of its neighbours. |
 | `Name` | The label in the Scope tree **and the column header when the recording is exported to CSV**. `minimal-single-channel.tcscopex` ships the placeholder `Signal`; left alone, fifty-three channels exported as fifty-three columns called `Signal`, which is what happened on a machine. `newscope` derives a short unique name per channel and keeps the full path in `Title`. |
-| `BaseSampleTime` | **100 ns ticks.** 10000 = 1 ms, 1000 = 100 µs. Only honoured when `UseTaskSampleTime` is `false`. |
+| `BaseSampleTime` | **100 ns ticks.** 10000 = 1 ms, 1000 = 100 µs — confirmed a second way when Scope saved 80000 and the recording ran at 125 Hz. Only honoured when `UseTaskSampleTime` is `false`, and **Scope snaps it to a multiple of the owning task's cycle**: 100000 (10 ms) on a 4 ms task was saved as 80000 (8 ms). |
 | `UseTaskSampleTime` | `true` samples at the owning task's rate — usually what you want. See `recording-load.md`. |
 | `Oversample` | For oversampling terminals. `0` unless the hardware supports it. |
 
@@ -228,6 +235,12 @@ It also lays them out, rather than piling every trace onto one axis:
 - **No band past eight traces.** A band that would hold more is split into even parts —
   `Digital / state`, `Digital / state (2)` — because that is where `checkscope` starts warning,
   and a generator should not write what its own checker complains about.
+- **Flags in lanes.** Two flags in one band sit on the same two levels and hide each other,
+  and Scope saves no band height to give them room — resizing a band in Scope View changed
+  no field in the file. So each `BIT` in a `Digital / state` band gets a display offset of
+  1.5 × its position (`Channel/SubMember/AcquisitionInterpreter/Offset`). That moves only
+  the drawn trace: a flag at offset 2 exported only 0 and 1, and the CSV's `Offset` header
+  row recorded the 2. The axis reads the offset value, not the flag's own.
 - **A lone parent is drawn beside what it drives.** A block with one channel and blocks
   beneath it — `GVL.fbCell.fbControl.seStep` above `…fbControl.fbStartup.*` — gets no tab of
   its own; the channel is drawn first in its band in each descendant's tab, as extra display
