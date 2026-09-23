@@ -698,9 +698,9 @@ def prefix_house_checks():
                       for s in startup_bands.get("Torque / current", [])),
               str({b: len(c) for b, c in startup_bands.items()}))
         check("step enums and counters get a band of their own",
-              sorted(s.rsplit(".", 1)[1]
-                     for s in startup_bands.get("Step / count", []))
-              == ["onIndex", "seStep"]
+              startup_bands.get("Step / count", [])
+              == [f"{ctl}.seStep", f"{ctl}.fbStartup.seStep",
+                  f"{ctl}.fbStartup.onIndex"]
               and f"{ctl}.fbTrack1.snCount" in charts.get("fbTrack1", {}).get(
                   "Step / count", []),
               str({b: len(c) for b, c in startup_bands.items()}))
@@ -709,8 +709,59 @@ def prefix_house_checks():
         check("checkscope has nothing to say about newscope's own layout",
               chk.get("ok") is True
               and not any("one value axis" in w or "stacks" in w
+                          or "twice in one tab" in w
                           for w in chk.get("warnings", [])),
               str([w[:60] for w in chk.get("warnings", [])]))
+
+        # A step is read against what it drives. The parent sequencer's lone
+        # step got a tab to itself in the field; it belongs in each child
+        # block's tab, first in its band - drawn three times, recorded once.
+        parent = f"{ctl}.seStep"
+        with_parent = sorted(c for c, bands in charts.items()
+                             if any(parent in chans for chans in bands.values()))
+        check("a lone parent step is drawn in each child block's tab, not its own",
+              "fbControl" not in charts
+              and with_parent == ["fbStartup", "fbTrack1", "fbTrack2"]
+              and all(charts[t]["Step / count"][0] == parent for t in with_parent),
+              f"tabs {sorted(charts)}, parent in {with_parent}")
+        house = ET.fromstring(out.read_text(encoding="utf-8-sig"))
+        parent_guid = next(a.findtext("Guid") for a in house.iter("AdsAcquisition")
+                           if a.findtext("SymbolName") == parent)
+        drawn = [c for c in house.iter("Channel")
+                 if c.findtext(".//AcquisitionGUID") == parent_guid]
+        check("the parent step is recorded once and drawn three times",
+              len(drawn) == 3 and chk.get("acquisitions") == 32
+              and chk.get("acquisitions_in_several_tabs") == 1,
+              f"drawn {len(drawn)}, acquisitions {chk.get('acquisitions')}")
+        # Nothing below it to give context to, so it keeps its own tab.
+        check("a lone channel with no child blocks keeps its tab",
+              list(charts.get("fbRecipe", {}).values()) == [["GVL.fbRecipe.bUpdating"]],
+              str(charts.get("fbRecipe")))
+
+        # A program or a global list is a namespace, not a block that drives
+        # anything: its lone flag is not copied into every block beneath it.
+        ns = Path(tmp) / "namespace.tcscopex"
+        spaced = run("newscope", tpl, "-o", ns, "--netid", "1.2.3.4.1.1",
+                     "--channels", "GVL.bFlag:BOOL,GVL.fbA.bX:BOOL,GVL.fbA.bY:BOOL")
+        ns_tabs = {c["chart"]: [s for b in c["bands"] for s in b["channels"]]
+                   for c in spaced.get("charts", [])}
+        check("a namespace's lone flag keeps its tab rather than spreading",
+              ns_tabs.get("GVL") == ["GVL.bFlag"]
+              and "GVL.bFlag" not in ns_tabs.get("fbA", []), str(ns_tabs))
+
+        # The same acquisition twice in one tab is not context, it is a slip.
+        twice = ET.fromstring(out.read_text(encoding="utf-8-sig"))
+        band = next(twice.iter("AxisGroup")).find("SubMember")
+        copy_of = ET.fromstring(ET.tostring(band.find("Channel")))
+        for guid in copy_of.iter("Guid"):
+            guid.text = str(__import__("uuid").uuid4())
+        band.append(copy_of)
+        doubled = Path(tmp) / "doubled.tcscopex"
+        doubled.write_bytes(b"\xef\xbb\xbf" + ET.tostring(twice, encoding="utf-8"))
+        check("checkscope warns when one acquisition is drawn twice in one tab",
+              any("twice in one tab" in w
+                  for w in run("checkscope", doubled).get("warnings", [])),
+              "")
 
         # Past the crowding threshold on bits alone, the band is split rather
         # than written in a shape checkscope would then warn about.

@@ -4,6 +4,19 @@
 
 First working version. Not yet published.
 
+### A sequencer's step drawn beside what it drives
+
+From the Part A field review: a parent sequencer's step got a tab to itself, and a step is
+read against the blocks it drives, not alone.
+
+- **A block with one channel and blocks beneath it gets no tab of its own.** Its channel is
+  drawn first in its band in each descendant's tab — extra display channels on one
+  acquisition, so recorded once. A namespace (`GVL`, `MAIN`) or a lone block with nothing
+  beneath it keeps its tab.
+- **`checkscope` tells context from a slip.** One acquisition drawn in several tabs is
+  counted (`acquisitions_in_several_tabs`) instead of drawing a warning; drawn twice in one
+  tab, it is two identical traces on one axis and still warns.
+
 ### This version's own output, recorded
 
 Part A of the field-test brief, run on this version's `newscope` output with no hand edits

@@ -1987,10 +1987,33 @@ def plan_layout(symbols, flat=False, types=None):
                  "bands": [{"band": BAND_OTHER, "channels": list(symbols)}]}]
 
     types = types or {}
-    charts = {}
+    by_device = {}
     for symbol in symbols:
-        bands = charts.setdefault(device_of(symbol), {})
-        bands.setdefault(quantity_of(symbol, types.get(symbol)), []).append(symbol)
+        by_device.setdefault(device_of(symbol), []).append(symbol)
+
+    # A block with one channel - usually a sequencer's step - is read against
+    # the blocks it drives, not alone in a tab. So it is drawn first in each
+    # descendant's tab instead: extra display channels on one acquisition,
+    # which cost the target nothing. A one-segment path (GVL, MAIN) is a
+    # namespace rather than a block, and a block with nothing below it has no
+    # one to lend context to; both keep their tab. Deepest first, so a lone
+    # block whose only descendants were themselves folded keeps its own.
+    folded = set()
+    for device in sorted(by_device, key=lambda d: -len(_segments(d))):
+        below = [d for d in by_device
+                 if d.startswith(device + ".") and d not in folded]
+        if len(by_device[device]) == 1 and len(_segments(device)) >= 2 and below:
+            folded.add(device)
+
+    charts = {}
+    for device, own in by_device.items():
+        if device in folded:
+            continue
+        context = [s for parent in by_device if parent in folded
+                   and device.startswith(parent + ".") for s in by_device[parent]]
+        bands = charts.setdefault(device, {})
+        for symbol in context + own:
+            bands.setdefault(quantity_of(symbol, types.get(symbol)), []).append(symbol)
 
     titles = _chart_titles(list(charts))
     # dicts keep insertion order, so tabs appear in the order the symbols were
@@ -2439,6 +2462,10 @@ def cmd_checkscope(args):
     # failure mode that looks like a working file until someone hits Record.
     plotted = 0
     wired_to = {}
+    # Which tab each display channel is drawn in, to tell a slip from context.
+    tab_of = {id(chan): id(chart) for chart in root.iter("YTChart")
+              for chan in chart.iter("Channel")}
+    tabs_of = {}
     for chan in root.findall(".//Channel"):
         ref = chan.find(".//AcquisitionGUID")
         name = (chan.findtext("Name") or "?").strip()
@@ -2454,6 +2481,7 @@ def cmd_checkscope(args):
         else:
             plotted += 1
             wired_to.setdefault(target, []).append(name)
+            tabs_of.setdefault(target, []).append(tab_of.get(id(chan)))
     if acquisitions and plotted == 0:
         warnings.append("no display channel is wired to any acquisition")
 
@@ -2468,14 +2496,18 @@ def cmd_checkscope(args):
             "but nothing plots them."
         )
 
-    # Two display channels may legitimately share one acquisition, which is why
-    # 'wired' can exceed the acquisition count. Report it rather than let the
-    # number read as more sources than exist.
-    shared = {guid: names for guid, names in wired_to.items() if len(names) > 1}
-    if shared:
+    # One acquisition drawn in several tabs is context - newscope puts a
+    # parent's lone step beside each block it drives, recorded once. Drawn
+    # twice in one tab it is two identical traces on one axis, which is a slip.
+    # Either way 'wired' can exceed the acquisition count, and the output
+    # says by how much rather than let it read as more sources than exist.
+    in_several_tabs = sum(1 for tabs in tabs_of.values() if len(set(tabs)) > 1)
+    doubled = [wired_to[guid][0] for guid, tabs in tabs_of.items()
+               if len(tabs) > len(set(tabs))]
+    if doubled:
         warnings.append(
-            f"{len(shared)} acquisition(s) feed more than one display channel, so "
-            f"{plotted} wired channels come from {len(wired_to)} sources."
+            f"{len(doubled)} acquisition(s) are drawn twice in one tab "
+            f"({_first_few(doubled)}) - identical traces on one axis."
         )
 
     # How it will actually look: charts are tabs, axis groups are bands stacked
@@ -2608,6 +2640,7 @@ def cmd_checkscope(args):
     emit({"ok": not problems, "file": str(args.input),
           "channels": channels, "display_channels_wired": plotted,
           "acquisitions": len(acq_guids), "acquisitions_plotted": len(wired_to),
+          "acquisitions_in_several_tabs": in_several_tabs,
           "acquisitions_without_display_channel": max(0, unwired),
           "acquisitions_without_declared_rate": unrated,
           "charts": layout,

@@ -166,7 +166,9 @@ metre. It writes **one chart tab per device** and, inside each tab, **one stacke
 quantity** — position (set and actual together, since that gap is the measurement), following
 error, velocity, acceleration, torque, then bits, then step numbers and counters (apart from
 the bits, which a step running to 200 would flatten) — and gives channels sharing a band
-different colours. A band that would hold more than eight traces is split into even parts. It
+different colours. A band that would hold more than eight traces is split into even parts. A
+block with a single channel — typically a sequencer's step — does not get a tab of its own: it
+is drawn first in the tab of each block beneath it, where it is read, and recorded once. It
 prints the layout it chose; check it before handing the file over. `--layout flat` returns to
 a single axis for channels that genuinely share a scale.
 
