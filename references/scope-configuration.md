@@ -6,9 +6,9 @@ data — which is what makes it templatable, diffable and safe to commit. Record
 
 **Verification status:** this schema was derived by reading real Beckhoff sample projects. A
 file generated from it first opened and recorded nothing (`evals/field-review-1fa0e9b.md`);
-with the type, name and port fixes described below, one **recorded** five NC axis channels
-(`evals/field-review-1fa0e9b-rounds.md`). That covers `REAL64` NC channels only — bit,
-integer and PLC-side channels, triggers and the `AxisStyle` colours have not been seen
+with the type, name and port fixes described below, files generated unedited **record** — NC
+axis channels on 501, and PLC `BIT`, `INT16` and `REAL64` channels on 851, with an
+`AxisStyle` on every axis (`evals/field-review-fe9b487.md`). Triggers have not been seen
 working.
 
 ## Byte conventions
@@ -124,18 +124,19 @@ which has nothing to stack. Channels sharing a band are also given different `Di
 values, because two traces of the same colour on one axis is the same failure by another
 route.
 
-**Seen in Scope View once:** a generated file's one-tab, four-band layout arrived exactly as
-written — `Position` {ActPos, SetPos}, `Following error`, `Velocity`, `Torque / current`
-(`evals/field-review-1fa0e9b-rounds.md`). Several `YTChart` siblings arriving as several tabs
-is still the reading of the structure, not an observation.
+**Seen in Scope View:** a one-tab, four-band layout arrived exactly as written — `Position`
+{ActPos, SetPos}, `Following error`, `Velocity`, `Torque / current` — and a file with three
+`YTChart` siblings arrived as three tabs (`evals/field-review-1fa0e9b-rounds.md`,
+`evals/field-review-fe9b487.md`).
 
 ## Colours
 
 Every colour is absolute: a signed 32-bit ARGB integer (`-921103` is `0xFFF1F1F1`) or a .NET
-colour name (`Black`). No value that follows the IDE theme has been seen, and whether Scope
-themes a colour the file leaves out is untested, so `newscope` writes them all and a file is
-styled for one background. What each one is taken to colour — **read from the structure and
-from where real dark-styled files put their colours, not watched in Scope View**:
+colour name (`Black`). Scope draws them as written: a dark-styled generated file stayed dark
+with the IDE in dark theme and in light (`evals/field-review-fe9b487.md`). Whether it would
+theme a colour the file leaves out is untested, so `newscope` writes them all and a file is
+styled for one background. What each one is taken to colour — **read from the structure; the
+dark theme was seen working as a whole, not checked element by element**:
 
 | Element | Its `DisplayColor`, as read |
 |---|---|
@@ -150,8 +151,9 @@ uses — and `--theme light` a near-white one. The trace palette is stepped per 
 checked for contrast against it; its first four are also checked for colour-blind separation
 between every pair, because every trace in a band shares one axis. With five or more in a band
 some pairs are close, and the channel name is what separates them. A light chart in a dark IDE
-was reported from the field as glaring; that a dark one reads well in a light IDE is the
-reasoning behind the default. **Not yet opened in Scope View.**
+was reported from the field as glaring; the dark default read well with the IDE in both
+themes. The generated `AxisStyle` matched one Scope wrote element for element, the grid colour
+aside, and Scope accepted it on every axis.
 
 ## `AdsAcquisition` fields that matter
 

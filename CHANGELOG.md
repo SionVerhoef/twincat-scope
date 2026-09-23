@@ -4,6 +4,22 @@
 
 First working version. Not yet published.
 
+### This version's own output, recorded
+
+Part A of the field-test brief, run on this version's `newscope` output with no hand edits
+(`evals/field-review-fe9b487.md`). Status lines throughout now say what it showed.
+
+- **Round 3 on main's own output recorded**: five NC axis channels, dark theme, an `AxisStyle`
+  on all eight axes — accepted, and matching one Scope wrote element for element but the grid
+  colour.
+- **The first bit, integer and PLC channels from a generated file recorded**: two NC axis
+  channels on 501 and a `BOOL`, an `INT` enum and an `LREAL` on 851, across three tabs.
+- **Scope draws the stored colours as written** and does not follow the IDE theme; the dark
+  default read well in both.
+- A 40-channel function-block recording laid out with no crowding warning and every band
+  enabled. Two readability findings are open: a band of two flags is hard to read next to
+  taller neighbours, and a lone step enum or flag gets a tab to itself.
+
 ### Bands that do not flatten each other, and disabled elements said out loud
 
 A follow-up field session regenerated a 32-channel function-block recording, in a
@@ -41,8 +57,9 @@ write-up, anonymised, is `evals/field-review-1fa0e9b-rounds.md`.
   traces are chosen for one background. The trace palette is checked for contrast against it,
   and its first four for colour-blind separation between every pair, since a band's traces
   share one axis. No value that follows the IDE theme has been seen, and whether Scope themes
-  colours a file leaves out is untested, so a file picks one. **Not yet opened in Scope View**
-  — this is new structure, not a change to what recorded.
+  colours a file leaves out is untested, so a file picks one. Since seen in the field: Scope
+  accepted the `AxisStyle` on every axis, the file recorded, and it read well with the IDE in
+  either theme (`evals/field-review-fe9b487.md`).
 - **`checkscope` refuses `VOID`.** It is what Scope wrote back after failing to read `LREAL`,
   so a `VOID` means the file has been opened, misread and saved; it drew only a soft warning.
   `checkscope` also reports which `theme` a file is styled for, warns about axes with no
@@ -292,12 +309,10 @@ samples cannot be. See `evals/results-iteration-1.md`.
 
 ### Known gaps
 
-- **A generated file has recorded — NC axis channels only, and not from this exact code.**
-  Five `REAL64` NC channels recorded on the third round of a field session, from patches to an
-  older version that write the same type, name, port and addressing fields this one does
-  (`evals/field-review-1fa0e9b-rounds.md`). This version adds an `AxisStyle` per axis and new
-  colours that Scope has never read, so no file from it has been opened. Bit, integer and
-  PLC-side channels and triggers have not been seen working.
+- **Triggers have not been seen working.** Generated files record NC axis and PLC bit,
+  integer and real channels unedited (`evals/field-review-fe9b487.md`), but every recording
+  so far was a fixed window started by hand, and `checkscope`'s trigger detection has not met
+  a trigger configured in Scope View.
 - **No `.svdx` has been converted by the real export tool here.** The CSV path is measured
   against 19 real exports, but the `.svdx` → CSV step still depends on
   `TC3ScopeExportTool.exe` behaving as documented.
