@@ -24,12 +24,21 @@ with the tool found under the TwinCAT root in `Functions\TF3300-Scope-Server\`.
 - **One column per display channel, not per acquisition.** A channel drawn in three tabs
   exports three times — `<name>`, `<name> (1)`, `<name> (2)`, each in a group of its own. The
   reader collapses exact copies (same symbol and port, same time column, same values) and
-  `manifest` reports them as `copies_collapsed`. The same symbol recorded at another rate is a
-  second recording and stays.
+  `manifest` reports them as `copies_collapsed`, with `matched_on: "symbol"`. The same symbol
+  recorded at another rate is a second recording and stays.
 - **The `Offset` header row is the display offset**, set per display channel in Scope View.
   The values under it are raw: a flag drawn at offset 2 exported only 0 and 1. `manifest`
   shows it as `display_offset`; **never add it to the values.**
 
+### Scope View's own CSV export is not this
+
+Exporting to CSV from inside Scope View writes a different file (seen in the field, round 6):
+comma delimiter, dot decimal, a short preamble, then **one shared time column** and a value
+column per display channel — no `SymbolName`, `Port`, `Data-Type` or `Offset` rows. The reader
+parses it as one group, but it cannot know which symbol a column is, what type it was, or
+where it was drawn. Copies are collapsed only where Scope's own naming says so — `<name> (n)`
+beside a `<name>` with identical time and values — and reported with `matched_on: "name"`.
+**Prefer the export tool**, through `ingest`, on the `.svdx`.
 ### Formats and licensing
 
 | Format | Licence |

@@ -694,6 +694,33 @@ def write_folded_export(path, rows=200):
     return parent
 
 
+def write_hand_export(path, rows=200):
+    """Scope View's own CSV export, as described from the field (round 6).
+
+    Reconstructed from a description, not copied from a file: comma delimiter,
+    dot decimal, a short preamble, then one row of names over ONE shared time
+    column (ms) and the value columns - no SymbolName, Port or Offset rows. With
+    no symbol to match on, Scope's own "<name> (n)" suffix is the only sign of
+    a copy.
+    """
+    step = [0.0 if i < 50 else 10.0 for i in range(rows)]
+    other = list(step)
+    other[120] = 7.0
+    columns = [("seStep", step), ("bFlag", [float(i % 2) for i in range(rows)]),
+               ("seStep (1)", step), ("seStep (2)", step),
+               ("seStep (3)", other),          # one sample different: a recording
+               ("Idle (1)", [3.0] * rows),      # a suffix with no base: a name
+               # Same name, no suffix, same data: Scope did not call either a
+               # copy, so neither is one.
+               ("Twin", [4.0] * rows), ("Twin", [4.0] * rows)]
+    lines = ["Name,Scope Project", "File,rec.svdx",
+             "StartTime,23.09.2026 10:00:00", "EndTime,23.09.2026 10:00:02", "",
+             ",".join(["Name"] + [name for name, _ in columns])]
+    for i in range(rows):
+        lines.append(",".join([f"{i * 8.0:.1f}"] + [f"{v[i]:g}" for _, v in columns]))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def export_copy_checks():
     """One acquisition drawn in three tabs exports as three columns.
 
@@ -713,7 +740,8 @@ def export_copy_checks():
               str([(c["name"], c["symbol_name"]) for c in chans]))
         check("the collapse is reported, naming what was dropped",
               man.get("copies_collapsed") == [{"kept": "seStep",
-                                               "dropped": ["seStep (1)", "seStep (2)"]}],
+                                               "dropped": ["seStep (1)", "seStep (2)"],
+                                               "matched_on": "symbol"}],
               str(man.get("copies_collapsed")))
         # Only exact copies: another block's step, and the same symbol with one
         # sample different, are real channels and must survive.
@@ -736,6 +764,19 @@ def export_copy_checks():
               and back.get("copies_collapsed") == man.get("copies_collapsed")
               and any(c.get("display_offset") == 2.0 for c in back.get("channels", [])),
               str(back.get("copies_collapsed")))
+
+        # Scope View's own export carries no symbol; the "(n)" suffix plus
+        # identical data is all there is to go on, and the output says so.
+        hand = Path(tmp) / "hand.csv"
+        write_hand_export(hand)
+        hand_man = run("manifest", hand)
+        names = [c["name"] for c in hand_man.get("channels", [])]
+        check("a hand export's copies collapse on Scope's (n) suffix, said as such",
+              names == ["seStep", "bFlag", "seStep (3)", "Idle (1)", "Twin", "Twin"]
+              and hand_man.get("copies_collapsed")
+              == [{"kept": "seStep", "dropped": ["seStep (1)", "seStep (2)"],
+                   "matched_on": "name"}],
+              f"{names} {hand_man.get('copies_collapsed')}")
 
 
 def prefix_house_checks():
@@ -826,8 +867,8 @@ def prefix_house_checks():
               len(drawn) == 3 and chk.get("acquisitions") == 32
               and chk.get("acquisitions_in_several_tabs") == 1,
               f"drawn {len(drawn)}, acquisitions {chk.get('acquisitions')}")
-        # Flags in one band get lanes of their own, by display offset - the
-        # field showed the export stays raw 0/1. Integers are not offset.
+        # Flags stay on 0/1 with no display offset: lanes were tried in the
+        # field (round 6) and rejected as harder to read, not easier.
         def offsets(chart_name, band_name):
             chart = next((c for c in house.iter("YTChart")
                           if c.findtext("Name") == chart_name), None)
@@ -835,9 +876,8 @@ def prefix_house_checks():
                          if g.findtext("Name") == band_name), None) if chart is not None else None
             return [c.findtext("SubMember/AcquisitionInterpreter/Offset")
                     for c in (band.findall("SubMember/Channel") if band is not None else [])]
-        check("flags in one band are drawn in lanes of their own",
-              offsets("fbStartup", "Digital / state")
-              == ["0", "1.5", "3", "4.5", "6", "7.5", "9"]
+        check("flags are drawn on 0/1, with no display offset",
+              offsets("fbStartup", "Digital / state") == ["0"] * 7
               and set(offsets("fbStartup", "Step / count")) == {"0"},
               str(offsets("fbStartup", "Digital / state")))
         timed = run("newscope", tpl, "-o", Path(tmp) / "timed.tcscopex",

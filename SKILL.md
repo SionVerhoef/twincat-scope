@@ -96,6 +96,11 @@ Scope exports one column per *display* channel, so a channel drawn in three tabs
 — are read as one channel, and `manifest` lists them under `copies_collapsed`. A non-zero
 `display_offset` is where the trace was drawn, not a change to the values; never add it.
 
+**Convert the `.svdx` with `ingest`; don't use Scope View's own CSV export.** That export has
+one shared time column and no symbol, port, type or offset rows. Copies in it are matched only
+by Scope's `(n)` suffix and identical data — `matched_on: "name"` in `copies_collapsed` — and
+two different channels that share a name cannot be told apart at all.
+
 ### 2. Convert once
 
 ```bash
@@ -174,9 +179,9 @@ metre. It writes **one chart tab per device** and, inside each tab, **one stacke
 quantity** — position (set and actual together, since that gap is the measurement), following
 error, velocity, acceleration, torque, then bits, then step numbers and counters (apart from
 the bits, which a step running to 200 would flatten) — and gives channels sharing a band
-different colours. Flags in one band are drawn in lanes of their own by a display offset,
-which moves only the trace — the exported values stay 0/1, and `manifest` reports the offset
-as `display_offset`. A band that would hold more than eight traces is split into even parts. A
+different colours. Flags stay on 0/1: stacking them at separate heights was tried in the field
+and found harder to read, not easier. A band that would hold more than eight traces is split
+into even parts. A
 block with a single channel — typically a sequencer's step — does not get a tab of its own: it
 is drawn first in the tab of each block beneath it, where it is read, and recorded once. It
 prints the layout it chose; check it before handing the file over. `--layout flat` returns to

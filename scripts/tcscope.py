@@ -307,6 +307,8 @@ def _parse_groups(meta, ncols, decimal):
                 "port": int(port) if port and port.isdigit() else None,
                 "sample_time_ms": _parse_float(declared, decimal) if declared else None,
                 "display_offset": _parse_float(offset, decimal) if offset else None,
+                # False when the export had no SymbolName row to read it from.
+                "symbol_known": bool(qualified),
             })
         groups.append({"id": index, "time_column": start, "channels": channels})
     return groups
@@ -333,7 +335,8 @@ def _flat_group(lines, data_row, delim, decimal, ncols):
         names = [f"col{i}" for i in range(ncols)]
     channels = [{"name": names[col] or f"col{col}", "symbol_name": names[col] or f"col{col}",
                  "column": col, "group": 0, "unit": None, "data_type": None,
-                 "port": None, "sample_time_ms": None, "display_offset": None}
+                 "port": None, "sample_time_ms": None, "display_offset": None,
+                 "symbol_known": False}
                 for col in range(1, ncols)]
     return [{"id": 0, "time_column": 0, "channels": channels}]
 
@@ -587,11 +590,24 @@ def collapse_copies(np, rec):
     perfectly with itself. Only exact copies go: same symbol and port, the same
     time column and the same values. The same symbol recorded twice at another
     rate is two recordings, and both stay.
+
+    Scope View's own CSV export has no symbol or port to match on (field round
+    6). There the only sign of a copy is Scope's naming: "<name> (n)" beside a
+    "<name>", with identical time and values. That is weaker evidence, so the
+    output says which one was used.
     """
     kept, collapsed = {}, {}
     for group in rec.groups:
         for channel in list(group["channels"]):
-            key = (channel["symbol_name"], channel["port"])
+            if channel.get("symbol_known", True):
+                key, how = ("symbol", channel["symbol_name"], channel["port"]), "symbol"
+            else:
+                base = re.sub(r" \(\d+\)$", "", channel["name"])
+                key, how = ("name", base), "name"
+                if base == channel["name"]:
+                    # Not suffixed, so a possible original, never a copy.
+                    kept.setdefault(key, []).append(channel)
+                    continue
             twin = next((k for k in kept.get(key, [])
                          if np.array_equal(rec.time_of(k), group["time"], equal_nan=True)
                          and np.array_equal(k["values"], channel["values"],
@@ -600,7 +616,9 @@ def collapse_copies(np, rec):
                 kept.setdefault(key, []).append(channel)
             else:
                 group["channels"].remove(channel)
-                collapsed.setdefault(twin["name"], []).append(channel["name"])
+                entry = collapsed.setdefault(twin["name"],
+                                             {"dropped": [], "matched_on": how})
+                entry["dropped"].append(channel["name"])
     if collapsed:
         # A copy sat in a group of its own; an emptied group is not a group.
         rec.groups = [g for g in rec.groups if g["channels"]]
@@ -608,8 +626,9 @@ def collapse_copies(np, rec):
             group["id"] = index
             for channel in group["channels"]:
                 channel["group"] = index
-    rec.info["copies_collapsed"] = [{"kept": name, "dropped": dropped}
-                                    for name, dropped in collapsed.items()]
+    rec.info["copies_collapsed"] = [{"kept": name, "dropped": entry["dropped"],
+                                     "matched_on": entry["matched_on"]}
+                                    for name, entry in collapsed.items()]
     return rec
 
 
@@ -1818,9 +1837,6 @@ BAND_DIGITAL = "Digital / state"
 # the bits: a step running 0..200 on the same axis as 0/1 flags draws every
 # flag as a flat line, which is the failure the bands exist to prevent.
 BAND_INTEGER = "Step / count"
-# Display offset between stacked flags: each 0/1 trace in a lane of its own,
-# half a unit clear of the next.
-FLAG_LANE = 1.5
 
 # Matched against the leaf of the symbol path, lowercased, first hit wins - so
 # the specific entries must come before the general ones. "PosDiff" contains
@@ -2270,24 +2286,15 @@ def cmd_newscope(args):
                 set_fields(group, (("Title", band["band"]), ("Name", band["band"]),
                                    ("SortPriority", str(10 + band_index))))
                 target = group.find("SubMember")
-                lane = 0
+                # Flags stay on 0/1. Stacking them in lanes by display offset
+                # was tried and rejected in the field: the lanes sat too close
+                # to tell apart, and the axis labels no longer meant anything.
                 for symbol in band["channels"]:
                     chan = copy.deepcopy(blank_chan)
                     refresh_guids(chan)
                     set_fields(chan, (("Name", aliases[symbol]),
                                       ("Title", symbol)),
                                required=True)
-                    # Flags in one band sit on the same two levels and hide
-                    # each other, and Scope saves no band height to make room.
-                    # A display offset moves only the drawn trace - measured
-                    # in the field, the export stays raw 0/1 and the header
-                    # records the offset - so each flag gets a lane of its own.
-                    if (band["band"].startswith(BAND_DIGITAL)
-                            and specs[symbol]["data_type"] == "BIT"):
-                        offset = chan.find("SubMember/AcquisitionInterpreter/Offset")
-                        if offset is not None:
-                            offset.text = f"{FLAG_LANE * lane:g}"
-                        lane += 1
                     ref = chan.find(".//AcquisitionGUID")
                     if ref is not None:
                         ref.text = acq_guid_of[symbol]
