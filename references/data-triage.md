@@ -42,16 +42,16 @@ repeat-padded, on one core of a small Linux container:
 
 | Samples | File | Per verb | Peak RSS |
 |---|---|---|---|
-| 0.4 M | 5.7 MB | ~1 s | 66 MB |
-| 2 M | 28.6 MB | ~4 s | 186 MB |
-| 10 M | 143.6 MB | 15–16 s | 340 MB |
-| 20 M | 288.3 MB | 31–42 s | 630 MB |
+| 0.4 M | 5.7 MB | ~1 s | 108 MB |
+| 2 M | 28.6 MB | ~4 s | 125 MB |
+| 10 M | 143.6 MB | 15–24 s | 215 MB |
+| 20 M | 288.3 MB | 31–33 s | 384 MB |
 
-**Peak memory tracks the file, not the sample count: roughly 25 MB + 2.2 × file size.** The
-array itself is a fraction of that (20 M samples is 176 MB of float64); the rest is the
-decoded text and its line list, which are both alive at once while the file is split. So the
-opening claim — ten minutes of twenty channels at 1 kHz — costs about 45–55 s per verb and
-under a gigabyte. That is usable on an engineering laptop and slow enough to be worth saying
+**Peak memory tracks the samples, not the file: roughly 100 MB + 2 × the float64 array**
+(20 M samples is 176 MB of array). The 100 MB is the interpreter and numpy, paid by any file.
+The file is read a chunk at a time, so its text is never held whole; the factor of two is
+the parsed blocks and the array they are joined into. So the opening claim — ten minutes of
+twenty channels at 1 kHz — costs about 45–55 s per verb and around half a gigabyte. That is usable on an engineering laptop and slow enough to be worth saying
 out loud before running four verbs in a row on the same file.
 
 Two things follow for how you work:
