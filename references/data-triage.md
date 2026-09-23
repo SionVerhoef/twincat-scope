@@ -166,9 +166,28 @@ with a bigger cap — it tells you which part of the recording to ask about inst
 and only roughly across kinds. `ramp`, `transition` and `crossing` are descriptive rather than
 anomalous and are always 1.0.
 
-**Known limitation.** `clipping` fires on an axis parked at the end of its travel, because a
-rest position and a rail look identical in the data. Check `stats` → `pct_at_max` and the
-`plot` before repeating a clipping claim about a position channel.
+#### Rails that are not rails
+
+Measured on a real recording (`evals/field-review-44d4951.md`):
+
+- **An axis standing still is not clipping.** At rest an actual position dithers over a few
+  dozen quantisation steps — 49 to 80 levels of 2.47e-5 mm there — and whichever extreme the
+  dither touches most looked like a rail: clipping at 1–11 %, and a micrometre "step" on every
+  still axis at the instant of one real correction. A real-valued channel that spans fewer
+  than 100 of its own quantisation steps is treated as **still**: no clipping or step is
+  reported for it, and `still_channels` names every one, so nothing is dropped silently. A
+  signal that genuinely moves that little is named there too.
+- **Holding a step is not a rail.** A step enum held at one value clipped at severities of 24
+  to 73 — the highest in that recording, ranked above everything real. Integer channels
+  (declared `INT…`/`UINT…`, or untyped and all whole numbers) are exempt from clipping and
+  flatline, as bits already were. Their changes are still reported.
+- **An axis moved and then parked did not clip.** It settled a few micrometres off its
+  extreme and the dither never landed on it again; the case the old warning here described
+  did not happen on that machine.
+
+**Still unverified:** an axis parked exactly at a hard or software limit, and a genuine
+current-limit saturation — neither was available. Check `stats` → `pct_at_max` and the `plot`
+before repeating a clipping claim about a position channel.
 
 ### Rung 4 — `plot`, and the one rule that matters
 

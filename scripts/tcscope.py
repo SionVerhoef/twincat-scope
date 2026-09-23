@@ -597,6 +597,14 @@ def collapse_copies(np, rec):
     output says which one was used.
     """
     kept, collapsed = {}, {}
+    # Unsuffixed names are the originals, wherever they sit: Scope View's own
+    # export can put "<name> (1)" before "<name>" (field round 7), and matching
+    # in file order kept the copy as an original. Register them all first.
+    for group in rec.groups:
+        for channel in group["channels"]:
+            if (not channel.get("symbol_known", True)
+                    and not re.search(r" \(\d+\)$", channel["name"])):
+                kept.setdefault(("name", channel["name"]), []).append(channel)
     for group in rec.groups:
         for channel in list(group["channels"]):
             if channel.get("symbol_known", True):
@@ -605,9 +613,7 @@ def collapse_copies(np, rec):
                 base = re.sub(r" \(\d+\)$", "", channel["name"])
                 key, how = ("name", base), "name"
                 if base == channel["name"]:
-                    # Not suffixed, so a possible original, never a copy.
-                    kept.setdefault(key, []).append(channel)
-                    continue
+                    continue  # an original, registered above
             twin = next((k for k in kept.get(key, [])
                          if np.array_equal(rec.time_of(k), group["time"], equal_nan=True)
                          and np.array_equal(k["values"], channel["values"],
@@ -1070,12 +1076,45 @@ def _detection_threshold(np, finite_d, span, args):
     return max(args.sigma * scale, args.min_step * span)
 
 
+# A real-valued channel whose whole recording spans fewer quantisation levels
+# than this is standing still. Measured in the field (round 7): axes at rest
+# dithered over 49-80 levels of 2.47e-5 mm, and clipped at 1-11 % on whichever
+# extreme the dither touched most, while the one that moved spanned ~16 million.
+# The known cost: a coarse, slow sensor that moves fewer than 100 of its own
+# steps is called still too - which is why the output names every such channel.
+STILL_LEVELS = 100
+
+
+def _is_integer(np, channel, finite):
+    """A step, mode or counter: declared integer, or all whole numbers untyped."""
+    declared = (channel.get("data_type") or "").strip().upper()
+    if declared:
+        return "INT" in declared and declared in SCOPE_TYPE_SIZES
+    return bool(np.all(finite == np.round(finite)))
+
+
+def _is_still(np, finite, finite_d):
+    """Does this channel span fewer than STILL_LEVELS of its own quantum?
+
+    The quantum is the smallest gap between two values the channel took. It is
+    never larger than the smallest non-zero sample-to-sample change, so a
+    moving channel is ruled out on that alone without sorting it.
+    """
+    span = float(np.max(finite) - np.min(finite))
+    moves = np.abs(finite_d)
+    moves = moves[moves > 0]
+    if not span or not moves.size or span / float(moves.min()) >= STILL_LEVELS:
+        return False
+    quantum = float(np.min(np.diff(np.unique(finite))))
+    return span / quantum < STILL_LEVELS
+
+
 def cmd_events(args):
     np = need("numpy")
     rec = load(args.input)
     total = len(rec.groups)
 
-    found = []
+    found, still_channels = [], []
     for channel in select(rec, args.channels):
         name = channel["name"]
 
@@ -1110,7 +1149,16 @@ def cmd_events(args):
         finite_d = d[np.isfinite(d)]
         thresh = _detection_threshold(np, finite_d, span, args)
 
-        if thresh > 0:
+        # Holding a step is not a rail, and a counter held is not a frozen
+        # signal: integers are exempt from clipping and flatline as bits are.
+        # An axis standing still dithers over a few dozen quantisation steps,
+        # and its extremes and micrometre corrections are not events either.
+        integer = not digital and _is_integer(np, channel, finite)
+        still = not (digital or integer) and _is_still(np, finite, finite_d)
+        if still:
+            still_channels.append(name)
+
+        if thresh > 0 and not still:
             # A sustained change is ONE event. Reporting each over-threshold
             # sample separately turned a single 2.4 s move into 1199 "steps" and
             # buried every real fault under them. NaN compares False, so a gap
@@ -1160,10 +1208,10 @@ def cmd_events(args):
         # A BOOL sits at both its rails 100% of the time and holds each state for
         # as long as the machine needs it. Clipping and flatline describe neither
         # - `transition` already reports every change a digital channel makes.
-        if not digital:
+        if not (digital or integer):
             for edge, value in (("max", hi), ("min", lo)):
                 frac = float(np.mean(col[ok] == value))
-                if frac > args.clip_fraction:
+                if frac > args.clip_fraction and not still:
                     found.append(event("clipping", frac / args.clip_fraction,
                                        edge=edge, value=value, fraction=frac))
 
@@ -1188,6 +1236,12 @@ def cmd_events(args):
           "events": sorted(_rank(found, t0, t1, args.max_events),
                            key=lambda e: e.get("time", 0.0)),
           "truncated": len(found) > args.max_events,
+          "still_channels": still_channels,
+          "still_note": (f"These spanned fewer than {STILL_LEVELS} of their own "
+                         "quantisation steps - standing still with dither - so "
+                         "no clipping or step is reported for them. A signal "
+                         "that genuinely moves that little is among them too."
+                         if still_channels else None),
           "severity": "multiple of each detector's own threshold; ramp, "
                       "transition and crossing are descriptive, always 1.0",
           "ranking": "worst first within each tenth of the recording, so a "
