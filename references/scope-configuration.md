@@ -148,7 +148,7 @@ dark theme was seen working as a whole, not checked element by element**:
 | Element | Its `DisplayColor`, as read |
 |---|---|
 | `YTChart`, `AxisGroup`, `OverviewChart` | the panel behind the traces. The light greys `newscope` used to write here were the reported glare, which fits; `OverviewChart` has not been seen |
-| `TimeAxis` / `ValueAxis` → `SubMember/AxisStyle` | axis text; `GridColor` is the grid. `ColorMode` is `CustomColor` in every real file seen |
+| `TimeAxis` / `ValueAxis` → `SubMember/AxisStyle` | axis text; `GridColor` is the grid. `ColorMode` is `CustomColor` in every real file seen; Scope View offers Custom, First Channel, or one named channel of the band — none follows the IDE theme |
 | `Channel` and its `ChannelStyle` | the trace. Which of the two Scope draws with is not established, so `newscope` writes both |
 
 Real projects carry an `AxisStyle` on **every** axis, time and value alike; files from older
@@ -235,12 +235,13 @@ It also lays them out, rather than piling every trace onto one axis:
 - **No band past eight traces.** A band that would hold more is split into even parts —
   `Digital / state`, `Digital / state (2)` — because that is where `checkscope` starts warning,
   and a generator should not write what its own checker complains about.
-- **Flags in lanes.** Two flags in one band sit on the same two levels and hide each other,
-  and Scope saves no band height to give them room — resizing a band in Scope View changed
-  no field in the file. So each `BIT` in a `Digital / state` band gets a display offset of
-  1.5 × its position (`Channel/SubMember/AcquisitionInterpreter/Offset`). That moves only
-  the drawn trace: a flag at offset 2 exported only 0 and 1, and the CSV's `Offset` header
-  row recorded the 2. The axis reads the offset value, not the flag's own.
+- **Flags stay on 0/1.** Two things were learned trying to separate them. Scope saves no band
+  height — resizing a band in Scope View changed no field in the file. A display offset
+  (`Channel/SubMember/AcquisitionInterpreter/Offset`) moves only the drawn trace — a flag at
+  offset 2 exported only 0 and 1, the CSV's `Offset` header recording the 2. Flags stacked at
+  1.5 apart that way were rejected in the field: the lanes were too close to tell which trace
+  was high, and the axis labels no longer lined up with anything. So `newscope` writes no
+  offset, and colour is what tells flags in one band apart.
 - **A lone parent is drawn beside what it drives.** A block with one channel and blocks
   beneath it — `GVL.fbCell.fbControl.seStep` above `…fbControl.fbStartup.*` — gets no tab of
   its own; the channel is drawn first in its band in each descendant's tab, as extra display

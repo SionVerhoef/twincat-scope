@@ -4,6 +4,22 @@
 
 First working version. Not yet published.
 
+### Flags back on 0/1, and Scope View's own CSV export
+
+Round 6 of the field test (`evals/field-review-6872161.md`).
+
+- **Flags are drawn on 0/1 again.** Stacking them 1.5 apart by display offset was tried and
+  rejected: the lanes were too close to tell which trace was high, and the axis labels no
+  longer lined up with anything. Colour is what separates flags in one band.
+- **Copies are collapsed in Scope View's own CSV export too.** That export has one shared
+  time column and no symbol rows, so the only evidence of a copy is Scope's `<name> (n)`
+  naming beside a `<name>` with identical data; `copies_collapsed` now says which evidence
+  was used (`matched_on: "symbol"` or `"name"`). The docs say to prefer `ingest` on the
+  `.svdx`.
+- The re-read of round 5's recordings with the new reader: 40 channels, not 42, and nothing
+  else lost. `ColorMode` offers Custom, First Channel or a named channel — nothing that
+  follows the IDE theme.
+
 ### The whole path, run once — and a copy the export made
 
 Round 5 of the field test (`evals/field-review-3e4c44d.md`): a generated 40-channel file
@@ -17,8 +33,6 @@ is confirmed a second way: Scope saved 80000 and the recording ran at 125 Hz.
   collapsed on read, listed in `manifest` as `copies_collapsed`, and kept through Parquet.
 - **`display_offset` in `manifest`.** The CSV's `Offset` header row is where a trace was drawn;
   the values under it are raw. It is reported, and never added.
-- **Flags drawn in lanes.** Scope saves no band height, so each `BIT` in a `Digital / state`
-  band gets a display offset of 1.5 × its position and no longer hides the others.
 - **`newscope` notes that Scope snaps the sample time** to a multiple of the task cycle —
   10 ms was saved as 8 ms on a 4 ms task.
 
