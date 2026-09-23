@@ -95,6 +95,7 @@ def asserts(t, *pats):
             before = t[max(0, m.start() - 240):m.start()]
             if not has(before,
                        r"\b(no|not|cannot|can'?t|don'?t|do not|won'?t|never|nothing|without)\b",
+                       r"\b(doesn'?t|didn'?t|isn'?t|wasn'?t|wouldn'?t)\b",
                        r'\b(basis|evidence|support|refus\w*|declin\w*|hold off|unable)\b',
                        r'row-?wise|naive|naïve|excel|artefact|artifact|opposite|contradict',
                        r'would (say|read|give|suggest|put)|appears?|one reading|if you (read|open)',
@@ -136,6 +137,7 @@ CHECKS = {
                           r'same sample rate', r'single acquisition')),
   ("declines to support the drive purchase on this evidence",
    lambda t, c, m: has(t, r"(don'?t|do not|before you|hold off|not).{0,60}order",
+                          r"(wouldn'?t|would not|shouldn'?t|should not).{0,30}order",
                           r'order.{0,40}drive.{0,60}(yet|until|before)',
                           r'no.{0,40}(basis|evidence|support).{0,40}(drive|purchase|order)',
                           r'cannot (confirm|answer|tell)')),
@@ -145,7 +147,7 @@ CHECKS = {
    lambda t, c, m: has(t, r'1[12][.,]\d{1,3}\s*s', r'\b12\s*s\b', r'\bt\s*=\s*1[12]')
                    and has(t, r'posdiff', r'following error', r'lag')),
   ("reports the spike is only a few samples wide",
-   lambda t, c, m: has(t, r'(three|3)\s*samples?', r'\d\s*samples? wide',
+   lambda t, c, m: has(t, r'(three|3)[\s-]*samples?', r'\d\s*samples? wide',
                           r'\b3\s*ms\b', r'few samples')),
   ("also surfaces the position step at ~6 s",
    lambda t, c, m: has(t, r'\b6[.,]0?\d*\s*s\b', r'\bt\s*=\s*6\b') and has(t, r'actpos', r'position')),
@@ -176,7 +178,8 @@ CHECKS = {
  # changes is the size of the haystack, and that is the whole measurement.
  'needle-at-scale': [
   ("finds the following-error spike at ~413.8 s",
-   lambda t, c, m: has(t, r'41[34][.,]\d{1,3}\s*s', r'\b41[34]\s*s\b', r'\bt\s*=\s*41[34]')
+   lambda t, c, m: has(t, r'41[34][.,]\d{1,3}\s*s', r'\b41[34]\s*s\b', r'\bt\s*=\s*41[34]',
+                          r'06:06:53')
                    and has(t, r'posdiff', r'following error', r'lag')),
   ("reports the spike is only a few samples wide",
    lambda t, c, m: has(t, r'\b[1-9]\s*samples?\b', r'\d\s*samples? wide',
@@ -185,7 +188,8 @@ CHECKS = {
    lambda t, c, m: has(t, r'12[89][.,]\d{1,3}\s*s', r'\b128\s*s\b', r'\bt\s*=\s*128')
                    and has(t, r'actpos', r'position')),
   ("also surfaces the frozen torque channel ~291-293.5 s",
-   lambda t, c, m: has(t, r'29[123].{0,40}29[34]', r'\b291\b.{0,40}\b29[34]\b')
+   lambda t, c, m: has(t, r'29[123].{0,40}29[34]', r'\b291\b.{0,40}\b29[34]\b',
+                          r'06:04:5[1-3].{0,40}06:04:5[3-4]')
                    and has(t, r'torque') and has(t, r'flat|frozen|constant|stopped chang')),
   ("also surfaces the clipped velocity channel",
    lambda t, c, m: has(t, r'velo') and has(t, r'clip', r'saturat', r'pinned', r'\brail')),
@@ -303,6 +307,7 @@ CHECKS = {
  'out-of-scope-authoring': [
   ("declines to author the ST function block",
    lambda t, c, m: has(t, r"(don'?t|do not|not|cannot|can'?t|won'?t).{0,40}(write|author)",
+                          r"(haven'?t|have not|didn'?t|did not) (written|authored|write|author)",
                           r'out(side)? of scope', r'not what (this|i) do', r'declin',
                           r'not the right (tool|place)')),
   # Detected by the declaration and a variable block, not by the closing
@@ -318,7 +323,9 @@ CHECKS = {
                           r'record.{0,40}(before|after)', r'confirm.{0,40}diagnos',
                           r'a recording.{0,80}(would|settle|show)', r'would settle it',
                           r'what i did not check', r're-?record.{0,60}(with|including)',
-                          r'captur\w*.{0,50}(setpoint|error word|status)')),
+                          r'captur\w*.{0,50}(setpoint|error word|status)',
+                          r'(next|new) recording.{0,40}(add|include|with)',
+                          r'\brecord the (drive|nc|axis|torque|error)')),
   ("points the authoring work somewhere else",
    lambda t, c, m: has(t, r'hand (it |this )?(off|over)', r'someone|whoever|your (plc|controls)',
                           r'st (skill|tool|authoring)', r'a different (job|tool|skill)',
@@ -339,7 +346,7 @@ CHECKS = {
                                   r'confirms?.{0,60}(following error|posdiff).{0,40}(first|before)',
                                   r'torque.{0,40}(react\w*|respond\w*|follow\w*|lag\w*)( to| behind)')),
   ("does not claim the torque came first either",
-   lambda t, c, m: not asserts(t, r'torque.{0,40}(came|occurred|happened|spiked?|rose|leads?|led).{0,30}(first|before)',
+   lambda t, c, m: not asserts(t, r'torque.{0,40}(came|occurred|happened|spiked?|rose|leads?|led).{0,30}(first|before)(?!\s+(shows|appears|visible|seen))',
                                   r'torque.{0,60}(precede|prior to)')),
   ("says the order is inside one torque sample, so not resolvable",
    lambda t, c, m: has(t, r'(within|inside|less than|shorter than|under) (one|a single|1) (torque )?sample',
@@ -353,6 +360,8 @@ CHECKS = {
                           r'same (acquisition )?group|one group')),
   ("does not clear the drive on this evidence",
    lambda t, c, m: has(t, r"(cannot|can'?t|not|no).{0,40}(clear|rule out|exonerat)",
+                          r"(doesn'?t|does not|isn'?t|wouldn'?t).{0,40}(clear|grounds|send\w* the mechanics)",
+                          r'hold off', r'has no support',
                           r'(drive|torque).{0,60}(not ruled out|still (possible|a candidate|open))',
                           r'no.{0,30}(basis|evidence).{0,40}(mechanical|drive)',
                           r'cannot (confirm|answer|tell)')),
