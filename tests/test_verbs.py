@@ -93,6 +93,34 @@ def expand_groups(man):
     return sorted(out, key=lambda g: g["group"])
 
 
+def stream_split_checks():
+    """load_csv's streamed lines are exactly text.splitlines() of the whole file.
+
+    The one internal function checked directly: no CLI output can show a
+    one-line disagreement at a chunk boundary until it misaligns a column, and
+    sniff_csv's data_row is only right if both split identically. A tiny chunk
+    puts a boundary inside every awkward case.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("tcscope", TCSCOPE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    text = ("﻿Name\tTime\r\nµs;1,5\r\n\r\nx\ry\n\x0bz\x1cw v\x85u\r\r\n"
+            "€€€\r\n" + "1\t2\r\n" * 5 + "tail no newline")
+    raw = text.encode("utf-8") + b"\xff\r\nlast"
+    want = raw.decode("utf-8-sig", errors="replace").splitlines()
+    mismatched = []
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "split.csv"
+        path.write_bytes(raw)
+        for size in (1, 2, 3, 7, 10_000):
+            mod.STREAM_CHARS = size
+            if list(mod._stream_lines(path)) != want:
+                mismatched.append(size)
+    check("streamed CSV lines match splitlines() at every chunk size",
+          not mismatched, f"differs at chunk size {mismatched}")
+
+
 def real_fixture_checks():
     """Everything that only a genuine Scope layout can exercise.
 
@@ -1226,6 +1254,138 @@ def shareability_checks():
           "; ".join(f"{k} in {v[0]}" for k, v in list(offenders.items())[:3]))
 
 
+def retarget_checks():
+    """Restyling a project with no --channels keeps its own targets.
+
+    It used to rewrite every AmsNetId to the --netid default and every PLC
+    channel to port 851, so a channel on 852 moved with no word said and the
+    output claimed the channels were unchanged.
+    """
+    import xml.etree.ElementTree as ET
+    tpl = ROOT / "templates" / "axis-diagnosis.tcscopex"
+    if not tpl.exists():
+        check("newscope keeps a template's targets", True, "skipped: no template")
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        own = Path(tmp) / "own-targets.tcscopex"
+        root = ET.fromstring(tpl.read_text(encoding="utf-8-sig"))
+        acqs = root.findall(".//AdsAcquisition")
+        for acq in acqs:
+            acq.find("AmsNetId").text = "1.2.3.4.1.1"
+        acqs[0].find("TargetPort").text = "852"
+        own.write_bytes(b"\xef\xbb\xbf" + ET.tostring(root, encoding="utf-8"))
+
+        def targets(path):
+            back = ET.fromstring(path.read_text(encoding="utf-8-sig"))
+            return [(a.findtext("AmsNetId"), a.findtext("TargetPort"))
+                    for a in back.iter("AdsAcquisition")]
+
+        before = targets(own)
+        kept = Path(tmp) / "kept.tcscopex"
+        made = run("newscope", own, "-o", kept, "--theme", "light")
+        check("newscope without --channels, --netid or --port keeps every target",
+              made.get("ok") and targets(kept) == before
+              and made.get("retargeted") == [],
+              f"{targets(kept)[:2]} from {before[:2]}")
+
+        ported = Path(tmp) / "ported.tcscopex"
+        made = run("newscope", own, "-o", ported, "--port", "851")
+        check("newscope --port alone moves the ports and keeps the NetIDs",
+              made.get("ok")
+              and targets(ported) == [("1.2.3.4.1.1", "851")] * len(before)
+              and made.get("retargeted") == [
+                  {"symbol": acqs[0].findtext("SymbolName"), "field": "TargetPort",
+                   "from": "852", "to": "851"}],
+              str(made.get("retargeted")))
+
+        moved = Path(tmp) / "moved.tcscopex"
+        made = run("newscope", own, "-o", moved, "--netid", "127.0.0.1.1.1")
+        check("newscope --netid alone moves the NetIDs, keeps 852, and says so",
+              made.get("ok")
+              and targets(moved) == [("127.0.0.1.1.1", p) for _, p in before]
+              and len(made.get("retargeted", [])) == len(before)
+              and made.get("ams_net_id") == "127.0.0.1.1.1",
+              f"{targets(moved)[:1]}, {len(made.get('retargeted', []))} reported")
+
+
+# Written from the structure a real PLC .tmc was seen to have, names invented:
+# symbols under DataAreas/DataArea/Symbol, a block's members as SubItem, an enum
+# with EnumInfo and its width in BaseType. Both array forms appear, since a
+# declaration can carry ArrayInfo or name an ARRAY type.
+SYNTHETIC_TMC = """<?xml version="1.0" encoding="utf-8"?>
+<TcModuleClass>
+  <DataTypes>
+    <DataType><Name>E_Step</Name><BitSize>16</BitSize><BaseType>INT</BaseType>
+      <EnumInfo><Text>Idle</Text><Enum>0</Enum></EnumInfo></DataType>
+    <DataType><Name>T_Pos</Name><BitSize>64</BitSize><BaseType>LREAL</BaseType></DataType>
+    <DataType><Name>FB_Station</Name><BitSize>448</BitSize>
+      <SubItem><Name>bBusy</Name><Type>BOOL</Type><BitSize>8</BitSize></SubItem>
+      <SubItem><Name>eStep</Name><Type>E_Step</Type><BitSize>16</BitSize></SubItem>
+      <SubItem><Name>fActPos</Name><Type>LREAL</Type><BitSize>64</BitSize></SubItem>
+      <SubItem><Name>fTarget</Name><Type>T_Pos</Type><BitSize>64</BitSize></SubItem>
+      <SubItem><Name>nCount</Name><Type>DINT</Type><BitSize>32</BitSize></SubItem>
+      <SubItem><Name>aLoad</Name><Type>INT</Type><BitSize>64</BitSize>
+        <ArrayInfo><LBound>0</LBound><Elements>4</Elements></ArrayInfo></SubItem>
+      <SubItem><Name>stLib</Name><Type>ST_FromALibrary</Type><BitSize>64</BitSize></SubItem>
+    </DataType>
+  </DataTypes>
+  <Modules><Module><DataAreas><DataArea>
+    <Symbol><Name>MAIN.fbStation</Name><BitSize>448</BitSize><BaseType>FB_Station</BaseType></Symbol>
+    <Symbol><Name>GVL.aTemps</Name><BitSize>320</BitSize><BaseType>ARRAY [0..9] OF REAL</BaseType></Symbol>
+  </DataArea></DataAreas></Module></Modules>
+</TcModuleClass>
+"""
+
+
+def tmc_checks():
+    """checkscope --tmc: each PLC symbol exists, and is read at its compiled width."""
+    tpl = ROOT / "templates" / "axis-diagnosis.tcscopex"
+    if not tpl.exists():
+        check("checkscope --tmc", True, "skipped: no template")
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        tmc = Path(tmp) / "Plc.tmc"
+        tmc.write_text(SYNTHETIC_TMC, encoding="utf-8")
+        good = Path(tmp) / "good.tcscopex"
+        run("newscope", tpl, "-o", good, "--netid", "1.2.3.4.1.1", "--channels",
+            "main.FBSTATION.bbusy:BOOL,MAIN.fbStation.eStep:INT,"
+            "MAIN.fbStation.fActPos,MAIN.fbStation.fTarget,"
+            "MAIN.fbStation.aLoad[2]:INT,GVL.aTemps[3]:REAL,Axes.A1.ActPos")
+        ok = run("checkscope", good, "--tmc", tmc)
+        compiled = {c["symbol"]: c.get("compiled_type") for c in ok.get("channels", [])}
+        check("checkscope --tmc passes symbols that exist at their compiled width",
+              ok.get("ok") and ok.get("tmc", {}).get("checked") == 6
+              and ok["tmc"]["resolved"] == 6
+              and compiled.get("MAIN.fbStation.eStep") == "INT"
+              and compiled.get("MAIN.fbStation.fTarget") == "LREAL"
+              and compiled.get("GVL.aTemps[3]") == "REAL",
+              f"{ok.get('tmc')} {ok.get('problems')}")
+
+        bad = Path(tmp) / "bad.tcscopex"
+        run("newscope", tpl, "-o", bad, "--netid", "1.2.3.4.1.1", "--channels",
+            "MAIN.fbStation.bBusyy:BOOL,MAIN.fbStation,MAIN.fbStation.nCount,"
+            "MAIN.fbStation.aLoad:INT,MAIN.fbStation.stLib.x:BOOL,GVL.nMissing:INT")
+        got = run("checkscope", bad, "--tmc", tmc, expect_ok=False)
+        problems = " | ".join(got.get("problems", []))
+        warnings = " | ".join(got.get("warnings", []))
+        check("checkscope --tmc names a typo, a whole block, an array and a wrong width",
+              not got.get("ok")
+              and "bBusyy (no such member of FB_Station)" in problems
+              and "MAIN.fbStation: compiles to FB_Station" in problems
+              and "MAIN.fbStation.aLoad: compiles to ARRAY OF INT" in problems
+              and "nCount: compiled as DINT, which Scope reads as INT32" in problems
+              and "GVL.nMissing: GVL.nMissing is not in the compiled program" in problems,
+              problems)
+        check("checkscope --tmc warns where the .tmc does not describe a type",
+              "stLib.x: found, but its type ST_FromALibrary" in warnings, warnings)
+        check("checkscope without --tmc says nothing about it",
+              run("checkscope", good).get("tmc") is None)
+        not_tmc = Path(tmp) / "not.tmc"
+        not_tmc.write_text("<TcModuleClass/>", encoding="utf-8")
+        check("checkscope --tmc refuses a file with no symbol table",
+              not run("checkscope", good, "--tmc", not_tmc, expect_ok=False).get("ok"))
+
+
 def layout_checks():
     """Where a channel lands on screen, which is not the same as being wired.
 
@@ -1474,6 +1634,7 @@ def main():
                               for w in chk_restart.get("warnings", [])),
                   str(chk_restart.get("warnings")))
 
+    stream_split_checks()
     real_fixture_checks()
     at_rest_checks()
     layout_checks()
@@ -1483,6 +1644,8 @@ def main():
     export_copy_checks()
     still_channel_checks()
     shareability_checks()
+    retarget_checks()
+    tmc_checks()
 
     print()
     failed = [name for name, ok, _ in results if not ok]

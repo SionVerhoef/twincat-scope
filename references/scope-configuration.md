@@ -283,6 +283,15 @@ bands or channels with `Enabled` false. Disabling is a Scope View feature, so th
 failure — but a file with every band disabled showed nothing until they were enabled by hand,
 and whether a disabled acquisition still records has not been established.
 
+When the PLC project is at hand, add `--tmc <PLC>.tmc` — the compiled symbol table the build
+writes beside the `.plcproj` (repeat it for a second PLC runtime). Every PLC symbol is then
+looked up in the compiled program: a typo, a renamed variable, a whole block or an unindexed
+array is a problem, and so is a type read at the wrong width — an undeclared `DINT` written
+as `REAL64`. Enums are read at their base type. A type the `.tmc` does not describe, such as
+one from a library, is a warning, never a guess. The reader was written from the structure of
+one real `.tmc` and has not yet been run against one; treat a surprising result as a finding
+about the reader.
+
 It also prints the layout — every chart, its bands and their channels — and warns when a chart
 stacks more than six bands or a band overlays more than eight channels. Both are readability,
 not validity: the file is fine, the picture is not. `theme` says which background the charts

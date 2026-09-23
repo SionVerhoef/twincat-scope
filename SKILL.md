@@ -134,6 +134,11 @@ symbol on the wrong port never resolves, an IEC type is refused as `VOID`, and s
 placeholder names export as columns nobody can tell apart — and it warns on recording load
 and on a fixed window with no trigger, which is a lottery ticket for an intermittent fault.
 
+With the PLC project at hand, add `--tmc <PLC>.tmc` — every PLC symbol is then checked
+against the compiled program: typos, renamed variables, whole blocks, and types read at the
+wrong width. The `.tmc` reader has not yet met a real file, so treat a surprising result as
+a finding about the reader. `references/scope-configuration.md`.
+
 Then stop: opening the file in Scope View and pressing Record is the human's move (rule 4).
 Tell them to **add it to an existing TwinCAT Measurement project** — double-clicked on its
 own, one hung in the new-project wizard. Generated files carry fresh GUIDs, so two can share

@@ -149,7 +149,8 @@ same honesty applies to the skill itself.
 
 **The most useful contribution now is Part B of `evals/field-test-brief.md`** — the analysis
 verbs re-run against the 19 genuine exports on the machine that holds them — and a check that
-GitHub Copilot in VS Code picks the skill up.
+GitHub Copilot in VS Code picks the skill up. Nobody on this project has a Copilot licence, so
+that install path is untested.
 
 ## Tests
 

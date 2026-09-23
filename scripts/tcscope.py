@@ -552,28 +552,52 @@ def _chunk_array(np, block, delim, decimal, ncols):
                         dtype=float).reshape(-1, ncols)
 
 
+STREAM_CHARS = 2_000_000
+
+
+def _stream_lines(path):
+    """The file's lines, exactly as text.splitlines() on the whole file gives them.
+
+    The same decoding and the same separators sniff_csv indexed with, so
+    data_row still means what it said there - a split that disagreed by one
+    line would misalign every column in silence. Only one chunk of text is
+    alive at a time: holding the whole decoded file and its line list at once
+    was over half the peak on a big export.
+
+    The last piece of every chunk is carried into the next, even when it looks
+    complete: a '\\r' at a chunk's end may be the first half of '\\r\\n'.
+    """
+    carry = ""
+    with open(path, encoding="utf-8-sig", errors="replace", newline="") as fh:
+        while True:
+            chunk = fh.read(STREAM_CHARS)
+            if not chunk:
+                break
+            pieces = (carry + chunk).splitlines(keepends=True)
+            carry = pieces.pop()
+            yield from "".join(pieces).splitlines()
+    yield from carry.splitlines()
+
+
 def load_csv(path):
     """Read a Scope CSV export into a Recording."""
     np = need("numpy")
     info = sniff_csv(path)
     delim, decimal, ncols = info["delimiter"], info["decimal"], info["columns"]
 
-    with open(path, "rb") as fh:
-        text = fh.read().decode("utf-8-sig", errors="replace")
-    # The same line list sniff_csv indexed into, so data_row still means what it
-    # said there. `text` is released before parsing begins: on a 143 MB export
-    # it and the line list are together 318 MB of the peak.
-    lines = text.splitlines()
-    del text
-    del lines[:info["data_row"]]
-
-    blocks = []
-    for start in range(0, len(lines), CHUNK_ROWS):
-        block = _chunk_array(np, lines[start:start + CHUNK_ROWS],
-                             delim, decimal, ncols)
-        if block is not None:
-            blocks.append(block)
-    del lines
+    blocks, batch = [], []
+    for index, line in enumerate(_stream_lines(path)):
+        if index < info["data_row"]:
+            continue
+        batch.append(line)
+        if len(batch) == CHUNK_ROWS:
+            block = _chunk_array(np, batch, delim, decimal, ncols)
+            if block is not None:
+                blocks.append(block)
+            batch = []
+    block = _chunk_array(np, batch, delim, decimal, ncols) if batch else None
+    if block is not None:
+        blocks.append(block)
     if not blocks:
         fail(f"no parsable data rows in {path}")
 
@@ -2279,8 +2303,12 @@ def cmd_newscope(args):
             fail(f"{template} has no RecordTime element to set")
         record_node.text = str(ticks)
 
-    valid_port(args.port, "--port")
-    requested = ([c.strip() for c in args.channels.split(",")]
+    # Left out, --netid and --port mean "keep the template's own" when there are
+    # no --channels, and these defaults only for the channels written new.
+    netid = args.netid if args.netid is not None else "0.0.0.0.0.0"
+    plc_port = (valid_port(args.port, "--port") if args.port is not None
+                else PLC_FIRST_PORT)
+    requested =([c.strip() for c in args.channels.split(",")]
                  if args.channels is not None else [])
     if args.channels is not None and not any(requested):
         # Otherwise this falls through to "unchanged from template" and ok:true,
@@ -2292,7 +2320,7 @@ def cmd_newscope(args):
     # signal. Keep first-seen order; it drives the tab order below.
     specs = {}
     for entry in (c for c in requested if c):
-        spec = parse_channel_spec(entry, args.port)
+        spec = parse_channel_spec(entry, plc_port)
         seen = specs.get(spec["symbol"])
         if seen is None:
             specs[spec["symbol"]] = spec
@@ -2304,13 +2332,23 @@ def cmd_newscope(args):
     channels = list(specs)
     aliases = short_aliases(channels)
     layout = None
+    retargeted = []
 
     if not channels:
+        # Only what was asked for. Rewriting both unasked moved a channel on 852
+        # to 851 in silence, in a file that then recorded nothing.
         for node in acquisitions:
             symbol = (node.findtext("SymbolName") or "").strip()
-            set_fields(node, (("AmsNetId", args.netid),
-                              ("TargetPort", str(port_for(symbol, args.port)))),
-                       required=True)
+            pairs = []
+            if args.netid is not None:
+                pairs.append(("AmsNetId", netid))
+            if args.port is not None:
+                pairs.append(("TargetPort", str(port_for(symbol, plc_port))))
+            before = {tag: (node.findtext(tag) or "").strip() for tag, _ in pairs}
+            set_fields(node, pairs, required=True)
+            retargeted += [{"symbol": symbol, "field": tag,
+                            "from": before[tag], "to": value}
+                           for tag, value in pairs if before[tag] != value]
     else:
         acq_parent = parent_of(acquisitions[0])
         if acq_parent is None:
@@ -2358,7 +2396,7 @@ def cmd_newscope(args):
             acq_guid_of[symbol] = acq_guid
             set_fields(acq, (
                 ("SymbolName", symbol),
-                ("AmsNetId", args.netid),
+                ("AmsNetId", netid),
                 ("TargetPort", str(channel["port"])),
                 ("DataType", channel["data_type"]),
                 ("VariableSize", str(channel["variable_size"])),
@@ -2435,7 +2473,8 @@ def cmd_newscope(args):
         "charts": layout if layout is not None else "unchanged from template",
         "theme": args.theme,
         "guids": guids,
-        "ams_net_id": args.netid,
+        "ams_net_id": (netid if channels or args.netid is not None
+                       else "unchanged from template"),
         "record_seconds": (int(record_ticks) / TICKS_PER_MS / 1000.0
                            if record_ticks.isdigit() and int(record_ticks) > 0
                            else None),
@@ -2444,6 +2483,8 @@ def cmd_newscope(args):
                 "by adding it to an existing Measurement project, not by "
                 "double-clicking it, and a person presses Record.",
     }
+    if not channels:
+        out["retargeted"] = retargeted
     if args.sample_time_ms is not None:
         # Measured in the field: 10 ms on a 4 ms task was saved as 8 ms. This
         # tool does not know the task cycle, so it says so instead of guessing.
@@ -2484,6 +2525,161 @@ def _is_own_leaf(name, symbol):
     """Is this name the symbol's own last segment, as newscope would derive it?"""
     parts = _segments(symbol)
     return bool(parts) and name.lower() == _safe_segment(parts[-1]).lower()
+
+
+ARRAY_TYPE = re.compile(r"^\s*ARRAY\s*\[.*\]\s*OF\s+(.+?)\s*$", re.IGNORECASE)
+WHOLE_ARRAY = object()  # an array named without an index: many values, not one
+
+
+def load_tmc(paths):
+    """Symbols and data types from a PLC's compiled .tmc, keyed lowercased.
+
+    IEC names are case-insensitive, and a symbol in a scope file is often not
+    typed with the declaration's own capitals. Structure as read from a real
+    file: symbols at Modules/Module/DataAreas/DataArea/Symbol, data types as
+    DataType elements with SubItem members, enums with a BaseType.
+    """
+    symbols, types = {}, {}
+    for path in paths:
+        try:
+            tmc = ET.parse(path).getroot()
+        except (OSError, ET.ParseError) as exc:
+            fail(f"could not read {path} as a .tmc: {exc}",
+                 "Pass the .tmc the PLC build writes beside the .plcproj.")
+        found = tmc.findall(".//DataArea/Symbol")
+        if not found:
+            fail(f"{path} has no DataArea/Symbol entries - is it a PLC .tmc?",
+                 "Pass the .tmc the PLC build writes beside the .plcproj.")
+        for sym in found:
+            name = (sym.findtext("Name") or "").strip().lower()
+            if name:
+                symbols.setdefault(name, sym)
+        for dt in tmc.iter("DataType"):
+            name = (dt.findtext("Name") or "").strip().lower()
+            if name:
+                types.setdefault(name, dt)
+    return symbols, types
+
+
+def resolve_tmc_type(symbol, symbols, types):
+    """Walk `symbol` through the compiled program to the type Scope would read.
+
+    Returns (kind, detail): ("scalar", IEC type), ("missing", what is not there),
+    ("compound", type name) for a block or struct rather than a value, or
+    ("unknown", type name) where the type is not in the .tmc to follow.
+    """
+    parts = [(re.sub(r"\[.*\]$", "", p).strip(), p.strip().endswith("]"))
+             for p in symbol.split(".")]
+    names = [n.lower() for n, _ in parts]
+    for cut in range(len(parts), 0, -1):
+        if ".".join(names[:cut]) in symbols:
+            break
+    else:
+        return "missing", symbol
+
+    def element(node, type_tag, indexed):
+        """A declaration's type, with an index taken off an array declared so."""
+        type_name = (node.findtext(type_tag) or "").strip()
+        if node.find("ArrayInfo") is not None:
+            if not indexed:
+                return f"ARRAY OF {type_name}", False, True
+            indexed = False
+        return type_name, indexed, False
+
+    type_name, indexed, whole = element(symbols[".".join(names[:cut])], "BaseType",
+                                        parts[cut - 1][1])
+    if whole:
+        return "compound", type_name
+
+    def settle(type_name, indexed):
+        """Follow aliases, arrays and enums to what the name finally stands for."""
+        for _ in range(32):  # an alias cycle in a broken file, not a real one
+            array = ARRAY_TYPE.match(type_name)
+            if array:
+                if not indexed:
+                    return type_name, WHOLE_ARRAY
+                type_name, indexed = array.group(1), False
+                continue
+            dt = types.get(type_name.strip().lower())
+            if dt is None:
+                return type_name, None
+            base = (dt.findtext("BaseType") or "").strip()
+            if dt.find("ArrayInfo") is not None:
+                if not indexed or not base:
+                    return type_name, WHOLE_ARRAY
+                type_name, indexed = base, False
+            elif dt.find("EnumInfo") is not None:
+                # An enum with no declared base is an INT in TwinCAT.
+                return base or "INT", None
+            elif dt.find("SubItem") is None and base:
+                type_name = base
+            else:
+                return type_name, dt
+        return type_name, None
+
+    type_name, dt = settle(type_name, indexed)
+    for (member, indexed), shown in zip(parts[cut:], symbol.split(".")[cut:]):
+        if dt is WHOLE_ARRAY:
+            return "missing", f"{shown} (a member of the array {type_name}, " \
+                              "which needs an index first)"
+        if dt is None:
+            if scope_type(type_name):
+                return "missing", f"{shown} (a member of the {type_name} value)"
+            return "unknown", type_name
+        item = next((s for s in dt.findall("SubItem")
+                     if (s.findtext("Name") or "").strip().lower() == member.lower()),
+                    None)
+        if item is None:
+            return "missing", f"{shown} (no such member of {type_name})"
+        type_name, indexed, whole = element(item, "Type", indexed)
+        if whole:
+            return "compound", type_name
+        type_name, dt = settle(type_name, indexed)
+    if dt is not None:
+        return "compound", type_name
+    if scope_type(type_name):
+        return "scalar", type_name.upper()
+    return "unknown", type_name
+
+
+def check_against_tmc(channels, paths, problems, warnings):
+    """Every PLC channel's symbol and type against the compiled program."""
+    symbols, types = load_tmc(paths)
+    checked = resolved = 0
+    for channel in channels:
+        symbol = channel["symbol"]
+        if (not symbol or symbol.upper().startswith("PLACEHOLDER")
+                or is_nc_symbol(symbol) or channel["port"] == NC_PORT):
+            continue
+        checked += 1
+        kind, detail = resolve_tmc_type(symbol, symbols, types)
+        if kind == "missing":
+            problems.append(
+                f"{symbol}: {detail} is not in the compiled program, so Scope "
+                "would report an unknown symbol. A typo, a renamed variable, or "
+                "a symbol of another PLC runtime - pass that one's .tmc too.")
+        elif kind == "compound":
+            problems.append(
+                f"{symbol}: compiles to {detail}, a block, structure or array "
+                "rather than one value. Name the member, or the index, to record.")
+        elif kind == "unknown":
+            warnings.append(
+                f"{symbol}: found, but its type {detail} is not described in "
+                "the .tmc given, so its width could not be checked.")
+        else:
+            resolved += 1
+            channel["compiled_type"] = detail
+            want = scope_type(detail)
+            declared = scope_type(channel["data_type"] or "")
+            size = channel["variable_size"]
+            if (declared and declared[0] != want[0]) or (size and size != want[1]):
+                problems.append(
+                    f"{symbol}: compiled as {detail}, which Scope reads as "
+                    f"{want[0]} ({want[1]} byte(s)), but the file says "
+                    f"{channel['data_type']} ({size} byte(s)). The recording "
+                    "would be of the wrong bytes.")
+    return {"files": [str(p) for p in paths], "checked": checked,
+            "resolved": resolved}
 
 
 def cmd_checkscope(args):
@@ -2831,8 +3027,14 @@ def cmd_checkscope(args):
             "A trigger with a pre-trigger keeps the seconds before the event instead."
         )
 
+    # The one check that needs the program, not just the file: does each symbol
+    # exist, and at the width written? Done by hand, it would have caught every
+    # generator defect but the port one before anyone walked to the machine.
+    tmc = (check_against_tmc(channels, args.tmc, problems, warnings)
+           if args.tmc else None)
+
     emit({"ok": not problems, "file": str(args.input),
-          "channels": channels, "display_channels_wired": plotted,
+          "channels": channels, "tmc": tmc, "display_channels_wired": plotted,
           "acquisitions": len(acq_guids), "acquisitions_plotted": len(wired_to),
           "acquisitions_in_several_tabs": in_several_tabs,
           "acquisitions_without_display_channel": max(0, unwired),
@@ -2938,10 +3140,14 @@ def build_parser():
                         "any other undeclared channel is written as "
                         f"{DEFAULT_SCOPE_TYPE}, which is wrong for a BOOL or an "
                         "enum and is reported as a default rather than a fact.")
-    q.add_argument("--netid", default="0.0.0.0.0.0", help="target AmsNetId")
-    q.add_argument("--port", type=int, default=851,
-                   help=f"ADS port for PLC symbols. Symbols under 'Axes.' are "
-                        f"served by the NC runtime and always go to {NC_PORT}.")
+    q.add_argument("--netid",
+                   help="target AmsNetId (0.0.0.0.0.0 for new channels). Left "
+                        "out with no --channels, the template's own is kept.")
+    q.add_argument("--port", type=int,
+                   help=f"ADS port for PLC symbols ({PLC_FIRST_PORT} for new "
+                        f"channels). Symbols under 'Axes.' are served by the NC "
+                        f"runtime and always go to {NC_PORT}. Left out with no "
+                        f"--channels, the template's own ports are kept.")
     q.add_argument("--sample-time-ms", type=float)
     q.add_argument("--record-time", type=float,
                    help="length of the recording window in seconds. The window "
@@ -2960,6 +3166,10 @@ def build_parser():
 
     q = sub.add_parser("checkscope", help="validate a .tcscopex")
     q.add_argument("input")
+    q.add_argument("--tmc", action="append", default=[],
+                   help="the PLC's compiled .tmc, written by the build beside "
+                        "the .plcproj. Checks every PLC symbol exists and is "
+                        "read at its compiled width. Repeat for each PLC runtime.")
     q.set_defaults(func=cmd_checkscope)
 
     return p

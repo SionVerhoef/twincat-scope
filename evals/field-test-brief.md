@@ -72,8 +72,9 @@ and 4.2, 4.5 and 4.7 were answered. A fifth (`evals/field-review-3e4c44d.md`) cl
 4.5, 4.6 and 4.8 and the omission test in 4.3, and a sixth (`evals/field-review-6872161.md`)
 answered `ColorMode` — no theme-following option exists. A seventh
 (`evals/field-review-44d4951.md`) recorded parked and still axes for 4.9. **Still open from
-Part A:** VS Code with Copilot installed (4.10), and in 4.9 an axis parked exactly at a limit
-and a genuine saturation — and all of Part B.
+Part A:** running the new `checkscope --tmc` against a real `.tmc` (4.7), whether Claude Code
+picks the skill up (4.10), and in 4.9 an axis parked exactly at a limit and a genuine
+saturation — and all of Part B.
 
 ## 3. Setting up
 
@@ -240,19 +241,20 @@ uv run scripts/tcscope.py correlate <recording>.csv --channels "<axis actual>,<a
 
 ### 4.7 The compiled symbol table (`.tmc`)
 
-A `checkscope --tmc` option would check every PLC symbol and its type against the compiled
-program before anyone walks to the machine. The last session did that by hand with `grep`,
-and it would have caught every defect except the port one. It has not been built, because
-nobody here has seen a `.tmc`.
+The structure was reported by an earlier session, and `checkscope --tmc` was built from it
+without ever reading a real file. This is its first run against one. **Do not copy the `.tmc`
+off the machine**: it is the program's whole symbol table.
 
-Find the PLC project's `.tmc`, written by the build — look beside the `.plcproj` first, and
-say where it was. **Do not copy it off the machine**: it is the program's whole symbol table.
-Report instead, names replaced:
+```bash
+uv run scripts/tcscope.py newscope templates/axis-diagnosis.tcscopex -o tmc-check.tcscopex \
+    --channels "<a BOOL>,<an enum>,<an LREAL>,<a DINT, left undeclared>,<a misspelt symbol>,<an FB instance>"
+uv run scripts/tcscope.py checkscope tmc-check.tcscopex --tmc <path to the PLC>.tmc
+```
 
-- the element path from the root down to one symbol's entry;
-- that entry's child elements for one `BOOL`, one `INT` or enum, one `LREAL`, and one member
-  of a function-block instance;
-- how an enum's underlying type is recorded, if it is.
+- **PASS:** `tmc.resolved` counts the first three; the enum's `compiled_type` is its base
+  type; the undeclared `DINT`, the misspelt symbol and the FB instance are each a problem.
+- **Also try** one member of a library type (a `Tc2_MC2` `AXIS_REF` field, say) and one array
+  element. Report whether each resolved, warned or failed, with the message, names replaced.
 
 ### 4.8 Does Scope keep a `<Comment>`?
 
@@ -271,15 +273,17 @@ position and a rail look the same in the data (§8). If there is time, record ab
 an axis parked and — if the machine has one — a channel that genuinely saturates. Keep the
 CSVs on the machine. Report `stats` and `events` for those channels, names replaced.
 
-### 4.10 VS Code and Copilot — needs no TwinCAT
+### 4.10 Does the agent pick the skill up? — needs no TwinCAT
 
-If VS Code with GitHub Copilot is available: install the skill the way `README.md` says
-(`.github/skills/twincat-scope`), open a folder containing a `.tcscopex` or `.svdx`, and ask
-something like "why did the axis fault".
+Install the skill the way `README.md` says for Claude Code, open a folder containing a
+`.tcscopex` or `.svdx`, and ask something like "why did the axis fault".
 
-- **PASS:** Copilot uses the skill without being told its name.
-- **If not:** note the VS Code and Copilot versions and any organisation policy. That is a
-  packaging problem, not a code one — do not patch the skill for it.
+- **PASS:** the agent uses the skill without being told its name.
+- **If not:** note the client version. That is a packaging problem, not a code one — do not
+  patch the skill for it.
+
+The GitHub Copilot install path is the same files in `.github/skills/` and has never been
+observed working. Try it too if a Copilot licence is at hand; nobody on this project has one.
 
 ### What to bring back from Part A
 
@@ -290,7 +294,7 @@ Anything that failed, plus:
 3. The dark-theme answers from 4.3.
 4. The `TriggerModule` XML, if 4.4 failed.
 5. The working export-tool command line.
-6. The `.tmc` structure from 4.7.
+6. The `checkscope --tmc` output from 4.7, names replaced.
 7. Whether `<Comment>` survived, from 4.8.
 
 Every open task waiting on a machine closes from those seven.
@@ -432,12 +436,13 @@ container, 20 channels in two groups:
 
 | Samples | File | Per verb | Peak RSS |
 |---|---|---|---|
-| 0.4 M | 5.7 MB | ~1 s | 66 MB |
-| 2 M | 28.6 MB | ~4 s | 186 MB |
-| 10 M | 143.6 MB | 15–16 s | 340 MB |
-| 20 M | 288.3 MB | 31–42 s | 630 MB |
+| 0.4 M | 5.7 MB | ~1 s | 108 MB |
+| 2 M | 28.6 MB | ~4 s | 125 MB |
+| 10 M | 143.6 MB | 15–24 s | 215 MB |
+| 20 M | 288.3 MB | 31–33 s | 384 MB |
 
-Peak memory tracks the **file size**, not the sample count: roughly 25 MB + 2.2 × file size.
+Peak memory tracks the **samples**, not the file: roughly 100 MB + 2 × the float64 array. The
+CSV is read a chunk at a time, split exactly as `str.splitlines()` splits the whole file.
 Also measured: one 13.6 s `ingest` turns that 143.6 MB CSV into 11 MB of Parquet, after which
 the same verbs run in 1.8–3.3 s instead of 15–16 s.
 
@@ -481,10 +486,9 @@ written for.
   documented limitation rather than shipping an unvalidated heuristic. **If you can suggest a
   discriminator that survives the real files, that is the single most useful thing you could
   add.** A candidate is the speed at which the signal enters and leaves the rail.
-- **Peak RSS is still ~2.2 × file size**, because the decoded text and its line list are alive
-  at once. Streaming needs an exact byte offset out of `sniff_csv` first, and `str.splitlines()`
-  breaks on a wider separator set than a byte-level split — a naive stream desyncs columns
-  silently, which is precisely the failure class this tool exists to avoid.
+- **Peak RSS is still ~2 × the array**, because the parsed blocks and the array they are
+  joined into are alive at once. Copying block by block and freeing each was tried and saved
+  nothing: the allocator kept the memory.
 
 ## 9. Verified correct — do NOT "fix" these
 
