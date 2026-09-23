@@ -167,7 +167,9 @@ def write_comma(path, groups, columns, truth, rows, blanks=False, names=None):
     for gid, spec in enumerate(groups):
         name_row.append("Name")
         for ch in range(spec["channels"]):
-            short = (names[ch] if names else COMMA_NAMES[ch % len(COMMA_NAMES)])
+            # `names` is one list for every group, or one list per group.
+            given = names[gid] if names and isinstance(names[0], list) else names
+            short = (given[ch] if given else COMMA_NAMES[ch % len(COMMA_NAMES)])
             seen[short] = seen.get(short, 0) + 1
             suffix = f" ({seen[short]})" if seen[short] > 1 else ""
             name_row.append(short + suffix)

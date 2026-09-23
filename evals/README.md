@@ -28,12 +28,20 @@ Each eval below is built around a specific wrong answer that is easy to reach an
 |---|---|
 | `broken-cross-group` | Read as one table, the export says torque spiked *before* the following error. Its own clock says *after*. Neither is defensible — the export is broken. The naive read inverts cause and effect. |
 | `needle-in-the-haystack` | The glitch is 3 samples in 20,000. Any decimation that makes the file plottable steps over it. |
-| `saturated-channel` | The velocity channel's maximum is 8.0. The real peak is 78.5. The recorded max is the clip. |
-| `unwired-acquisition` | The project opens perfectly and records nothing. The defect is one level of indirection away from anything visible. |
-| `over-specified-recording` | 20 channels at 50 µs is 400,000 samples/s taken from the target's real-time budget — the scope disturbs the machine it is diagnosing. |
 | `out-of-scope-authoring` | The diagnosis is done and the fix is obviously a few lines of ST. Writing it is the natural next move and the wrong one. |
 | `needle-at-scale` | The same needle, in a haystack the size the skill's argument is about: 3 samples in 12 million, across 20 channels and 127 MB. |
-| `saturated-at-scale` | The same rail, in the same large file, with three unclipped axes beside it so a rail has to be a finding rather than the house style. |
+| `multi-rate-ordering` | A valid export. Read as one table, the following error rises 5 ms before the torque. But torque is sampled every 10 ms, so the order is inside one of its samples and not in the data. |
+
+**Retired in iteration 3**, because a capable baseline passed them unaided and they measured
+nothing: `saturated-channel` and `saturated-at-scale` (a rail is as obvious at 12 M samples as at
+20,000), `unwired-acquisition` (the baseline grepped the GUIDs), `over-specified-recording` (the
+baseline computed the load unprompted). `evals.json` keeps the reasons under `retired`, and the
+grader keeps their checks so old runs still regrade. A European-format dialect eval was considered
+and not added: `head` shows the tabs, and no thousands separator has been seen in a real export,
+so a silent misread is not plausible enough to be worth six runs.
+
+The needles now ask for a **ranked list** rather than "what happened". Iteration 2 showed the old
+question had two defensible answers in one file and punished the ranking both arms reached.
 
 ### Why two evals are run twice, at two sizes
 
@@ -94,15 +102,20 @@ That section is not decoration. Whether an agent oriented before reading rows is
 prose, and it is one of the behaviours being measured. It is self-reported, which is a real
 limitation — but both arms are asked for it the same way, so any inflation is symmetric.
 
-Write each answer to `<run-dir>/<eval-name>/<arm>/answer.md`.
+Write each answer to `<run-dir>/<eval-name>/<arm>/run-<n>/answer.md`, and beside it a
+`cost.json` of `{"tokens": N, "seconds": N}` taken from what the agent runner reports. Cost is
+not optional: at scale the skill's case is token economy rather than correctness, and iteration 2
+could not settle it because nothing recorded usage. Run the cells one at a time, or the seconds
+measure contention rather than the arm.
 
 **4. Grade.**
 
 ```bash
-python3 evals/grade.py evals/runs/iteration-1
+python3 evals/grade.py evals/runs/iteration-3
 ```
 
-Checks that both arms pass are flagged `<- does not discriminate`. Read those flags: they are the
+Scores are means over the runs in a cell, and the mean tokens and seconds per arm are printed
+beneath them. Evals whose means tie are flagged `<- does not discriminate`. Read those flags: they are the
 early warning for the failure that wasted two evals in the sibling repo.
 
 **5. Run each cell three times.** Iteration 1 of the sibling harness was n=1, which makes a

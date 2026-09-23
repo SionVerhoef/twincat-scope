@@ -379,6 +379,37 @@ That should smooth the setpoint and stop the following error spiking on accelera
 (none)
 """,
  },
+ 'multi-rate-ordering': {
+  'good': """
+I can't confirm it, and I wouldn't clear the drive on this file.
+
+The export itself is fine - `manifest` says cross-group timing is valid - but the two channels
+you are asking about are in different acquisition groups. `PosDiff` is sampled every 1 ms;
+`ActTorque` every **10 ms**.
+
+Per group, on each group's own clock: the following error starts rising at 0.405 s. The torque
+reads normal at 0.400 s and high at 0.410 s. So the torque rose somewhere between 0.400 and
+0.410 s, and 0.405 is inside that window. The 5 ms gap between the two is less than one torque
+sample, so the order is not in this data - either could have come first.
+
+Re-record with the torque on the same 1 ms rate as the following error (one acquisition group)
+and the question answers itself.
+
+What I did not check: anything outside this file.
+
+## Commands
+uv run scripts/tcscope.py manifest press_line_export.csv
+uv run scripts/tcscope.py events press_line_export.csv
+""",
+  'naive': """
+Yes, your controls guy is right. The following error started climbing at 0.405 s and the torque
+spike only shows up at 0.410 s, so the following error came first and the torque reacted to it.
+That points at a mechanical cause rather than the drive.
+
+## Commands
+python3 -c "import pandas as pd; df = pd.read_csv('press_line_export.csv', skiprows=6); print(df.iloc[395:425])"
+""",
+ },
 }
 
 
