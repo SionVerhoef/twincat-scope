@@ -206,6 +206,15 @@ type records the wrong bytes; and channels sharing one name, or left with the te
 placeholder, export as columns nobody can tell apart. It reports the layout and the theme too,
 says when a chart is too crowded to read, and warns about anything disabled.
 
+When the PLC project is at hand, add `--tmc <PLC>.tmc` — the compiled symbol table the build
+writes beside the `.plcproj` (repeat it for a second PLC runtime). Every PLC symbol is then
+looked up in the compiled program: a typo, a renamed variable, a whole block or an unindexed
+array is a problem, and so is a type read at the wrong width — an undeclared `DINT` written
+as `REAL64`. Enums are read at their base type. A type the `.tmc` does not describe, such as
+one from a library, is a warning, never a guess. The reader was written from the structure of
+one real `.tmc` and has not yet been run against one; treat a surprising result as a finding
+about the reader.
+
 `py -3` is the Windows launcher, and TwinCAT runs on Windows; on Linux or macOS (and in this repo's CI) the same commands are `python3`.
 
 It also reads the capture strategy, which is a separate way to waste a trip to the machine.

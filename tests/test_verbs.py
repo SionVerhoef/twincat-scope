@@ -1199,6 +1199,84 @@ def shareability_checks():
           "; ".join(f"{k} in {v[0]}" for k, v in list(offenders.items())[:3]))
 
 
+# Written from the structure a real PLC .tmc was seen to have, names invented:
+# symbols under DataAreas/DataArea/Symbol, a block's members as SubItem, an enum
+# with EnumInfo and its width in BaseType. Both array forms appear, since a
+# declaration can carry ArrayInfo or name an ARRAY type.
+SYNTHETIC_TMC = """<?xml version="1.0" encoding="utf-8"?>
+<TcModuleClass>
+  <DataTypes>
+    <DataType><Name>E_Step</Name><BitSize>16</BitSize><BaseType>INT</BaseType>
+      <EnumInfo><Text>Idle</Text><Enum>0</Enum></EnumInfo></DataType>
+    <DataType><Name>T_Pos</Name><BitSize>64</BitSize><BaseType>LREAL</BaseType></DataType>
+    <DataType><Name>FB_Station</Name><BitSize>448</BitSize>
+      <SubItem><Name>bBusy</Name><Type>BOOL</Type><BitSize>8</BitSize></SubItem>
+      <SubItem><Name>eStep</Name><Type>E_Step</Type><BitSize>16</BitSize></SubItem>
+      <SubItem><Name>fActPos</Name><Type>LREAL</Type><BitSize>64</BitSize></SubItem>
+      <SubItem><Name>fTarget</Name><Type>T_Pos</Type><BitSize>64</BitSize></SubItem>
+      <SubItem><Name>nCount</Name><Type>DINT</Type><BitSize>32</BitSize></SubItem>
+      <SubItem><Name>aLoad</Name><Type>INT</Type><BitSize>64</BitSize>
+        <ArrayInfo><LBound>0</LBound><Elements>4</Elements></ArrayInfo></SubItem>
+      <SubItem><Name>stLib</Name><Type>ST_FromALibrary</Type><BitSize>64</BitSize></SubItem>
+    </DataType>
+  </DataTypes>
+  <Modules><Module><DataAreas><DataArea>
+    <Symbol><Name>MAIN.fbStation</Name><BitSize>448</BitSize><BaseType>FB_Station</BaseType></Symbol>
+    <Symbol><Name>GVL.aTemps</Name><BitSize>320</BitSize><BaseType>ARRAY [0..9] OF REAL</BaseType></Symbol>
+  </DataArea></DataAreas></Module></Modules>
+</TcModuleClass>
+"""
+
+
+def tmc_checks():
+    """checkscope --tmc: each PLC symbol exists, and is read at its compiled width."""
+    tpl = ROOT / "templates" / "axis-diagnosis.tcscopex"
+    if not tpl.exists():
+        check("checkscope --tmc", True, "skipped: no template")
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        tmc = Path(tmp) / "Plc.tmc"
+        tmc.write_text(SYNTHETIC_TMC, encoding="utf-8")
+        good = Path(tmp) / "good.tcscopex"
+        run("newscope", tpl, "-o", good, "--netid", "1.2.3.4.1.1", "--channels",
+            "main.FBSTATION.bbusy:BOOL,MAIN.fbStation.eStep:INT,"
+            "MAIN.fbStation.fActPos,MAIN.fbStation.fTarget,"
+            "MAIN.fbStation.aLoad[2]:INT,GVL.aTemps[3]:REAL,Axes.A1.ActPos")
+        ok = run("checkscope", good, "--tmc", tmc)
+        compiled = {c["symbol"]: c.get("compiled_type") for c in ok.get("channels", [])}
+        check("checkscope --tmc passes symbols that exist at their compiled width",
+              ok.get("ok") and ok.get("tmc", {}).get("checked") == 6
+              and ok["tmc"]["resolved"] == 6
+              and compiled.get("MAIN.fbStation.eStep") == "INT"
+              and compiled.get("MAIN.fbStation.fTarget") == "LREAL"
+              and compiled.get("GVL.aTemps[3]") == "REAL",
+              f"{ok.get('tmc')} {ok.get('problems')}")
+
+        bad = Path(tmp) / "bad.tcscopex"
+        run("newscope", tpl, "-o", bad, "--netid", "1.2.3.4.1.1", "--channels",
+            "MAIN.fbStation.bBusyy:BOOL,MAIN.fbStation,MAIN.fbStation.nCount,"
+            "MAIN.fbStation.aLoad:INT,MAIN.fbStation.stLib.x:BOOL,GVL.nMissing:INT")
+        got = run("checkscope", bad, "--tmc", tmc, expect_ok=False)
+        problems = " | ".join(got.get("problems", []))
+        warnings = " | ".join(got.get("warnings", []))
+        check("checkscope --tmc names a typo, a whole block, an array and a wrong width",
+              not got.get("ok")
+              and "bBusyy (no such member of FB_Station)" in problems
+              and "MAIN.fbStation: compiles to FB_Station" in problems
+              and "MAIN.fbStation.aLoad: compiles to ARRAY OF INT" in problems
+              and "nCount: compiled as DINT, which Scope reads as INT32" in problems
+              and "GVL.nMissing: GVL.nMissing is not in the compiled program" in problems,
+              problems)
+        check("checkscope --tmc warns where the .tmc does not describe a type",
+              "stLib.x: found, but its type ST_FromALibrary" in warnings, warnings)
+        check("checkscope without --tmc says nothing about it",
+              run("checkscope", good).get("tmc") is None)
+        not_tmc = Path(tmp) / "not.tmc"
+        not_tmc.write_text("<TcModuleClass/>", encoding="utf-8")
+        check("checkscope --tmc refuses a file with no symbol table",
+              not run("checkscope", good, "--tmc", not_tmc, expect_ok=False).get("ok"))
+
+
 def layout_checks():
     """Where a channel lands on screen, which is not the same as being wired.
 
@@ -1456,6 +1534,7 @@ def main():
     export_copy_checks()
     still_channel_checks()
     shareability_checks()
+    tmc_checks()
 
     print()
     failed = [name for name, ok, _ in results if not ok]

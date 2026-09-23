@@ -4,6 +4,14 @@
 
 First working version. Not yet published.
 
+### Checking symbols against the compiled program
+
+- **`checkscope --tmc <PLC>.tmc`** looks every PLC channel up in the compiled symbol table
+  before anyone walks to the machine. A symbol that does not exist, a whole block or array,
+  and a width that does not match the compiled type are problems; a type the `.tmc` does not
+  describe is a warning. Written from the structure field-recorded in
+  `evals/field-review-fe9b487.md`; not yet run against a real `.tmc`.
+
 ### Rails that are not rails, and copies in any column order
 
 Round 7 of the field test (`evals/field-review-44d4951.md`): a 48.7 s recording at 125 Hz with
