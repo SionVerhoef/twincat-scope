@@ -4,6 +4,27 @@
 
 First working version. Not yet published.
 
+### A slimmer skill, before the next measurement
+
+Eval round 2 showed the skill arm reading more, not less. Before round 3 measures token
+cost, the cost is cut where it was known to be paid:
+
+- **`SKILL.md` is 40% smaller.** Each rule now appears once, as a line with its reason,
+  pointing at the reference that carries the detail; the field history moved to the README's
+  *Status*, and the long-form writing stays in `references/`. Nothing was dropped — the
+  timing-block table moved into `data-triage.md`, the hand-edited-layout story into
+  `scope-configuration.md`, and the trigger description is byte-identical.
+- **`manifest` merges groups that differ only in their id** into one entry naming them all
+  (`"groups": "0-39"`), so a per-display-channel export no longer buries the one group that
+  disagrees under 39 copies of its twin.
+- **The numpy-missing message names the trap it used to spring.** `uv run python
+  scripts/tcscope.py` skips the script's inline dependencies and lands on the very error
+  whose fix said "run this through uv" — the message now spells out both the working and
+  the broken invocation.
+- The stale claim in `export-tool.md` that no real `.svdx` had been converted is corrected:
+  two were, first time (`evals/field-review-3e4c44d.md`); what remains unproven is variety.
+- CI's branding guard no longer spells the name it guards against; the pattern is encoded.
+
 ### Rails that are not rails, and copies in any column order
 
 Round 7 of the field test (`evals/field-review-44d4951.md`): a 48.7 s recording at 125 Hz with

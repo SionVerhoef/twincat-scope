@@ -41,12 +41,14 @@ jobs:
 
       - name: standalone contract
         # No reference may point outside this repository, and no business
-        # branding may leak into it. The bracket around the first letter keeps
-        # each pattern from matching this file, which would fail the check
-        # against its own source.
+        # branding may leak into it. The branding pattern is base64-encoded so
+        # the guarded name appears nowhere in this tree - a guard that spells
+        # the name it guards against is itself the leak. For the plaintext
+        # patterns, the bracket around a first letter keeps each one from
+        # matching this file's own source.
         run: |
           ! grep -rn '\.\./\.\.' --include='*.md' --include='*.py' . || exit 1
-          ! grep -rniE '[s]olvera|certified [b]eckhoff' . || exit 1
+          ! grep -rniE "$(printf 'c29sdmVyYQ==' | base64 -d)|certified [b]eckhoff" . || exit 1
           ! grep -rnE '/[h]ome/|/[p]rojects/|[C]:\\Users' \
               --include='*.md' --include='*.py' --include='*.yml' . || exit 1
           # The twincat-st guard that used to sit here is gone on purpose: that

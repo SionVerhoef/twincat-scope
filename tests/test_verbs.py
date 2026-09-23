@@ -73,6 +73,26 @@ def first(events, channel, kind):
     return None
 
 
+def expand_groups(man):
+    """Undo manifest's identical-group merge: one dict per group id, in order.
+
+    manifest folds groups that differ only in their id into one entry whose
+    "groups" field is an id-range string ('1-59'). The checks here reason per
+    group, so they expand that entry back out.
+    """
+    out = []
+    for entry in man.get("groups", []):
+        if "group" in entry:
+            out.append(entry)
+            continue
+        for part in entry["groups"].split(","):
+            lo, _, hi = part.partition("-")
+            for gid in range(int(lo), int(hi or lo) + 1):
+                out.append({**{k: v for k, v in entry.items()
+                               if k not in ("groups", "count")}, "group": gid})
+    return sorted(out, key=lambda g: g["group"])
+
+
 def real_fixture_checks():
     """Everything that only a genuine Scope layout can exercise.
 
@@ -85,12 +105,13 @@ def real_fixture_checks():
     # --- structure: groups, channels, and names that are not metadata --------
     for name, want in sorted(truth.items()):
         got = run("manifest", REAL / name)
+        groups = expand_groups(got)
         check(f"{name}: manifest parses it",
               got.get("ok") is True, str(got.get("error", ""))[:80])
         check(f"{name}: {want['columns']} columns, {len(want['groups'])} groups",
               got.get("ncols") == want["columns"]
-              and len(got.get("groups", [])) == len(want["groups"]),
-              f"ncols={got.get('ncols')} groups={len(got.get('groups', []))}")
+              and len(groups) == len(want["groups"]),
+              f"ncols={got.get('ncols')} groups={len(groups)}")
         expect_channels = sum(g["channels"] for g in want["groups"])
         check(f"{name}: {expect_channels} channels, time columns excluded",
               len(got.get("channels", [])) == expect_channels,
@@ -101,12 +122,12 @@ def real_fixture_checks():
               names.isdisjoint(FORBIDDEN_NAMES),
               f"offending: {sorted(names & FORBIDDEN_NAMES)[:4]}")
 
-        rates = [g["sample_time_ms_measured"] for g in got.get("groups", [])]
+        rates = [g["sample_time_ms_measured"] for g in groups]
         check(f"{name}: per-group sample times measured correctly",
               rates == [g["sample_time_ms"] for g in want["groups"]],
               f"got {rates[:4]}")
 
-        repeats = [g["repeat_factor"] for g in got.get("groups", [])]
+        repeats = [g["repeat_factor"] for g in groups]
         check(f"{name}: repeat_factor detected from the padded time column",
               repeats == [g["repeat_factor"] for g in want["groups"]],
               f"got {repeats[:4]}")
@@ -121,8 +142,8 @@ def real_fixture_checks():
           tab.get("delimiter") == "\t" and tab.get("decimal") == ",",
           f"delim={tab.get('delimiter')!r} decimal={tab.get('decimal')!r}")
     check("TAB dialect: SampleTime[ms] is read from the file, not guessed",
-          [g["sample_time_ms_declared"] for g in tab.get("groups", [])] == [2.0, 4.0],
-          str([g["sample_time_ms_declared"] for g in tab.get("groups", [])]))
+          [g["sample_time_ms_declared"] for g in expand_groups(tab)] == [2.0, 4.0],
+          str([g["sample_time_ms_declared"] for g in expand_groups(tab)]))
     symbols = [c["symbol_name"] for c in tab.get("channels", [])]
     check("TAB dialect: channels carry their qualified SymbolName path",
           any(s.startswith("Axes.Linear Axis 1 (") for s in symbols)
@@ -134,8 +155,14 @@ def real_fixture_checks():
 
     single = run("manifest", REAL / "real_tab_pergroup_single.csv")
     check("multi-line SymbolComment does not derail the metadata scan",
-          single.get("ok") is True and len(single.get("groups", [])) == 60,
-          f"groups={len(single.get('groups', []))}")
+          single.get("ok") is True and len(expand_groups(single)) == 60,
+          f"groups={len(expand_groups(single))}")
+    check("60 identical groups arrive as one merged entry, ids named",
+          len(single.get("groups", [])) == 1
+          and single["groups"][0].get("count") == 60
+          and single["groups"][0].get("groups") == "0-59"
+          and "groups_note" in single,
+          str(single.get("groups", [{}])[0])[:80])
 
     # --- the broken export --------------------------------------------------
     broken = run("manifest", REAL / "real_tab_pergroup_skewed.csv")
@@ -170,7 +197,7 @@ def real_fixture_checks():
 
     # --- blank cells --------------------------------------------------------
     blanks = run("manifest", REAL / "real_comma_blanks.csv")
-    lead = (blanks.get("groups") or [{}])[0]
+    lead = (expand_groups(blanks) or [{}])[0]
     check("blanks in a time column do not poison the measured rate",
           near(lead.get("estimated_rate_hz"), 500.0, 1e-6)
           and lead.get("time_nan_count") == 2,
@@ -212,12 +239,12 @@ def real_fixture_checks():
         run("ingest", REAL / "real_tab_2group.csv", "-o", cache)
         back = run("manifest", cache)
         check("ingest to Parquet keeps the group model and the qualified names",
-              len(back.get("groups", [])) == 2
+              len(expand_groups(back)) == 2
               and len(back.get("channels", [])) == 54
               and any(c["symbol_name"].startswith("Axes.Linear Axis")
                       for c in back.get("channels", [])),
-              f"groups={len(back.get('groups', []))} channels={len(back.get('channels', []))}")
-        rates = [g["estimated_rate_hz"] for g in back.get("groups", [])]
+              f"groups={len(expand_groups(back))} channels={len(back.get('channels', []))}")
+        rates = [g["estimated_rate_hz"] for g in expand_groups(back)]
         check("per-group sample rates survive the Parquet round-trip",
               rates == [500.0, 250.0], str(rates))
 
@@ -255,7 +282,7 @@ def real_fixture_checks():
 
     # --- stats is auditable -------------------------------------------------
     man = run("manifest", REAL / "real_comma_3group.csv")
-    counts = {g["group"]: g["n_samples"] for g in man.get("groups", [])}
+    counts = {g["group"]: g["n_samples"] for g in expand_groups(man)}
     st = run("stats", REAL / "real_comma_3group.csv")
     per_group = {c.get("group"): c.get("n_samples") for c in st.get("channels", [])}
     check("stats reports a per-channel sample count",
@@ -794,7 +821,7 @@ def export_copy_checks():
         symbols = [c["symbol_name"] for c in chans]
         check("identical copies of one acquisition are read as one channel",
               symbols.count(parent) == 2 and len(chans) == 5
-              and len(man.get("groups", [])) == 5,
+              and len(expand_groups(man)) == 5,
               str([(c["name"], c["symbol_name"]) for c in chans]))
         check("the collapse is reported, naming what was dropped",
               man.get("copies_collapsed") == [{"kept": "seStep",

@@ -136,6 +136,11 @@ route.
 `YTChart` siblings arrived as three tabs (`evals/field-review-1fa0e9b-rounds.md`,
 `evals/field-review-fe9b487.md`).
 
+**Change a layout by regenerating, not by editing the XML.** A generated file came back from
+the field with every band disabled and hand-written band names, showing nothing until someone
+enabled the bands in Scope View — most likely edited after `newscope` wrote it. If you must
+edit one, copy an element that is enabled, and run `checkscope` again afterwards.
+
 ## Colours
 
 Every colour is absolute: a signed 32-bit ARGB integer (`-921103` is `0xFFF1F1F1`) or a .NET

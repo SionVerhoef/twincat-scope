@@ -62,11 +62,12 @@ $env:TCSCOPE_EXPORT_TOOL = "C:\TwinCAT\Functions\TE1300-Scope-View\TC3ScopeExpor
 ## The CSV traps
 
 **The reader was measured against 19 genuine export-tool CSVs**, covering both dialects, and
-`tests/make_real_fixtures.py` reproduces the five layouts they use. What is unproven is the
-step *before* it: no `.svdx` has been converted by the real tool here, so the invocation above
-is as documented rather than as observed. The reader still sniffs each file and reports what
-it detected — if something looks wrong, `manifest --dump-header` shows the raw first lines,
-and those beat the sniffer.
+`tests/make_real_fixtures.py` reproduces the five layouts they use. The step *before* it has
+now been observed too: the real tool converted two `.svdx` recordings first time with the
+invocation above (`evals/field-review-3e4c44d.md`). What that leaves unproven is variety —
+one machine, one tool version, and the `;` delimiter has yet to appear in a real file. The
+reader still sniffs each file and reports what it detected — if something looks wrong,
+`manifest --dump-header` shows the raw first lines, and those beat the sniffer.
 
 ### Trap 1: the European locale
 
