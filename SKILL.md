@@ -91,6 +91,11 @@ measured `sample_time_ms`, `repeat_factor`, `t_first`, `t_last`, `n_samples`. Th
 Times in a Scope export are milliseconds. This tool converts on read and reports **seconds**
 everywhere (`time_unit: "ms"`, `times_reported_in: "s"`).
 
+Scope exports one column per *display* channel, so a channel drawn in three tabs arrives as
+`<name>`, `<name> (1)`, `<name> (2)`. Exact copies — same symbol, same time column, same values
+— are read as one channel, and `manifest` lists them under `copies_collapsed`. A non-zero
+`display_offset` is where the trace was drawn, not a change to the values; never add it.
+
 ### 2. Convert once
 
 ```bash
@@ -158,6 +163,9 @@ are stood at the machine:
   from a 1-byte variable and records nothing usable.
 - **The window has to contain the event.** `--record-time <seconds>`; the templates ship 60 s,
   and a homing sequence alone can outrun that.
+- **The sample time snaps to the task cycle.** Scope saved `--sample-time-ms 10` as 8 ms on a
+  4 ms task. Pick a multiple of the cycle of the task that owns the channels, and read the
+  rate that was recorded from `manifest`.
 
 `newscope` also decides where each channel is drawn, which matters as much as recording it.
 Everything sharing an axis shares one auto-scaled range, so twenty channels on one axis is
@@ -166,7 +174,9 @@ metre. It writes **one chart tab per device** and, inside each tab, **one stacke
 quantity** — position (set and actual together, since that gap is the measurement), following
 error, velocity, acceleration, torque, then bits, then step numbers and counters (apart from
 the bits, which a step running to 200 would flatten) — and gives channels sharing a band
-different colours. A band that would hold more than eight traces is split into even parts. A
+different colours. Flags in one band are drawn in lanes of their own by a display offset,
+which moves only the trace — the exported values stay 0/1, and `manifest` reports the offset
+as `display_offset`. A band that would hold more than eight traces is split into even parts. A
 block with a single channel — typically a sequencer's step — does not get a tab of its own: it
 is drawn first in the tab of each block beneath it, where it is read, and recorded once. It
 prints the layout it chose; check it before handing the file over. `--layout flat` returns to
@@ -236,8 +246,9 @@ Those rounds ran patches to an older version. A later session ran this skill's o
 unedited (`evals/field-review-fe9b487.md`): the same five NC channels, now with an `AxisStyle`
 on every axis and the dark theme, **opened and recorded**; and a file mixing two NC axis
 channels with a PLC `BOOL`, `INT` and `LREAL` on 851 **recorded all five** across three tabs.
-Triggers, `.svdx` conversion and the round trip back through these verbs have not been seen
-working.
+Then the whole path (`evals/field-review-3e4c44d.md`): a generated 40-channel file recorded, a
+trigger configured in Scope View was detected by `checkscope`, and the real export tool
+converted the `.svdx` with the command line `ingest` uses, which `manifest` read back.
 
 Rule 3 applies to this skill's own claims, so precisely: the CSV reader **was** measured
 against 19 genuine `TC3ScopeExportTool.exe` exports from a Beckhoff CX/AX8000 machine
@@ -251,6 +262,6 @@ against synthetic fixtures with planted defects. `checkscope` was run against 7 
 Beckhoff-authored `.tcscopex` files, which validated *reading* a real project file rather
 than *writing* an equivalent one.
 
-What that does **not** prove: no `.svdx` has been converted by the real export tool in this
-environment, and a recording from a generated `.tcscopex` has not yet been exported and read
-back through these verbs.
+What that does **not** prove: the analysis verbs have been run against one real recording of a
+generated file, not against the variety of the 19 exports, and the `;` delimiter has still not
+been seen in a real file.

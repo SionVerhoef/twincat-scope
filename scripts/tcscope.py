@@ -38,8 +38,8 @@ both the TAB and ',' dialects, and is tested against structural copies of all
 five layouts those files use. The .tcscopex writer is modelled on real Beckhoff
 sample files. Its first file to reach a machine recorded nothing; with the type,
 name and port fixes, its own unedited output has recorded NC axis and PLC
-channels. Triggers and .svdx conversion have not been seen working. Both say so
-rather than implying otherwise.
+channels, with a trigger, and the real export tool has converted the result.
+Both say so rather than implying otherwise.
 """
 
 import argparse
@@ -293,6 +293,10 @@ def _parse_groups(meta, ncols, decimal):
                 short = qualified or f"col{col}"
             declared = cell("SampleTime[ms]", col)
             port = cell("Port", col)
+            # A display offset set in Scope View lands in this header while the
+            # values below it stay raw - measured in the field, a flag offset
+            # by 2 exported only 0 and 1. Report it; never add it.
+            offset = cell("Offset", col)
             channels.append({
                 "name": short,
                 "symbol_name": qualified or short,
@@ -302,6 +306,7 @@ def _parse_groups(meta, ncols, decimal):
                 "data_type": cell("Data-Type", col),
                 "port": int(port) if port and port.isdigit() else None,
                 "sample_time_ms": _parse_float(declared, decimal) if declared else None,
+                "display_offset": _parse_float(offset, decimal) if offset else None,
             })
         groups.append({"id": index, "time_column": start, "channels": channels})
     return groups
@@ -328,7 +333,7 @@ def _flat_group(lines, data_row, delim, decimal, ncols):
         names = [f"col{i}" for i in range(ncols)]
     channels = [{"name": names[col] or f"col{col}", "symbol_name": names[col] or f"col{col}",
                  "column": col, "group": 0, "unit": None, "data_type": None,
-                 "port": None, "sample_time_ms": None}
+                 "port": None, "sample_time_ms": None, "display_offset": None}
                 for col in range(1, ncols)]
     return [{"id": 0, "time_column": 0, "channels": channels}]
 
@@ -569,7 +574,43 @@ def load_csv(path):
             channel["values"] = data[:, channel["column"]]
         groups.append(_finalise_group(np, group, data[:, group["time_column"]]))
     info["rows"] = int(data.shape[0])
-    return Recording(groups, info)
+    return collapse_copies(np, Recording(groups, info))
+
+
+def collapse_copies(np, rec):
+    """Read one acquisition drawn in several tabs as one channel.
+
+    Scope exports a column per display channel, not per acquisition, so a step
+    newscope draws in three tabs comes out three times - "<name>", "<name> (1)",
+    "<name> (2)", each in a group of its own (field round 5: 40 acquisitions,
+    42 columns). Counted three times it triples every event and correlates
+    perfectly with itself. Only exact copies go: same symbol and port, the same
+    time column and the same values. The same symbol recorded twice at another
+    rate is two recordings, and both stay.
+    """
+    kept, collapsed = {}, {}
+    for group in rec.groups:
+        for channel in list(group["channels"]):
+            key = (channel["symbol_name"], channel["port"])
+            twin = next((k for k in kept.get(key, [])
+                         if np.array_equal(rec.time_of(k), group["time"], equal_nan=True)
+                         and np.array_equal(k["values"], channel["values"],
+                                            equal_nan=True)), None)
+            if twin is None:
+                kept.setdefault(key, []).append(channel)
+            else:
+                group["channels"].remove(channel)
+                collapsed.setdefault(twin["name"], []).append(channel["name"])
+    if collapsed:
+        # A copy sat in a group of its own; an emptied group is not a group.
+        rec.groups = [g for g in rec.groups if g["channels"]]
+        for index, group in enumerate(rec.groups):
+            group["id"] = index
+            for channel in group["channels"]:
+                channel["group"] = index
+    rec.info["copies_collapsed"] = [{"kept": name, "dropped": dropped}
+                                    for name, dropped in collapsed.items()]
+    return rec
 
 
 PARQUET_META_KEY = b"tcscope"
@@ -592,7 +633,8 @@ def _unique(name, used):
 def parquet_payload(rec):
     """(columns, layout) for writing a Recording losslessly to Parquet."""
     columns, used = {}, {}
-    layout = {"time_unit": "s", "groups": []}
+    layout = {"time_unit": "s", "groups": [],
+              "copies_collapsed": rec.info.get("copies_collapsed", [])}
     for group in rec.groups:
         time_col = _unique(f"g{group['id']}.time", used)
         columns[time_col] = group["time"]
@@ -607,6 +649,7 @@ def parquet_payload(rec):
                 "symbol_name": channel["symbol_name"], "unit": channel["unit"],
                 "data_type": channel["data_type"], "port": channel["port"],
                 "sample_time_ms": channel["sample_time_ms"],
+                "display_offset": channel.get("display_offset"),
             })
         layout["groups"].append(entry)
     return columns, layout
@@ -646,13 +689,15 @@ def load_parquet(path):
                 "column": spec["column"], "group": entry["id"],
                 "unit": spec.get("unit"), "data_type": spec.get("data_type"),
                 "port": spec.get("port"), "sample_time_ms": spec.get("sample_time_ms"),
+                "display_offset": spec.get("display_offset"),
                 "values": column(spec["column"]),
             })
         groups.append(_finalise_group(np, group, seconds * MS_PER_S))
 
     rows = int(groups[0]["time"].size) if groups else 0
     return Recording(groups, {"source": "parquet", "rows": rows,
-                              "columns": len(table.column_names)})
+                              "columns": len(table.column_names),
+                              "copies_collapsed": layout.get("copies_collapsed", [])})
 
 
 def load(path):
@@ -843,7 +888,18 @@ def cmd_manifest(args):
     lead = min(groups, key=lambda g: g["sample_time_ms_measured"]
                if g["sample_time_ms_measured"] == g["sample_time_ms_measured"] else 1e18)
 
-    emit({
+    channels = []
+    for ch in rec.channels:
+        entry = dict(channel_label(ch, total),
+                     unit=ch["unit"], data_type=ch["data_type"],
+                     nan_fraction=float(np.mean(~np.isfinite(ch["values"]))),
+                     constant=bool(np.nanmax(ch["values"]) == np.nanmin(ch["values"])))
+        # Where the trace is drawn, not what was recorded: the values are raw.
+        if ch.get("display_offset"):
+            entry["display_offset"] = ch["display_offset"]
+        channels.append(entry)
+
+    out = {
         "ok": True,
         "file": str(args.input),
         "rows": rec.info.get("rows"),
@@ -856,16 +912,16 @@ def cmd_manifest(args):
         "gaps": sum(g["gaps"] for g in groups),
         "timing": timing,
         "groups": groups,
-        "channels": [
-            dict(channel_label(ch, total),
-                 unit=ch["unit"], data_type=ch["data_type"],
-                 nan_fraction=float(np.mean(~np.isfinite(ch["values"]))),
-                 constant=bool(np.nanmax(ch["values"]) == np.nanmin(ch["values"])))
-            for ch in rec.channels
-        ],
+        "channels": channels,
         "delimiter": rec.info.get("delimiter"),
         "decimal": rec.info.get("decimal"),
-    })
+    }
+    if rec.info.get("copies_collapsed"):
+        out["copies_collapsed"] = rec.info["copies_collapsed"]
+        out["copies_note"] = (
+            "These columns were exact copies of another - one acquisition drawn "
+            "in several tabs exports once per tab - and are read as one channel.")
+    emit(out)
     return 0
 
 
@@ -1762,6 +1818,9 @@ BAND_DIGITAL = "Digital / state"
 # the bits: a step running 0..200 on the same axis as 0/1 flags draws every
 # flag as a flat line, which is the failure the bands exist to prevent.
 BAND_INTEGER = "Step / count"
+# Display offset between stacked flags: each 0/1 trace in a lane of its own,
+# half a unit clear of the next.
+FLAG_LANE = 1.5
 
 # Matched against the leaf of the symbol path, lowercased, first hit wins - so
 # the specific entries must come before the general ones. "PosDiff" contains
@@ -2211,12 +2270,24 @@ def cmd_newscope(args):
                 set_fields(group, (("Title", band["band"]), ("Name", band["band"]),
                                    ("SortPriority", str(10 + band_index))))
                 target = group.find("SubMember")
+                lane = 0
                 for symbol in band["channels"]:
                     chan = copy.deepcopy(blank_chan)
                     refresh_guids(chan)
                     set_fields(chan, (("Name", aliases[symbol]),
                                       ("Title", symbol)),
                                required=True)
+                    # Flags in one band sit on the same two levels and hide
+                    # each other, and Scope saves no band height to make room.
+                    # A display offset moves only the drawn trace - measured
+                    # in the field, the export stays raw 0/1 and the header
+                    # records the offset - so each flag gets a lane of its own.
+                    if (band["band"].startswith(BAND_DIGITAL)
+                            and specs[symbol]["data_type"] == "BIT"):
+                        offset = chan.find("SubMember/AcquisitionInterpreter/Offset")
+                        if offset is not None:
+                            offset.text = f"{FLAG_LANE * lane:g}"
+                        lane += 1
                     ref = chan.find(".//AcquisitionGUID")
                     if ref is not None:
                         ref.text = acq_guid_of[symbol]
@@ -2253,11 +2324,18 @@ def cmd_newscope(args):
                            if record_ticks.isdigit() and int(record_ticks) > 0
                            else None),
         "note": "Files from this version have recorded NC axis and PLC bit, "
-                "integer and real channels on a real target, unedited. Triggers "
-                "have not been seen working. Open it by adding it to an "
-                "existing Measurement project, not by double-clicking it, and "
-                "a person presses Record.",
+                "integer and real channels on a real target, unedited. Open it "
+                "by adding it to an existing Measurement project, not by "
+                "double-clicking it, and a person presses Record.",
     }
+    if args.sample_time_ms is not None:
+        # Measured in the field: 10 ms on a 4 ms task was saved as 8 ms. This
+        # tool does not know the task cycle, so it says so instead of guessing.
+        out["sample_time_note"] = (
+            "Scope snaps a sample time to a multiple of the cycle of the task "
+            "that owns the channel - 10 ms was saved as 8 ms on a 4 ms task. "
+            "Choose a multiple of that cycle, and read the recorded rate from "
+            "manifest rather than from this file.")
     suspect_ports = [s for s, spec in specs.items()
                      if unlikely_plc_port(s, spec["port"])]
     if suspect_ports:

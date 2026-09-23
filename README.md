@@ -108,7 +108,9 @@ twincat-scope/
 with the dark theme, and a mix of NC axis and PLC `BOOL`, `INT` and `LREAL` channels
 (`evals/field-review-fe9b487.md`). Earlier sessions found the type, port and name defects that
 stood in the way (`evals/field-review-1fa0e9b.md`, `evals/field-review-1fa0e9b-rounds.md`).
-Triggers have not been seen working. Specifically:
+The whole path has run once end to end (`evals/field-review-3e4c44d.md`): a generated file
+recorded with a trigger configured in Scope View, the real export tool converted the `.svdx`,
+and `ingest` and `manifest` read it. Specifically:
 
 - The `.tcscopex` schema was derived by reading real Beckhoff sample projects, and the
   templates validate against it. `checkscope` has been run against 7 real Beckhoff-authored
@@ -119,15 +121,16 @@ Triggers have not been seen working. Specifically:
   machine behaviour and are not in this repo; `tests/make_real_fixtures.py` regenerates
   structural copies of all five layouts instead.
 - The analysis verbs are tested against those structural fixtures and against synthetic ones
-  with planted defects — a step, a 3-sample spike, a flatline, a clipped channel. No `.svdx`
-  has been converted by the real export tool here.
+  with planted defects — a step, a 3-sample spike, a flatline, a clipped channel. Two real
+  `.svdx` recordings of a generated file have been converted by the real export tool and read
+  back, once.
 
 `SKILL.md` rule 3 tells the agent never to claim something is verified when it is not. The
 same honesty applies to the skill itself.
 
-**The most useful contribution now is a `.svdx` from a generated file, converted by the real
-export tool and read back through these verbs**, and a scope with a real trigger configured
-in Scope View, checked with `checkscope`.
+**The most useful contribution now is Part B of `evals/field-test-brief.md`** — the analysis
+verbs re-run against the 19 genuine exports on the machine that holds them — and a check that
+GitHub Copilot in VS Code picks the skill up.
 
 ## Tests
 

@@ -68,8 +68,9 @@ still named `Signal`. All four are fixed. A third session
 the old version **recorded five NC axis channels**. A fourth
 (`evals/field-review-fe9b487.md`) ran Part A on this skill's own output: items 1, 2 and 4
 passed — NC axis and PLC bit, integer and real channels all recorded, `AxisStyle` accepted —
-and 4.2, 4.5 and 4.7 were answered. **Still open from Part A:** the rest of 4.3 (`ColorMode`
-options, the omission test), 4.4 a real trigger, `ingest` in 4.5, 4.6, 4.8, 4.9 and 4.10.
+and 4.2, 4.5 and 4.7 were answered. A fifth (`evals/field-review-3e4c44d.md`) closed 4.4,
+4.5, 4.6 and 4.8 and the omission test in 4.3. **Still open from Part A:** the `ColorMode`
+options (4.3), a parked axis (4.9) and VS Code (4.10) — and all of Part B.
 
 ## 3. Setting up
 

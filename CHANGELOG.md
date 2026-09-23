@@ -4,6 +4,24 @@
 
 First working version. Not yet published.
 
+### The whole path, run once — and a copy the export made
+
+Round 5 of the field test (`evals/field-review-3e4c44d.md`): a generated 40-channel file
+recorded, a trigger configured in Scope View was detected, and the real export tool converted
+the `.svdx` with `ingest`'s command line on its first run. `BaseSampleTime` being 100 ns ticks
+is confirmed a second way: Scope saved 80000 and the recording ran at 125 Hz.
+
+- **Exported copies are read as one channel.** Scope exports a column per display channel, so
+  the parent step `newscope` draws in three tabs came out three times — 42 columns for 40
+  acquisitions. Exact copies (same symbol and port, same time column, same values) are
+  collapsed on read, listed in `manifest` as `copies_collapsed`, and kept through Parquet.
+- **`display_offset` in `manifest`.** The CSV's `Offset` header row is where a trace was drawn;
+  the values under it are raw. It is reported, and never added.
+- **Flags drawn in lanes.** Scope saves no band height, so each `BIT` in a `Digital / state`
+  band gets a display offset of 1.5 × its position and no longer hides the others.
+- **`newscope` notes that Scope snaps the sample time** to a multiple of the task cycle —
+  10 ms was saved as 8 ms on a 4 ms task.
+
 ### A sequencer's step drawn beside what it drives
 
 From the Part A field review: a parent sequencer's step got a tab to itself, and a step is
@@ -322,14 +340,9 @@ samples cannot be. See `evals/results-iteration-1.md`.
 
 ### Known gaps
 
-- **Triggers have not been seen working.** Generated files record NC axis and PLC bit,
-  integer and real channels unedited (`evals/field-review-fe9b487.md`), but every recording
-  so far was a fixed window started by hand, and `checkscope`'s trigger detection has not met
-  a trigger configured in Scope View.
-- **No `.svdx` has been converted by the real export tool here.** The CSV path is measured
-  against 19 real exports, but the `.svdx` → CSV step still depends on
-  `TC3ScopeExportTool.exe` behaving as documented.
-- The `;` delimiter appeared in none of the 19 real files. It stays supported on the strength
-  of the synthetic EU fixture alone.
-- `BaseSampleTime` is documented as 100 ns ticks, confirmed from a sample's `RecordTime`, but
-  not verified against a second independent source.
+- **The analysis verbs have met one real recording of a generated file.** The whole path —
+  generate, record with a trigger, convert the `.svdx`, `ingest`, `manifest` — ran once
+  (`evals/field-review-3e4c44d.md`); Part B of the brief, the 19 genuine exports re-run, has
+  not.
+- The `;` delimiter appeared in none of the real files. It stays supported on the strength of
+  the synthetic EU fixture alone.

@@ -15,7 +15,20 @@ TC3ScopeExportTool.exe "svd=C:\path\rec.svdx" target=C:\path\out.csv silent
 | `target=` | Output file; the extension selects the format. |
 | `silent` | No UI. Required for scripting. |
 
-`tcscope.py ingest` calls this for you when handed a `.svdx`, then converts to Parquet.
+`tcscope.py ingest` calls this for you when handed a `.svdx`, then converts to Parquet. That
+exact command line converted two real recordings first time (`evals/field-review-3e4c44d.md`),
+with the tool found under the TwinCAT root in `Functions\TF3300-Scope-Server\`.
+
+### Two things the export does that the recording did not
+
+- **One column per display channel, not per acquisition.** A channel drawn in three tabs
+  exports three times — `<name>`, `<name> (1)`, `<name> (2)`, each in a group of its own. The
+  reader collapses exact copies (same symbol and port, same time column, same values) and
+  `manifest` reports them as `copies_collapsed`. The same symbol recorded at another rate is a
+  second recording and stays.
+- **The `Offset` header row is the display offset**, set per display channel in Scope View.
+  The values under it are raw: a flag drawn at offset 2 exported only 0 and 1. `manifest`
+  shows it as `display_offset`; **never add it to the values.**
 
 ### Formats and licensing
 
