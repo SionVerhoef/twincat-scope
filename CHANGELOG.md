@@ -4,6 +4,12 @@
 
 First working version. Not yet published.
 
+### Big CSVs read in a third less memory
+
+- **The CSV is read a chunk at a time.** The whole decoded file and its line list were both
+  held while it was split, over half the peak. A 20 M-sample export now peaks at 384 MB, not
+  630 MB, at the same speed. Lines split exactly as before, so the header row is found where
+  the sniffer found it; a check runs the split at chunk sizes down to one character.
 ### Restyling a project keeps its targets
 
 - **`newscope` without `--channels` no longer resets every channel's target.** It rewrote

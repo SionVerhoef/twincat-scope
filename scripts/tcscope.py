@@ -544,28 +544,52 @@ def _chunk_array(np, block, delim, decimal, ncols):
                         dtype=float).reshape(-1, ncols)
 
 
+STREAM_CHARS = 2_000_000
+
+
+def _stream_lines(path):
+    """The file's lines, exactly as text.splitlines() on the whole file gives them.
+
+    The same decoding and the same separators sniff_csv indexed with, so
+    data_row still means what it said there - a split that disagreed by one
+    line would misalign every column in silence. Only one chunk of text is
+    alive at a time: holding the whole decoded file and its line list at once
+    was over half the peak on a big export.
+
+    The last piece of every chunk is carried into the next, even when it looks
+    complete: a '\\r' at a chunk's end may be the first half of '\\r\\n'.
+    """
+    carry = ""
+    with open(path, encoding="utf-8-sig", errors="replace", newline="") as fh:
+        while True:
+            chunk = fh.read(STREAM_CHARS)
+            if not chunk:
+                break
+            pieces = (carry + chunk).splitlines(keepends=True)
+            carry = pieces.pop()
+            yield from "".join(pieces).splitlines()
+    yield from carry.splitlines()
+
+
 def load_csv(path):
     """Read a Scope CSV export into a Recording."""
     np = need("numpy")
     info = sniff_csv(path)
     delim, decimal, ncols = info["delimiter"], info["decimal"], info["columns"]
 
-    with open(path, "rb") as fh:
-        text = fh.read().decode("utf-8-sig", errors="replace")
-    # The same line list sniff_csv indexed into, so data_row still means what it
-    # said there. `text` is released before parsing begins: on a 143 MB export
-    # it and the line list are together 318 MB of the peak.
-    lines = text.splitlines()
-    del text
-    del lines[:info["data_row"]]
-
-    blocks = []
-    for start in range(0, len(lines), CHUNK_ROWS):
-        block = _chunk_array(np, lines[start:start + CHUNK_ROWS],
-                             delim, decimal, ncols)
-        if block is not None:
-            blocks.append(block)
-    del lines
+    blocks, batch = [], []
+    for index, line in enumerate(_stream_lines(path)):
+        if index < info["data_row"]:
+            continue
+        batch.append(line)
+        if len(batch) == CHUNK_ROWS:
+            block = _chunk_array(np, batch, delim, decimal, ncols)
+            if block is not None:
+                blocks.append(block)
+            batch = []
+    block = _chunk_array(np, batch, delim, decimal, ncols) if batch else None
+    if block is not None:
+        blocks.append(block)
     if not blocks:
         fail(f"no parsable data rows in {path}")
 

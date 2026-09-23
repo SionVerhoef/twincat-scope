@@ -73,6 +73,34 @@ def first(events, channel, kind):
     return None
 
 
+def stream_split_checks():
+    """load_csv's streamed lines are exactly text.splitlines() of the whole file.
+
+    The one internal function checked directly: no CLI output can show a
+    one-line disagreement at a chunk boundary until it misaligns a column, and
+    sniff_csv's data_row is only right if both split identically. A tiny chunk
+    puts a boundary inside every awkward case.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("tcscope", TCSCOPE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    text = ("﻿Name\tTime\r\nµs;1,5\r\n\r\nx\ry\n\x0bz\x1cw v\x85u\r\r\n"
+            "€€€\r\n" + "1\t2\r\n" * 5 + "tail no newline")
+    raw = text.encode("utf-8") + b"\xff\r\nlast"
+    want = raw.decode("utf-8-sig", errors="replace").splitlines()
+    mismatched = []
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "split.csv"
+        path.write_bytes(raw)
+        for size in (1, 2, 3, 7, 10_000):
+            mod.STREAM_CHARS = size
+            if list(mod._stream_lines(path)) != want:
+                mismatched.append(size)
+    check("streamed CSV lines match splitlines() at every chunk size",
+          not mismatched, f"differs at chunk size {mismatched}")
+
+
 def real_fixture_checks():
     """Everything that only a genuine Scope layout can exercise.
 
@@ -1501,6 +1529,7 @@ def main():
                               for w in chk_restart.get("warnings", [])),
                   str(chk_restart.get("warnings")))
 
+    stream_split_checks()
     real_fixture_checks()
     at_rest_checks()
     layout_checks()
