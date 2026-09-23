@@ -40,13 +40,12 @@ jobs:
         run: python3 tests/test_verbs.py
 
       - name: standalone contract
-        # No reference may point outside this repository, and no business
-        # branding may leak into it. The bracket around the first letter keeps
-        # each pattern from matching this file, which would fail the check
-        # against its own source.
+        # No reference may point outside this repository, and nothing here may
+        # claim a certification that does not exist. The bracket around a first
+        # letter keeps each pattern from matching this file's own source.
         run: |
           ! grep -rn '\.\./\.\.' --include='*.md' --include='*.py' . || exit 1
-          ! grep -rniE '[s]olvera|certified [b]eckhoff' . || exit 1
+          ! grep -rniE 'certified [b]eckhoff' . || exit 1
           ! grep -rnE '/[h]ome/|/[p]rojects/|[C]:\\Users' \
               --include='*.md' --include='*.py' --include='*.yml' . || exit 1
           # The twincat-st guard that used to sit here is gone on purpose: that

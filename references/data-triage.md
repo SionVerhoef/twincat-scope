@@ -71,6 +71,35 @@ which matters because every frequency claim you make downstream is scaled by tha
 Look for: a channel that is entirely constant (dead symbol, wrong index offset), a
 `nan_fraction` above zero (parse trouble), and `gaps` above zero (the recording stalled).
 
+**Read the `timing` block before you compare any two channels.** A Scope CSV is not one
+table — it is several acquisition groups laid side by side, each with its own time column
+and often its own sample rate, so *a physical row is not one instant in time*:
+
+```
+<t0> <a0> <a1> | <t1> <b0> <b1> <b2> | <t2> <c0>
+^ group 0      ^ group 1             ^ group 2
+```
+
+Every channel is timestamped from its own group. `manifest` reports per group: declared and
+measured `sample_time_ms`, `repeat_factor`, `t_first`, `t_last`, `n_samples`. Groups that
+differ only in their id are merged into one entry naming them all (`"groups": "0-39"`), so
+the one group that disagrees stands out instead of drowning under its twins. Then:
+
+| Field | Means |
+|---|---|
+| `row_is_one_instant: true` | all groups agree exactly; the file behaves like one table |
+| `max_skew_ms` | worst row-wise disagreement between any two group clocks |
+| `cross_group_timing_valid: false` | **the export is broken.** Slow groups were never repeat-padded, so they run off their own wall clock. No cross-group timing claim from this file means anything — say so and re-export. |
+
+Times in a Scope export are milliseconds. This tool converts on read and reports **seconds**
+everywhere (`time_unit: "ms"`, `times_reported_in: "s"`).
+
+Scope exports one column per *display* channel, so a channel drawn in three tabs arrives
+three times. Exact copies are read as one channel and listed under `copies_collapsed`, and a
+non-zero `display_offset` is where the trace was drawn, not a change to the values — never
+add it. The export-side detail, and why `ingest` on the `.svdx` beats Scope View's own CSV
+export, is in `export-tool.md`.
+
 ### Rung 2 — `stats`
 
 Read these four together, not individually:
@@ -230,7 +259,9 @@ meaningful beyond the file's `max_skew_ms`. On an export where
 
 ### Rung 6 — `window`
 
-Now, and only now, real numbers — for a range you can justify from rungs 3–5.
+Now, and only now, real numbers — for a range you can justify from rungs 3–5. It returns
+one block per acquisition group; a flat `rows` list appears only when the selection lives in
+a single group, because rows from different groups do not share a timestamp.
 
 ## Working rules
 
