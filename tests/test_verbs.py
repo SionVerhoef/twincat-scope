@@ -805,6 +805,39 @@ def write_still_export(path, rows=6000, seed=7):
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def long_correlate_checks(rows=300_000, delay=25):
+    """correlate on a recording long enough to be a real one.
+
+    An eval run spent 3,006 s on one correlate of a 600,000-row export: the lag
+    search went through np.correlate's "full" mode, which is quadratic in the
+    length, then kept only the lags inside --max-lag-samples. B is A delayed by
+    `delay` samples, so A must lead by exactly that - and the answer has to come
+    back in the time the rest of the suite takes, not in minutes.
+    """
+    import random
+    import time
+    rng = random.Random(11)
+    a = [rng.gauss(0, 1) for _ in range(rows + delay)]
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "long.csv"
+        lines = ["Name,Synthetic scope export", "File,long.csv",
+                 "StartTime,2026-09-24 10:00:00", "SampleTime,0.001000", "",
+                 "Time,A,B"]
+        for i in range(rows):
+            lines.append(f"{float(i):.1f},{a[i + delay]:.6f},"
+                         f"{a[i] + rng.gauss(0, 0.1):.6f}")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        start = time.monotonic()
+        co = run("correlate", path, "--channels", "A,B")
+        took = time.monotonic() - start
+    pair = (co.get("pairs") or [{}])[0]
+    check("correlate on a 300,000-row recording finds the planted lead",
+          pair.get("lag_samples") == -delay and pair.get("leads") == "A",
+          f"lag={pair.get('lag_samples')} leads={pair.get('leads')}")
+    check("correlate on a 300,000-row recording answers in seconds, not minutes",
+          took < 30, f"{took:.1f} s")
+
+
 def still_channel_checks():
     """Field round 7, bead htl: rails that are not rails.
 
@@ -1643,6 +1676,7 @@ def main():
     prefix_house_checks()
     export_copy_checks()
     still_channel_checks()
+    long_correlate_checks()
     shareability_checks()
     retarget_checks()
     tmc_checks()

@@ -1434,13 +1434,18 @@ def _lag_of(np, x, y, max_lag):
     Sign convention: a NEGATIVE lag means `a` leads `b` - a's features appear
     earlier in time. `np.correlate(x, y, "full")[k]` sums x[n+k]·y[n], so if
     y is x delayed by D samples the peak sits at k = -D.
+
+    Computed by FFT, not np.correlate: "full" mode is quadratic in the length,
+    which is minutes per pair on a ten-minute 1 kHz recording.
     """
-    full = np.correlate(x, y, mode="full")
-    zero = x.size - 1
-    lo, hi = max(0, zero - max_lag), min(full.size, zero + max_lag + 1)
-    window = full[lo:hi]
-    peak = int(np.argmax(np.abs(window))) + lo
-    return peak - zero, float(full[peak])
+    n = x.size
+    size = 1 << (2 * n - 1).bit_length()
+    circular = np.fft.irfft(np.fft.rfft(x, size) * np.conj(np.fft.rfft(y, size)), size)
+    reach = min(max_lag, n - 1)
+    lags = np.arange(-reach, reach + 1)
+    window = circular[lags % size]
+    peak = int(np.argmax(np.abs(window)))
+    return int(lags[peak]), float(window[peak])
 
 
 def cmd_correlate(args):
