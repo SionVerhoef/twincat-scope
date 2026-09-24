@@ -4,6 +4,24 @@
 
 First working version. Not yet published.
 
+### Scope View's CSV export options
+
+Users export the same recording with different settings. Variants of a real two-rate export
+now read the same way, or are refused with a reason:
+
+- **The delimiter vote no longer counts the half line** that ends `sniff_csv`'s 200 kB sample.
+  On an export with integer times and one decimal comma per row, that half line broke the tie
+  in favour of `,`, and a TAB or `;` file failed with "found no numeric rows".
+- **Full Timestamp (FILETIME) time columns are converted** to time since the first sample.
+  They were read as ms, so durations and sample times came out 10 000 times too long.
+  `manifest` reports `start_filetime`, and it survives Parquet.
+- **`,` as both separator and decimal mark is refused.** The reader used to skip some rows
+  silently and read the rest as one group.
+- A trailing `EOF` row is skipped, not counted. `ingest` reports `malformed_rows`, and the
+  count survives Parquet.
+- `references/export-tool.md` lists which export settings to choose, and marks which are
+  verified and which are untested.
+
 ### Field-test fixes: short rows, cross-group timing, TriggerAction
 
 A field test found three defects. Each is now held by a check that fails on

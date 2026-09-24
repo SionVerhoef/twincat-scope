@@ -1605,6 +1605,89 @@ def two_rate_checks():
               str([g.get("n_samples") for g in back]))
 
 
+def export_option_checks():
+    """Scope View's CSV export options, applied to the real two-rate layout.
+
+    Each option rewrites the same recording, so each must read back as the
+    same two groups - or fail loudly where the file cannot be read at all.
+    """
+    name = "real_tab_2rate_truncated.csv"
+    truth = json.loads((REAL / "ground_truth.json").read_text())[name]
+    lines = (REAL / name).read_text(encoding="utf-8").splitlines()
+    data = truth["data_line"] - 1
+    head, rows = lines[:data], lines[data:]
+
+    def same_recording(man):
+        groups = expand_groups(man)
+        return ([g.get("n_samples") for g in groups] == [30001, 15001]
+                and all(near(g.get("t_last"), 60.0, 1e-9) for g in groups)
+                and not man.get("malformed_rows"))
+
+    def filetime(row):
+        fields = row.split("\t")
+        for col in (0, 2):
+            if col < len(fields) and fields[col]:
+                ms = float(fields[col].replace(",", "."))
+                fields[col] = str(133500000000000000 + round(ms * 10_000))
+        return "\t".join(fields)
+
+    def cut_mid_row(delim):
+        """The export as the tool writes it - times and flags as integers, one
+        decimal comma per row - shifted so sniff_csv's 200 kB sample ends just
+        past that comma. The half line then tied the delimiter vote for ','."""
+        ints = []
+        for row in rows:
+            fields = row.split("\t")
+            for col in (0, 2, 3):
+                if col < len(fields) and fields[col]:
+                    fields[col] = str(round(float(fields[col].replace(",", "."))))
+            ints.append(delim.join(fields))
+        body = "\r\n".join(ln.replace("\t", delim) for ln in head) + "\r\n"
+        for pad in range(200):
+            # Leading zeros on the first row's time shift everything after it.
+            text = body + "\r\n".join(["0" * pad + ints[0]] + ints[1:])
+            tail = text.encode("utf-8")[:200_000].decode("utf-8").rsplit("\n", 1)[-1]
+            if tail.count(",") == 1 and tail.count(delim) < 3:
+                return text.splitlines()
+        raise AssertionError("no padding puts the sample boundary mid-row")
+
+    variants = {
+        # Bigger than sniff_csv's 200 kB sample, cut mid-row: see cut_mid_row.
+        "tab_integers": cut_mid_row("\t"),
+        "semicolon": cut_mid_row(";"),
+        "full_timestamp": head + [filetime(r) for r in rows],
+        "eof_tag": lines + ["EOF"],
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        for option, text in variants.items():
+            path = Path(tmp) / f"{option}.csv"
+            path.write_text("\r\n".join(text) + "\r\n", encoding="utf-8")
+            man = run("manifest", path)
+            check(f"export option '{option}' reads as the same two groups over 60 s",
+                  same_recording(man),
+                  str([(g.get("n_samples"), g.get("t_last")) for g in expand_groups(man)])
+                  + f" malformed={man.get('malformed_rows')} err={man.get('error')}")
+            if option == "full_timestamp":
+                check("a FILETIME export reports where its clock started",
+                      man.get("start_filetime") == 133500000000000000,
+                      str(man.get("start_filetime")))
+                cache = Path(tmp) / "ft.parquet"
+                run("ingest", path, "-o", cache)
+                back = run("manifest", cache)
+                check("the FILETIME start survives Parquet",
+                      same_recording(back)
+                      and back.get("start_filetime") == 133500000000000000,
+                      str(back.get("start_filetime")))
+
+        both = Path(tmp) / "comma_comma.csv"
+        both.write_text("\r\n".join(ln.replace("\t", ",") for ln in lines) + "\r\n",
+                        encoding="utf-8")
+        man = run("manifest", both, expect_ok=False)
+        check("',' as both separator and decimal mark is refused, not half-read",
+              man.get("ok") is False and "decimal mark" in (man.get("error") or ""),
+              str(man.get("error") or man.get("rows")))
+
+
 def ingest_cache_checks():
     """ingest leaves the export tool's CSV in the cache dir, never beside the
     .svdx - which sits in a project folder that is not ours to fill.
@@ -1826,6 +1909,7 @@ def main():
     still_channel_checks()
     long_correlate_checks()
     two_rate_checks()
+    export_option_checks()
     ingest_cache_checks()
     shareability_checks()
     retarget_checks()
