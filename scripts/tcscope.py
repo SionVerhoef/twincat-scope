@@ -352,11 +352,17 @@ def _flat_group(lines, data_row, delim, decimal, ncols):
 def sniff_csv(path, sample_bytes=200_000):
     """Work out delimiter, decimal separator, data start and group layout."""
     with open(path, "rb") as fh:
-        text = fh.read(sample_bytes).decode("utf-8-sig", errors="replace")
+        raw = fh.read(sample_bytes)
+    text = raw.decode("utf-8-sig", errors="replace")
     # Indices below are into the raw line list, blanks included, because
     # load_csv slices the same raw list. Filtering here and slicing there is
     # how the header row ends up parsed as a row of NaN.
     lines = text.splitlines()
+    # A sample that stops mid-file stops mid-line. That half line is one of
+    # the 20 the delimiter vote counts, and on a decimal-comma file it tips a
+    # tie to ',' - the whole file then reports no numeric rows.
+    if len(raw) == sample_bytes and len(lines) > 1:
+        lines.pop()
     nonblank = [i for i, ln in enumerate(lines) if ln.strip()]
     if not nonblank:
         fail(f"{path} is empty")
@@ -386,7 +392,18 @@ def sniff_csv(path, sample_bytes=200_000):
             "Check this really is a Scope export: tcscope.py manifest <file> --dump-header",
         )
 
-    meta = _metadata_rows(lines, nonblank, delim, ncols, data_start)
+    # Every header row is as wide as the data. A ',' file whose data is wider
+    # than the row naming its columns has decimal commas splitting the values.
+    header = [i for i in nonblank if i < data_start]
+    if delim == "," and header and len(lines[header[-1]].split(",")) < ncols:
+        fail(
+            f"{path} uses ',' both as the field separator and as the decimal mark, "
+            "so the values cannot be told apart from the fields",
+            "Re-export with a different CSV separator (TAB or ';') or with '.' as "
+            "the decimal mark - see references/export-tool.md, 'Export settings'",
+        )
+
+    meta =_metadata_rows(lines, nonblank, delim, ncols, data_start)
     groups = _parse_groups(meta, ncols, decimal)
     if groups is None:
         groups = _flat_group(lines, data_start, delim, decimal, ncols)
@@ -587,7 +604,7 @@ def _chunk_array(np, block, delim, decimal, ncols, short_widths=()):
         elif len(parts) in short_widths:
             fields.extend(parts)
             fields.extend(["nan"] * (ncols - len(parts)))
-        elif line.strip():
+        elif line.strip() and line.strip() != "EOF":  # Scope's optional end tag
             malformed += 1
     if not fields:
         return None, malformed
@@ -627,6 +644,34 @@ def _stream_lines(path):
     yield from carry.splitlines()
 
 
+# Scope's "Full Timestamp" export option writes Windows FILETIME (100 ns ticks
+# since 1601) instead of ms since the first sample. Any date since 1601 is
+# above this; ms since the first sample would need 300 years of recording.
+FILETIME_MIN = 1e16
+FILETIME_TICKS_PER_MS = 10_000
+
+
+def _filetime_to_ms(np, data, info):
+    """Rewrite FILETIME time columns, in place, as ms since the earliest one.
+
+    Read as ms, they report every duration and sample time 10 000 times too
+    long and nothing looks broken. All groups share one origin, so their
+    relative timing survives.
+    """
+    columns = sorted({g["time_column"] for g in info["groups"]})
+    firsts = []
+    for col in columns:
+        finite = data[:, col][np.isfinite(data[:, col])]
+        if finite.size:
+            firsts.append(finite[0])
+    if not firsts or min(firsts) < FILETIME_MIN:
+        return
+    origin = min(firsts)
+    for col in columns:
+        data[:, col] = (data[:, col] - origin) / FILETIME_TICKS_PER_MS
+    info["start_filetime"] = int(origin)
+
+
 def load_csv(path):
     """Read a Scope CSV export into a Recording."""
     np = need("numpy")
@@ -660,6 +705,7 @@ def load_csv(path):
 
     data = blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
     del blocks
+    _filetime_to_ms(np, data, info)
     groups = []
     for group in info["groups"]:
         for channel in group["channels"]:
@@ -759,6 +805,9 @@ def parquet_payload(rec):
     columns, used = {}, {}
     layout = {"time_unit": "s", "groups": [],
               "copies_collapsed": rec.info.get("copies_collapsed", [])}
+    for key in ("malformed_rows", "start_filetime"):
+        if rec.info.get(key):
+            layout[key] = rec.info[key]
     for group in rec.groups:
         time_col = _unique(f"g{group['id']}.time", used)
         columns[time_col] = padded(group["time"])
@@ -820,7 +869,9 @@ def load_parquet(path):
 
     return Recording(groups, {"source": "parquet", "rows": table.num_rows,
                               "columns": len(table.column_names),
-                              "copies_collapsed": layout.get("copies_collapsed", [])})
+                              "copies_collapsed": layout.get("copies_collapsed", []),
+                              "malformed_rows": layout.get("malformed_rows", 0),
+                              "start_filetime": layout.get("start_filetime")})
 
 
 def load(path):
@@ -982,6 +1033,8 @@ def cmd_ingest(args):
           "channels": len(rec.channels), "columns": list(columns),
           "delimiter": rec.info.get("delimiter"), "decimal": rec.info.get("decimal"),
           "intermediate_csv": intermediate,
+          **({"malformed_rows": rec.info["malformed_rows"]}
+             if rec.info.get("malformed_rows") else {}),
           "note": "Group layout is stored in the Parquet schema metadata, so the "
                   "per-group time axes survive the round trip."})
     return 0
@@ -1104,6 +1157,12 @@ def cmd_manifest(args):
             "Rows whose width is neither the full row nor a whole number of "
             "groups were skipped. A row that stops mid-group is damage, not a "
             "group that ran out.")
+    if rec.info.get("start_filetime"):
+        out["start_filetime"] = rec.info["start_filetime"]
+        out["start_filetime_note"] = (
+            "The export wrote absolute FILETIME timestamps (Scope's 'Full Timestamp' "
+            "option). Times here are seconds from this first sample; the value is "
+            "100 ns ticks since 1601, for matching against other logs.")
     if rec.info.get("copies_collapsed"):
         out["copies_collapsed"] = rec.info["copies_collapsed"]
         out["copies_note"] = (

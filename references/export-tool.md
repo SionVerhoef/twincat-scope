@@ -31,15 +31,31 @@ with the tool found under the TwinCAT root in `Functions\TF3300-Scope-Server\`.
   The values under it are raw: a flag drawn at offset 2 exported only 0 and 1. `manifest`
   shows it as `display_offset`; **never add it to the values.**
 
-### Scope View's own CSV export is not this
+### Exporting from Scope View by hand: the settings
 
-Exporting to CSV from inside Scope View writes a different file (seen in the field, round 6):
-comma delimiter, dot decimal, a short preamble, then **one shared time column** and a value
-column per display channel — no `SymbolName`, `Port`, `Data-Type` or `Offset` rows. The reader
-parses it as one group, but it cannot know which symbol a column is, what type it was, or
-where it was drawn. Copies are collapsed only where Scope's own naming says so — `<name> (n)`
-beside a `<name>` with identical time and values — and reported with `matched_on: "name"`.
-**Prefer the export tool**, through `ingest`, on the `.svdx`.
+**Prefer `ingest` on the `.svdx`.** The export tool offers no choices to get wrong, and it
+writes the full metadata header. When someone exports from Scope View instead
+(*Export → CSV → Configure Properties*), the file depends on their settings. Different users
+send different files for the same recording. Ask which settings they used, or read the answer
+off `manifest --dump-header`. This table lists what to choose and why.
+
+| Option | Choose | Why, and how well it is known |
+|---|---|---|
+| **Header configuration** | The fullest preset: `SymbolName`, `Data-Type`, `Port`, `SampleTime[ms]`, `Offset` rows | A `Name`-only header, as seen in the field, leaves the reader unable to tell which symbol a column is, what type it was, or where it was drawn. Copies are then collapsed only on Scope's own `<name> (n)` naming (`matched_on: "name"`). |
+| **Timelines** | *For each sample time* | One time column per group, the layout the reader is built around. *All* (one per channel) should read as one-channel groups, but that is **untested**. **Never *None***: the reader then takes the first value column for time and reports nonsense. |
+| **Interpolation** | *None* or *Fill with previous value* | **Both verified on a real 60 s export** (2 ms + 4 ms groups): *None* writes the slow group on the first rows and then shorter rows, and *Fill* repeats each slow sample (time `0,0,4,4…`). Both read to 30001 and 15001 samples over 60 s. *Shift value* is **untested**. |
+| **CSV separator / decimal mark** | TAB or `;` with `,`, or `,` with `.` | The sniffer reports what it found. **Never `,` for both**: fields and decimals can't be told apart, so the reader refuses the file. |
+| **Full Timestamp** | Off | On writes absolute FILETIME (100 ns ticks since 1601). The reader converts it to time since the first sample and reports `start_filetime`. **Tested on a derived file, not yet a real one.** |
+| **Scale values before export** | Off | The reader treats values as raw, the same as the PLC variable. Scaled values are whatever the display was configured to show. |
+| **Include trigger info**, **Marker windows** | Off / none | Extra rows or tables in the file. **Untested**: they may be counted as `malformed_rows`. |
+| **Include EOF tag** | Either | A trailing `EOF` row is skipped. |
+| **Sort channels by sample time** | Either | Changes only the column order. The reader keys on groups, not position. |
+
+Two things remain unknown. First, whether `TC3ScopeExportTool.exe` follows export settings
+saved in a project: a `.svdx` carries an `<AutoSaveExportConfigurationString>` with a
+`CSVProperties` block, and it was empty in the one real file inspected. Second, whether
+Scope View's defaults match the table above. Report any other layout with
+`manifest --dump-header`, redacted per `examples/README.md`.
 ### Formats and licensing
 
 | Format | Licence |
