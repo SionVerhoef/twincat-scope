@@ -64,7 +64,9 @@ Windows; on Linux or macOS (and in this repo's CI) the same commands are `python
    timing claim from it means anything — say so and re-export. `references/data-triage.md`.
 3. **Times are reported in seconds** everywhere, converted from the export's milliseconds.
 4. **Convert the `.svdx` with `ingest`, once** — everything downstream runs in seconds
-   against Parquet instead of minutes against CSV. Don't use Scope View's own CSV export: it
+   against Parquet instead of minutes against CSV. The export tool's intermediate CSV goes to
+   the cache dir (`%LOCALAPPDATA%\tcscope\cache`, `$XDG_CACHE_HOME/tcscope` elsewhere),
+   never beside the `.svdx`; `intermediate_csv` names it. Don't use Scope View's own CSV export: it
    drops the symbol, port, type and offset rows (`references/export-tool.md`). Exact copies
    of a channel drawn in several tabs are collapsed and reported (`copies_collapsed`), and a
    `display_offset` is where a trace was drawn — never add it to the values.
@@ -85,7 +87,8 @@ Then descend the ladder — never skip to the bottom:
 - `plot` draws a min/max envelope per pixel bucket, never decimation — a decimated chart
   hides a three-sample spike about six times out of seven. `references/data-triage.md`.
 - `correlate` refuses pairs from different groups unless `--allow-cross-group` resamples
-  them (and says so). A **negative** `lag_seconds` means `a` leads `b`.
+  them (and says so). A **negative** `lag_seconds` means `a` leads `b`, and `a` is
+  whichever channel comes first in `--channels` — swap the order and the sign flips.
 - `--channels` matches the short `name` or the qualified `symbol_name`; two groups routinely
   share a short name, so quote the qualified path when you need to be exact.
 
@@ -132,7 +135,9 @@ dark-styled file read well with the IDE in both themes. `references/scope-config
 success — a display channel wired to nothing opens perfectly and plots an empty chart, a
 symbol on the wrong port never resolves, an IEC type is refused as `VOID`, and shared or
 placeholder names export as columns nobody can tell apart — and it warns on recording load
-and on a fixed window with no trigger, which is a lottery ticket for an intermittent fault.
+and on a fixed window, which is a lottery ticket for an intermittent fault. `trigger_action`
+is `TriggerAction` exactly as the file writes it; `NONE` with no restart is a fixed window
+even when a trigger is configured.
 
 With the PLC project at hand, add `--tmc <PLC>.tmc` — every PLC symbol is then checked
 against the compiled program: typos, renamed variables, whole blocks, and types read at the

@@ -278,7 +278,8 @@ columns nobody can tell apart.
 Reports a **warning** for things that are legal but probably not what you meant: a placeholder
 `AmsNetId`, a PLC symbol on a port below 851 where no runtime answers, a channel still
 carrying the template's placeholder name, no display channel wired to anything, a total
-sample rate high enough to perturb the target, axes with no `AxisStyle`, and acquisitions,
+sample rate high enough to perturb the target, a fixed recording window (no trigger, or
+`TriggerAction` `NONE`, and no `AutoRestartRecord`), axes with no `AxisStyle`, and acquisitions,
 bands or channels with `Enabled` false. Disabling is a Scope View feature, so that is not a
 failure — but a file with every band disabled showed nothing until they were enabled by hand,
 and whether a disabled acquisition still records has not been established.

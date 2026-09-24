@@ -129,12 +129,11 @@ def build_columns(groups, rows, rng):
 
 
 def max_skew_ms(groups, rows):
+    """Largest disagreement between the groups' first or last timestamps -
+    judged per group, the way the reader does, never row by row."""
     times = [group_times(g, rows) for g in groups]
-    worst = 0.0
-    for i in range(rows):
-        row = [t[i] for t in times]
-        worst = max(worst, max(row) - min(row))
-    return worst
+    firsts, lasts = [t[0] for t in times], [t[-1] for t in times]
+    return max(max(firsts) - min(firsts), max(lasts) - min(lasts))
 
 
 # --------------------------------------------------------------------------
@@ -228,11 +227,15 @@ def tab_symbol(gid, spec, ch):
     return f"gPlc.emTransport.fbCtrl[{ch}].{short}"
 
 
-def write_tab(path, groups, columns, truth, rows, wrap_comments=False):
+def write_tab(path, groups, columns, truth, rows, wrap_comments=False, symbols=None):
     """TAB dialect: '\\t' delimiter, EU decimal comma, 17 metadata rows.
 
     The decimal comma is the trap: on a TAB file every row holds exactly as many
     ',' as '\\t', so a delimiter vote decided on consistency alone elects ','.
+
+    `symbols` is one list of SymbolNames per group. A None cell in `columns`
+    ends that row there: the export writes shorter rows once a group has run
+    out of samples.
     """
     delim = "\t"
     lines = [
@@ -255,8 +258,10 @@ def write_tab(path, groups, columns, truth, rows, wrap_comments=False):
 
     types = ["REAL64", "INT16", "BIT"]
     values = {
-        "Name": lambda g, s, c, i: TAB_SHORT[c % len(TAB_SHORT)],
-        "SymbolName": lambda g, s, c, i: tab_symbol(g, s, c),
+        "Name": lambda g, s, c, i: (symbols[g][c].rsplit(".", 1)[-1] if symbols
+                                    else TAB_SHORT[c % len(TAB_SHORT)]),
+        "SymbolName": lambda g, s, c, i: (symbols[g][c] if symbols
+                                          else tab_symbol(g, s, c)),
         "SymbolComment": lambda g, s, c, i: comment_for(i, wrap_comments),
         "NetId": lambda g, s, c, i: "192.168.1.10.1.1",
         "Port": lambda g, s, c, i: str(s["port"]),
@@ -281,7 +286,10 @@ def write_tab(path, groups, columns, truth, rows, wrap_comments=False):
 
     ncols = len(columns)
     for i in range(rows):
-        lines.append(delim.join(decimal_comma(columns[j][i]) for j in range(ncols)))
+        row = [columns[j][i] for j in range(ncols)]
+        if None in row:
+            row = row[:row.index(None)]
+        lines.append(delim.join(decimal_comma(cell) for cell in row))
 
     text = "\r\n".join(lines) + "\r\n"
     path.write_text(text, encoding="utf-8")
@@ -387,6 +395,56 @@ def at_rest_columns():
 
 
 # --------------------------------------------------------------------------
+# a 2 ms and a 4 ms group over 60 s, in both layouts a real export uses
+# --------------------------------------------------------------------------
+
+TWO_RATE_SPAN_MS = 60_000
+TWO_RATE_SYMBOLS = [["Axes.Axis1.ActPos"], ["MAIN.bFlag"]]
+TWO_RATE_LAG_S = 0.1     # bFlag follows ActPos's sign this much later
+
+
+def two_rate_columns(layout):
+    """Two groups, one channel each, both covering the same 60 s.
+
+    'padded': the 4 ms group repeats each sample on the next row - times
+    0,0,4,4,... - so every row is full, 30001 of them.
+    'truncated': the 4 ms group writes its 15001 samples on the first 15001
+    rows, and every row after that carries the 2 ms group alone.
+
+    In both a row is not one instant, and in both the two groups start and end
+    together - which is what makes the file sound for cross-group timing. The
+    truncated layout disagrees row by row by up to 30 s.
+    """
+    rng = random.Random(61)
+    fast = [i * 2.0 for i in range(TWO_RATE_SPAN_MS // 2 + 1)]
+    rows = len(fast)
+    if layout == "padded":
+        slow = [(i // 2) * 4.0 for i in range(rows)]
+    else:
+        slow = [i * 4.0 for i in range(TWO_RATE_SPAN_MS // 4 + 1)]
+        slow += [None] * (rows - len(slow))
+
+    def pos(t_ms):
+        return 100.0 * math.sin(2 * math.pi * 0.5 * t_ms / 1000.0)
+
+    act_pos = [f"{pos(t) + rng.gauss(0, 0.01):.6f}" for t in fast]
+    flag = [None if t is None else
+            f"{1.0 if pos(t - TWO_RATE_LAG_S * 1000.0) > 0 else 0.0:.6f}" for t in slow]
+    columns = [[f"{t:.6f}" for t in fast], act_pos,
+               [None if t is None else f"{t:.6f}" for t in slow], flag]
+    samples = len({t for t in slow if t is not None})
+    truth = [
+        {"group": 0, "start_column": 0, "channels": 1, "sample_time_ms": 2.0,
+         "repeat_factor": 1, "n_samples": rows,
+         "t_first_s": 0.0, "t_last_s": TWO_RATE_SPAN_MS / 1000.0},
+        {"group": 1, "start_column": 2, "channels": 1, "sample_time_ms": 4.0,
+         "repeat_factor": 2 if layout == "padded" else 1, "n_samples": samples,
+         "t_first_s": 0.0, "t_last_s": TWO_RATE_SPAN_MS / 1000.0},
+    ]
+    return columns, truth, rows
+
+
+# --------------------------------------------------------------------------
 
 def spec(channels, sample_time_ms, base_ms, offset_ms=0.0, padded=True, port=851):
     return {"channels": channels, "sample_time_ms": sample_time_ms,
@@ -447,6 +505,17 @@ def main():
     truth["real_comma_atrest.csv"] = write_comma(
         out / "real_comma_atrest.csv", groups, cols, gt, AT_REST_ROWS,
         names=AT_REST_NAMES)
+
+    # A 2 ms and a 4 ms group over 60 s, in the two layouts real exports use
+    # for a slow group: repeat-padded, and truncated into shorter rows.
+    for layout in ("padded", "truncated"):
+        groups = [spec(1, 2, 2, port=501), spec(1, 4, 2, padded=layout == "padded")]
+        cols, gt, rows = two_rate_columns(layout)
+        name = f"real_tab_2rate_{layout}.csv"
+        meta = write_tab(out / name, groups, cols, gt, rows, symbols=TWO_RATE_SYMBOLS)
+        meta["max_skew_ms"] = 0.0     # both groups span exactly 0 to 60 s
+        meta["lag_s"] = TWO_RATE_LAG_S
+        truth[name] = meta
 
     (out / "ground_truth.json").write_text(json.dumps(truth, indent=2))
     print(json.dumps(
