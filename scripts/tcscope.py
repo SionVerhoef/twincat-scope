@@ -369,8 +369,15 @@ def sniff_csv(path, sample_bytes=200_000):
         )
     delim, _, ncols = best
 
-    tail = [lines[i].split(delim) for i in nonblank[-20:]]
-    decimal = _probe_decimal([f for f in tail if len(f) == ncols], delim)
+    # A group that runs out early leaves shorter rows at the end. In a small
+    # file they fill the whole tail probed above, so the width they vote for
+    # is the short one. The data is as wide as its widest all-numeric row.
+    rows = [lines[i].split(delim) for i in nonblank]
+    ncols = max([ncols] + [len(r) for r in rows if all(
+        _looks_numeric(f, ".") or _looks_numeric(f, ",") for f in r if f.strip())])
+
+    tail = [r for r in rows if len(r) == ncols][-20:]
+    decimal = _probe_decimal(tail, delim)
 
     data_start = _find_data_row(lines, nonblank, delim, decimal, ncols)
     if data_start is None:
@@ -444,16 +451,28 @@ class Recording:
         return group["time"][keep], channel["values"][keep]
 
     def max_skew_ms(self):
-        """Largest row-wise disagreement between any two group time columns."""
-        np = need("numpy")
+        """Largest disagreement between the groups' first or last timestamps.
+
+        Judged per group, never row by row. Every verb reads a channel against
+        its own group's clock, so which row a sample sits on says nothing about
+        when it was taken. A slow group that ran out early, or was padded, puts
+        different instants on one row while both groups still cover the same
+        span; a group that was neither is stretched over a longer one.
+        """
         if len(self.groups) < 2:
             return 0.0
-        stack = np.column_stack([g["raw_ms"] for g in self.groups])
-        usable = np.all(np.isfinite(stack), axis=1)
-        if not usable.any():
+        firsts = [g["t_first"] * MS_PER_S for g in self.groups]
+        lasts = [g["t_last"] * MS_PER_S for g in self.groups]
+        if any(t != t for t in firsts + lasts):
             return float("nan")
-        spans = stack[usable].max(axis=1) - stack[usable].min(axis=1)
-        return float(spans.max())
+        return max(max(firsts) - min(firsts), max(lasts) - min(lasts))
+
+    def rows_are_instants(self):
+        """True when every group carries the same time column, row for row."""
+        np = need("numpy")
+        first = self.groups[0]["raw_ms"]
+        return all(np.array_equal(g["raw_ms"], first, equal_nan=True)
+                   for g in self.groups[1:])
 
     def fastest_sample_time_ms(self):
         rates = [g["sample_time_ms_measured"] for g in self.groups
@@ -467,31 +486,49 @@ class Recording:
         limit = (fastest or 0) * BROKEN_SKEW_MULTIPLE
         broken = bool(fastest and skew == skew and skew > limit)
         out = {
-            "row_is_one_instant": bool(skew == 0.0),
+            "row_is_one_instant": self.rows_are_instants(),
             "max_skew_ms": skew,
             "fastest_sample_time_ms": fastest,
             "cross_group_timing_valid": not broken,
         }
+        spans = "; ".join(f"group {g['id']} {g['t_first']:g}-{g['t_last']:g} s"
+                          for g in self.groups)
         if broken:
             out["note"] = (
-                f"This export is broken, not merely skewed: the groups disagree by "
-                f"{skew:.0f} ms against a {fastest:.0f} ms fastest sample time. The "
-                "slow groups were never repeat-padded, so they run off their own wall "
-                "clock and are stretched over a different span. Any conclusion about "
+                f"This export is broken, not merely skewed: the groups' spans disagree "
+                f"by {skew:.0f} ms against a {fastest:.0f} ms fastest sample time "
+                f"({spans}). A slow group that was never repeat-padded runs off its own "
+                "clock and is stretched over a different span. Any conclusion about "
                 "the relative timing of channels in different groups is invalid. "
                 "Re-export with all groups on one sample rate."
             )
-        elif skew > 0:
+        elif not out["row_is_one_instant"]:
+            slowest = max((g["sample_time_ms_measured"] for g in self.groups
+                           if g["sample_time_ms_measured"] == g["sample_time_ms_measured"]),
+                          default=0.0)
             out["note"] = (
-                f"Groups are repeat-padded and disagree by up to {skew:.0f} ms. Each "
-                "channel is timestamped from its own group, so single-channel results "
-                "are exact; cross-group ordering is only meaningful beyond that skew."
+                f"Groups cover the same span to within {skew:g} ms, but a row is not "
+                "one instant: each channel is timestamped from its own group, so "
+                "single-channel results are exact. Cross-group ordering finer than "
+                f"the slowest group's {slowest:g} ms sample time is not in the data."
             )
         return out
 
 
 def _finalise_group(np, group, raw):
     """Attach the timing numbers one group needs, from its time column in ms."""
+    # A group that ran out before the others ends in rows it never wrote.
+    # Trimmed here, its length is its own, not the longest group's.
+    written = np.isfinite(raw)
+    for channel in group["channels"]:
+        written |= np.isfinite(channel["values"])
+    last = np.flatnonzero(written)
+    size = int(last[-1]) + 1 if last.size else 0
+    if size < raw.size:
+        raw = raw[:size]
+        for channel in group["channels"]:
+            channel["values"] = channel["values"][:size]
+
     finite = np.isfinite(raw)
     group["raw_ms"] = raw
     group["time"] = raw / MS_PER_S
@@ -524,8 +561,8 @@ def _finalise_group(np, group, raw):
 CHUNK_ROWS = 20_000
 
 
-def _chunk_array(np, block, delim, decimal, ncols):
-    """One chunk of raw lines -> an (n, ncols) float array, or None if empty.
+def _chunk_array(np, block, delim, decimal, ncols, short_widths=()):
+    """One chunk of raw lines -> (an (n, ncols) float array or None, malformed).
 
     numpy parses a flat list of strings itself, at C speed and without ever
     materialising a Python float per cell. That only matters at scale, and at
@@ -535,21 +572,32 @@ def _chunk_array(np, block, delim, decimal, ncols):
     A blank or unreadable cell makes numpy raise rather than yield NaN, so such
     chunks fall back to the field-by-field rule. Real exports do drop cells -
     7 of the 19 measured files did - so that fallback is a live path.
+
+    A row that stops exactly where a later group begins is a group that ran
+    out of samples, not damage: a slow group that is not repeat-padded has
+    fewer rows than the fast one, and the export writes shorter rows once it
+    is done. The missing groups are filled with NaN, which _finalise_group
+    trims per group. A row of any other width is malformed and only counted.
     """
-    fields = []
+    fields, malformed = [], 0
     for line in block:
         parts = line.split(delim)
         if len(parts) == ncols:
             fields.extend(parts)
+        elif len(parts) in short_widths:
+            fields.extend(parts)
+            fields.extend(["nan"] * (ncols - len(parts)))
+        elif line.strip():
+            malformed += 1
     if not fields:
-        return None
+        return None, malformed
     if decimal == ",":
         fields = [_normalise(f) for f in fields]
     try:
-        return np.array(fields, dtype=float).reshape(-1, ncols)
+        return np.array(fields, dtype=float).reshape(-1, ncols), malformed
     except ValueError:
         return np.array([_to_float(f) for f in fields],
-                        dtype=float).reshape(-1, ncols)
+                        dtype=float).reshape(-1, ncols), malformed
 
 
 STREAM_CHARS = 2_000_000
@@ -585,21 +633,30 @@ def load_csv(path):
     info = sniff_csv(path)
     delim, decimal, ncols = info["delimiter"], info["decimal"], info["columns"]
 
-    blocks, batch = [], []
+    # Widths at which a row may legitimately stop: the start of any group but
+    # the first. A flat export has no groups to run out, so no short width.
+    short_widths = {g["time_column"] for g in info["groups"][1:]}
+    blocks, batch, malformed = [], [], 0
+
+    def flush():
+        nonlocal malformed
+        block, bad = _chunk_array(np, batch, delim, decimal, ncols, short_widths)
+        malformed += bad
+        if block is not None:
+            blocks.append(block)
+
     for index, line in enumerate(_stream_lines(path)):
         if index < info["data_row"]:
             continue
         batch.append(line)
         if len(batch) == CHUNK_ROWS:
-            block = _chunk_array(np, batch, delim, decimal, ncols)
-            if block is not None:
-                blocks.append(block)
+            flush()
             batch = []
-    block = _chunk_array(np, batch, delim, decimal, ncols) if batch else None
-    if block is not None:
-        blocks.append(block)
+    if batch:
+        flush()
     if not blocks:
         fail(f"no parsable data rows in {path}")
+    info["malformed_rows"] = malformed
 
     data = blocks[0] if len(blocks) == 1 else np.concatenate(blocks)
     del blocks
@@ -688,19 +745,29 @@ def _unique(name, used):
 
 
 def parquet_payload(rec):
-    """(columns, layout) for writing a Recording losslessly to Parquet."""
+    """(columns, layout) for writing a Recording losslessly to Parquet.
+
+    A Parquet table is rectangular, so a group that ran out early is padded
+    back to the longest with NaN. load_parquet trims it again.
+    """
+    np = need("numpy")
+    rows = max((g["time"].size for g in rec.groups), default=0)
+
+    def padded(values):
+        return np.pad(values, (0, rows - values.size), constant_values=np.nan)
+
     columns, used = {}, {}
     layout = {"time_unit": "s", "groups": [],
               "copies_collapsed": rec.info.get("copies_collapsed", [])}
     for group in rec.groups:
         time_col = _unique(f"g{group['id']}.time", used)
-        columns[time_col] = group["time"]
+        columns[time_col] = padded(group["time"])
         entry = {"id": group["id"], "time_column": time_col,
                  "sample_time_ms_declared": group["sample_time_ms_declared"],
                  "channels": []}
         for channel in group["channels"]:
             name = _unique(f"g{group['id']}.{channel['name']}", used)
-            columns[name] = channel["values"]
+            columns[name] = padded(channel["values"])
             entry["channels"].append({
                 "column": name, "name": channel["name"],
                 "symbol_name": channel["symbol_name"], "unit": channel["unit"],
@@ -751,8 +818,7 @@ def load_parquet(path):
             })
         groups.append(_finalise_group(np, group, seconds * MS_PER_S))
 
-    rows = int(groups[0]["time"].size) if groups else 0
-    return Recording(groups, {"source": "parquet", "rows": rows,
+    return Recording(groups, {"source": "parquet", "rows": table.num_rows,
                               "columns": len(table.column_names),
                               "copies_collapsed": layout.get("copies_collapsed", [])})
 
@@ -780,6 +846,14 @@ def config_dir():
         base = os.environ.get("LOCALAPPDATA", str(Path.home()))
         return Path(base) / "tcscope"
     return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tcscope"
+
+
+def cache_dir():
+    """Where ingest leaves the export tool's CSV: never beside the .svdx, which
+    usually sits in a project folder that is not ours to fill."""
+    if os.name == "nt":
+        return config_dir() / "cache"
+    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "tcscope"
 
 
 EXPORT_TOOL_CANDIDATES = [
@@ -883,7 +957,9 @@ def cmd_ingest(args):
         if not tool:
             fail("TC3ScopeExportTool.exe not found",
                  "Set TCSCOPE_EXPORT_TOOL, or run: tcscope.py doctor")
-        csv_out = src.with_suffix(".csv")
+        cache = cache_dir()
+        cache.mkdir(parents=True, exist_ok=True)
+        csv_out = cache / (src.stem + ".csv")
         cmd = [tool, f"svd={src}", f"target={csv_out}", "silent"]
         try:
             subprocess.run(cmd, check=True, capture_output=True)
@@ -892,6 +968,7 @@ def cmd_ingest(args):
                  f"Try running it by hand: {' '.join(cmd)}")
         src = csv_out
 
+    intermediate = str(src) if src != Path(args.input) else None
     rec = load_csv(src)
     out = Path(args.output)
     pa = need("pyarrow")
@@ -904,6 +981,7 @@ def cmd_ingest(args):
           "rows": rec.info.get("rows"), "groups": len(rec.groups),
           "channels": len(rec.channels), "columns": list(columns),
           "delimiter": rec.info.get("delimiter"), "decimal": rec.info.get("decimal"),
+          "intermediate_csv": intermediate,
           "note": "Group layout is stored in the Parquet schema metadata, so the "
                   "per-group time axes survive the round trip."})
     return 0
@@ -1020,6 +1098,12 @@ def cmd_manifest(args):
         out["groups_note"] = (
             "Groups that differ only in their id are merged into one entry; "
             "its 'groups' field lists the ids it stands for.")
+    if rec.info.get("malformed_rows"):
+        out["malformed_rows"] = rec.info["malformed_rows"]
+        out["malformed_note"] = (
+            "Rows whose width is neither the full row nor a whole number of "
+            "groups were skipped. A row that stops mid-group is damage, not a "
+            "group that ran out.")
     if rec.info.get("copies_collapsed"):
         out["copies_collapsed"] = rec.info["copies_collapsed"]
         out["copies_note"] = (
@@ -1043,8 +1127,15 @@ def select(rec, wanted):
     channels = rec.channels
     if not wanted:
         return channels
-    want = {w.strip() for w in wanted.split(",")}
-    hits = [ch for ch in channels if ch["name"] in want or ch["symbol_name"] in want]
+    # In the order asked for: correlate's 'a' and 'b', and so the sign of its
+    # lag, follow this order. One selector matching several channels keeps
+    # them in file order.
+    order = {}
+    for w in wanted.split(","):
+        order.setdefault(w.strip(), len(order))
+    hits = sorted((ch for ch in channels if ch["name"] in order or ch["symbol_name"] in order),
+                  key=lambda ch: min(order.get(ch["name"], len(order)),
+                                     order.get(ch["symbol_name"], len(order))))
     if not hits:
         available = ", ".join(sorted({ch["name"] for ch in channels})[:40])
         fail(f"no channel matched {wanted}", f"Available: {available}")
@@ -3021,11 +3112,26 @@ def cmd_checkscope(args):
             "explicitly with `newscope --record-time <seconds>`."
         )
 
-    auto_restart = (root.findtext(".//AutoRestartRecord") or "").strip().lower() == "true"
+    restart_text = root.findtext(".//AutoRestartRecord")
+    if restart_text is None:
+        restart_text = root.findtext(".//RestartRecord")
+    auto_restart = (restart_text or "").strip().lower() == "true"
 
-    if record_seconds and not has_trigger and not auto_restart:
+    # Reported exactly as written. A configured TriggerModule can still carry
+    # TriggerAction NONE, and then it starts nothing: the window is as fixed as
+    # with no trigger at all.
+    trigger_action = root.findtext(".//TriggerAction")
+    if trigger_action is not None:
+        trigger_action = trigger_action.strip()
+    action_none = (trigger_action or "").upper() == "NONE"
+
+    fixed_window = not auto_restart and (action_none or (record_seconds and not has_trigger))
+    if fixed_window:
+        window = f"a fixed {record_seconds:g} s window" if record_seconds else "a fixed window"
+        why = ("TriggerAction is NONE, so the trigger starts nothing"
+               if action_none else "no trigger configured")
         warnings.append(
-            f"records a fixed {record_seconds:g} s window with no trigger configured. "
+            f"records {window} ({why}, and the recording does not restart). "
             "For a fault you can reproduce on demand that is fine. For an intermittent "
             "one the chance of catching it is roughly the window divided by the mean "
             "time between occurrences - a 60 s window on an hourly fault is under 2%. "
@@ -3057,6 +3163,8 @@ def cmd_checkscope(args):
           },
           "record_seconds": record_seconds,
           "trigger_configured": has_trigger,
+          "trigger_action": trigger_action,
+          "fixed_window": bool(fixed_window),
           "auto_restart_record": auto_restart,
           "problems": problems, "warnings": warnings})
     return 0 if not problems else 1

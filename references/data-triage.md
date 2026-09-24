@@ -87,9 +87,15 @@ the one group that disagrees stands out instead of drowning under its twins. The
 
 | Field | Means |
 |---|---|
-| `row_is_one_instant: true` | all groups agree exactly; the file behaves like one table |
-| `max_skew_ms` | worst row-wise disagreement between any two group clocks |
-| `cross_group_timing_valid: false` | **the export is broken.** Slow groups were never repeat-padded, so they run off their own wall clock. No cross-group timing claim from this file means anything — say so and re-export. |
+| `row_is_one_instant: true` | every group carries the same time column; the file behaves like one table |
+| `max_skew_ms` | largest disagreement between the groups' first or last timestamps — judged per group, never row by row |
+| `cross_group_timing_valid: false` | **the export is broken.** The groups cover different spans: a slow group that was never repeat-padded runs off its own wall clock. No cross-group timing claim from this file means anything — say so and re-export. |
+| `malformed_rows` | rows that stop partway through a group, skipped. Rows that stop exactly where a group begins are a slow group that ran out, and are read |
+
+A slow group reaches the file one of two ways: repeat-padded (its times run `0,0,4,4,…` beside
+a 2 ms group, every row full) or truncated (its samples fill the first rows, then the rows
+carry the fast group alone). Both are sound; in both a row is not one instant. Cross-group
+ordering finer than the slowest group's sample time is not in either.
 
 Times in a Scope export are milliseconds. This tool converts on read and reports **seconds**
 everywhere (`time_unit: "ms"`, `times_reported_in: "s"`).
@@ -254,7 +260,7 @@ Two more limits worth knowing. Correlation is computed on mean-centred, unit-nor
 signals, so a high-amplitude channel no longer outranks the low-amplitude one that caused
 it. And channels from different acquisition groups are refused unless you pass
 `--allow-cross-group`: they are sampled on different clocks, so a lag between them is only
-meaningful beyond the file's `max_skew_ms`. On an export where
+meaningful beyond the slower group's sample time and the file's `max_skew_ms`. On an export where
 `cross_group_timing_valid` is false, `correlate` refuses outright.
 
 ### Rung 6 — `window`

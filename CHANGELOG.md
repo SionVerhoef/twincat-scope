@@ -4,6 +4,28 @@
 
 First working version. Not yet published.
 
+### Field-test fixes: short rows, cross-group timing, TriggerAction
+
+A field test found three defects. Each is now held by a check that fails on
+the previous code.
+
+- **Rows that stop where a group begins are read, not dropped.** A slow group that is not
+  repeat-padded writes its samples on the first rows; after that the export writes shorter
+  rows carrying the fast group alone. Those rows were discarded, and with them half of the
+  fast group. They are now filled with NaN and each group trimmed to its own length. A row
+  that stops partway through a group is still skipped, and now counted: `malformed_rows`.
+- **Cross-group timing is judged per group, not row by row.** `max_skew_ms` is the largest
+  disagreement between the groups' first or last timestamps. Row by row, a truncated 4 ms
+  group beside a 2 ms one disagreed by 30 s and a sound export was called broken, so
+  `correlate --allow-cross-group` refused it. New fixtures hold both real layouts, a 2 ms and
+  a 4 ms group over 60 s: repeat-padded (30001 full rows) and truncated (15001 full rows, then
+  2-field rows).
+- **`checkscope` reports `trigger_action` as written.** `TriggerAction` `NONE` without
+  `AutoRestartRecord` now warns that the window is fixed, even with a trigger configured.
+- **`correlate`'s `a` and `b` follow the `--channels` order**, so the lag sign does too; they
+  followed file order. `ingest` writes the export tool's CSV to the cache dir instead of
+  beside the `.svdx`.
+
 ### A slimmer skill, before the next measurement
 
 Eval round 2 showed the skill arm reading more, not less. Before round 3 measures token

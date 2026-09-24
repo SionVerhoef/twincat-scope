@@ -15,7 +15,8 @@ TC3ScopeExportTool.exe "svd=C:\path\rec.svdx" target=C:\path\out.csv silent
 | `target=` | Output file; the extension selects the format. |
 | `silent` | No UI. Required for scripting. |
 
-`tcscope.py ingest` calls this for you when handed a `.svdx`, then converts to Parquet. That
+`tcscope.py ingest` calls this for you when handed a `.svdx`, writing the CSV to its cache
+dir rather than beside the recording, then converts to Parquet. That
 exact command line converted two real recordings first time (`evals/field-review-3e4c44d.md`),
 with the tool found under the TwinCAT root in `Functions\TF3300-Scope-Server\`.
 

@@ -10,6 +10,7 @@ Usage:  uv run tests/test_verbs.py
 """
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -1521,6 +1522,125 @@ def layout_checks():
               str(dup.get("channels")))
 
 
+def two_rate_checks():
+    """A 2 ms and a 4 ms group over 60 s, in both layouts real exports use.
+
+    Field test: a slow group that is not repeat-padded writes its samples on
+    the first rows and then stops, so the rest of the file is shorter rows.
+    Those rows were dropped as malformed - half the fast group went with them
+    - and the row-by-row skew they left behind (30 s) called a sound export
+    broken. Timing is judged on each group's own first and last timestamp.
+    """
+    truth = json.loads((REAL / "ground_truth.json").read_text())
+    for layout in ("padded", "truncated"):
+        name = f"real_tab_2rate_{layout}.csv"
+        path = REAL / name
+        man = run("manifest", path)
+        groups = expand_groups(man)
+        want = truth[name]["groups"]
+        check(f"{name}: every row is read, short ones included",
+              man.get("rows") == truth[name]["rows"] and not man.get("malformed_rows"),
+              f"rows={man.get('rows')} malformed={man.get('malformed_rows')}")
+        check(f"{name}: each group keeps its own sample count and ends at 60 s",
+              [g.get("n_samples") for g in groups] == [g["n_samples"] for g in want]
+              and all(near(g.get("t_last"), 60.0, 1e-9) for g in groups),
+              str([(g.get("n_samples"), g.get("t_last")) for g in groups]))
+        timing = man.get("timing", {})
+        check(f"{name}: groups spanning the same 60 s are sound for cross-group timing",
+              timing.get("cross_group_timing_valid") is True
+              and timing.get("max_skew_ms") == 0.0
+              and timing.get("row_is_one_instant") is False,
+              str(timing)[:120])
+
+        lag_s = truth[name]["lag_s"]
+        fwd = run("correlate", path, "--channels", "Axes.Axis1.ActPos,MAIN.bFlag",
+                  "--allow-cross-group")
+        pair = (fwd.get("pairs") or [{}])[0]
+        check(f"{name}: correlate --allow-cross-group finds the planted lag",
+              fwd.get("ok") is True and near(pair.get("lag_seconds"), -lag_s, 0.005)
+              and pair.get("leads") == "ActPos" and pair.get("resampled"),
+              f"ok={fwd.get('ok')} lag={pair.get('lag_seconds')} leads={pair.get('leads')}")
+        rev = run("correlate", path, "--channels", "MAIN.bFlag,Axes.Axis1.ActPos",
+                  "--allow-cross-group")
+        pair = (rev.get("pairs") or [{}])[0]
+        check(f"{name}: the lag sign follows the --channels order",
+              pair.get("a") == "bFlag" and near(pair.get("lag_seconds"), lag_s, 0.005)
+              and pair.get("leads") == "ActPos",
+              f"a={pair.get('a')} lag={pair.get('lag_seconds')}")
+
+    lines = (REAL / "real_tab_2rate_truncated.csv").read_text(encoding="utf-8").splitlines()
+    data = truth["real_tab_2rate_truncated.csv"]["data_line"] - 1
+    with tempfile.TemporaryDirectory() as tmp:
+        # A row that stops inside a group is damage, not a group running out.
+        # Row 100 loses bFlag (3 of 4 fields), row 200 everything but time.
+        cut = list(lines)
+        cut[data + 100] = "\t".join(cut[data + 100].split("\t")[:3])
+        cut[data + 200] = cut[data + 200].split("\t")[0]
+        damaged = Path(tmp) / "damaged.csv"
+        damaged.write_text("\r\n".join(cut) + "\r\n", encoding="utf-8")
+        man = run("manifest", damaged)
+        check("a row cut off mid-group is counted as malformed, not padded",
+              man.get("malformed_rows") == 2
+              and man.get("rows") == truth["real_tab_2rate_truncated.csv"]["rows"] - 2,
+              f"malformed={man.get('malformed_rows')} rows={man.get('rows')}")
+
+        # Small enough that the short rows fill the whole tail sniff_csv votes
+        # on: the width they suggest is the short one, not the file's.
+        small = Path(tmp) / "small.csv"
+        small.write_text("\r\n".join(lines[:data + 10] + lines[-40:]) + "\r\n",
+                         encoding="utf-8")
+        man = run("manifest", small)
+        check("a small file ending in short rows keeps its full width and decimal comma",
+              man.get("ncols") == 4 and man.get("decimal") == ","
+              and len(expand_groups(man)) == 2 and man.get("rows") == 50,
+              f"ncols={man.get('ncols')} decimal={man.get('decimal')} rows={man.get('rows')}")
+
+        # Parquet is rectangular: the short group is padded to write and
+        # trimmed again on read.
+        cache = Path(tmp) / "two_rate.parquet"
+        run("ingest", REAL / "real_tab_2rate_truncated.csv", "-o", cache)
+        back = expand_groups(run("manifest", cache))
+        check("a group that ran out early keeps its own length through Parquet",
+              [g.get("n_samples") for g in back] == [30001, 15001],
+              str([g.get("n_samples") for g in back]))
+
+
+def ingest_cache_checks():
+    """ingest leaves the export tool's CSV in the cache dir, never beside the
+    .svdx - which sits in a project folder that is not ours to fill.
+
+    The real TC3ScopeExportTool.exe only exists on Windows, so a stand-in that
+    honours the same svd= / target= arguments plays its part.
+    """
+    if sys.platform == "win32":
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        tool = tmp / "fake_export_tool"
+        tool.write_text(
+            "#!/bin/sh\n"
+            'for a in "$@"; do case "$a" in target=*) t="${a#target=}";; esac; done\n'
+            f'cp "{REAL / "real_tab_2group.csv"}" "$t"\n')
+        tool.chmod(0o755)
+        project = tmp / "project"
+        project.mkdir()
+        svdx = project / "rec.svdx"
+        svdx.write_bytes(b"not read by the stand-in")
+        env = {**os.environ, "TCSCOPE_EXPORT_TOOL": str(tool),
+               "XDG_CACHE_HOME": str(tmp / "cache")}
+        proc = subprocess.run([*BASE_CMD, "ingest", str(svdx), "-o", str(tmp / "rec.parquet")],
+                              capture_output=True, text=True, env=env)
+        try:
+            out = json.loads(proc.stdout)
+        except ValueError:
+            out = {"error": proc.stdout[:200] + proc.stderr[:200]}
+        check("ingest writes its intermediate CSV to the cache dir",
+              out.get("ok") is True
+              and out.get("intermediate_csv") == str(tmp / "cache" / "tcscope" / "rec.csv")
+              and sorted(p.name for p in project.iterdir()) == ["rec.svdx"],
+              str(out.get("intermediate_csv") or out.get("error")))
+
+
 def main():
     subprocess.run([sys.executable, str(ROOT / "tests" / "make_fixture.py")],
                    check=True, capture_output=True)
@@ -1667,6 +1787,34 @@ def main():
                               for w in chk_restart.get("warnings", [])),
                   str(chk_restart.get("warnings")))
 
+            # A filled TriggerModule whose TriggerAction is NONE starts nothing:
+            # the window is still fixed. The value is reported exactly as written.
+            text = a.read_bytes().decode("utf-8-sig")
+            armed = re.sub(r"(<TriggerModule[^>]*>\s*)<SubMember />",
+                           r"\1<SubMember><TriggerAction>@ACTION@</TriggerAction></SubMember>",
+                           text, count=1)
+            none = Path(tmp) / "none.tcscopex"
+            none.write_bytes(b"\xef\xbb\xbf" + armed.replace("@ACTION@", "NONE").encode("utf-8"))
+            chk_none = run("checkscope", none)
+            check("TriggerAction NONE is reported as-is and warns of a fixed window",
+                  chk_none.get("trigger_action") == "NONE"
+                  and chk_none.get("trigger_configured") is True
+                  and chk_none.get("fixed_window") is True
+                  and any("TriggerAction is NONE" in w for w in chk_none.get("warnings", [])),
+                  f"action={chk_none.get('trigger_action')} warnings={chk_none.get('warnings')}")
+            other = Path(tmp) / "other.tcscopex"
+            other.write_bytes(b"\xef\xbb\xbf" + armed.replace("@ACTION@", "SomeAction").encode("utf-8"))
+            chk_other = run("checkscope", other)
+            check("any other TriggerAction is reported as-is and draws no fixed-window warning",
+                  chk_other.get("trigger_action") == "SomeAction"
+                  and chk_other.get("fixed_window") is False,
+                  str(chk_other.get("warnings")))
+            rearm = Path(tmp) / "rearm.tcscopex"
+            rearm.write_bytes(b"\xef\xbb\xbf" + armed.replace("@ACTION@", "NONE").replace(
+                "<AutoRestartRecord>false", "<AutoRestartRecord>true").encode("utf-8"))
+            check("TriggerAction NONE on a re-arming recording is not a fixed window",
+                  run("checkscope", rearm).get("fixed_window") is False)
+
     stream_split_checks()
     real_fixture_checks()
     at_rest_checks()
@@ -1677,6 +1825,8 @@ def main():
     export_copy_checks()
     still_channel_checks()
     long_correlate_checks()
+    two_rate_checks()
+    ingest_cache_checks()
     shareability_checks()
     retarget_checks()
     tmc_checks()
