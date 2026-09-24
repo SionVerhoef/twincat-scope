@@ -6,7 +6,9 @@ crude - they detect the presence or absence of a specific technical behaviour,
 not writing quality. Anything needing judgement is left for a human read.
 
 Run it against a directory laid out as <run-dir>/<eval-name>/{with_skill,without_skill}/answer.md,
-where each answer.md is one agent's reply to the matching prompt in evals.json:
+where each answer.md is one agent's reply to the matching prompt in evals.json - or, for
+several runs per cell, .../<arm>/run-1/answer.md and so on, each beside an optional cost.json
+of {"tokens": N, "seconds": N}:
 
     python3 evals/grade.py path/to/run-dir
 
@@ -93,6 +95,7 @@ def asserts(t, *pats):
             before = t[max(0, m.start() - 240):m.start()]
             if not has(before,
                        r"\b(no|not|cannot|can'?t|don'?t|do not|won'?t|never|nothing|without)\b",
+                       r"\b(doesn'?t|didn'?t|isn'?t|wasn'?t|wouldn'?t)\b",
                        r'\b(basis|evidence|support|refus\w*|declin\w*|hold off|unable)\b',
                        r'row-?wise|naive|naïve|excel|artefact|artifact|opposite|contradict',
                        r'would (say|read|give|suggest|put)|appears?|one reading|if you (read|open)',
@@ -134,6 +137,7 @@ CHECKS = {
                           r'same sample rate', r'single acquisition')),
   ("declines to support the drive purchase on this evidence",
    lambda t, c, m: has(t, r"(don'?t|do not|before you|hold off|not).{0,60}order",
+                          r"(wouldn'?t|would not|shouldn'?t|should not).{0,30}order",
                           r'order.{0,40}drive.{0,60}(yet|until|before)',
                           r'no.{0,40}(basis|evidence|support).{0,40}(drive|purchase|order)',
                           r'cannot (confirm|answer|tell)')),
@@ -143,13 +147,15 @@ CHECKS = {
    lambda t, c, m: has(t, r'1[12][.,]\d{1,3}\s*s', r'\b12\s*s\b', r'\bt\s*=\s*1[12]')
                    and has(t, r'posdiff', r'following error', r'lag')),
   ("reports the spike is only a few samples wide",
-   lambda t, c, m: has(t, r'(three|3)\s*samples?', r'\d\s*samples? wide',
+   lambda t, c, m: has(t, r'(three|3)[\s-]*samples?', r'\d\s*samples? wide',
                           r'\b3\s*ms\b', r'few samples')),
   ("also surfaces the position step at ~6 s",
    lambda t, c, m: has(t, r'\b6[.,]0?\d*\s*s\b', r'\bt\s*=\s*6\b') and has(t, r'actpos', r'position')),
   ("also surfaces the frozen torque channel 15-17 s",
    lambda t, c, m: has(t, r'1[5-7].{0,30}1[5-7]', r'\b15\b.{0,40}\b17\b')
                    and has(t, r'torque') and has(t, r'flat|frozen|constant|stopped chang')),
+  ("also surfaces the clipped velocity channel",
+   lambda t, c, m: has(t, r'velo') and has(t, r'clip', r'saturat', r'pinned', r'\brail')),
   ("does not paste bulk sample rows",
    lambda t, c, m: dumped_rows(t) <= 10),
   # Duration alone does not count: it is on the last line of the file. The
@@ -172,7 +178,8 @@ CHECKS = {
  # changes is the size of the haystack, and that is the whole measurement.
  'needle-at-scale': [
   ("finds the following-error spike at ~413.8 s",
-   lambda t, c, m: has(t, r'41[34][.,]\d{1,3}\s*s', r'\b41[34]\s*s\b', r'\bt\s*=\s*41[34]')
+   lambda t, c, m: has(t, r'41[34][.,]\d{1,3}\s*s', r'\b41[34]\s*s\b', r'\bt\s*=\s*41[34]',
+                          r'06:06:53')
                    and has(t, r'posdiff', r'following error', r'lag')),
   ("reports the spike is only a few samples wide",
    lambda t, c, m: has(t, r'\b[1-9]\s*samples?\b', r'\d\s*samples? wide',
@@ -181,8 +188,11 @@ CHECKS = {
    lambda t, c, m: has(t, r'12[89][.,]\d{1,3}\s*s', r'\b128\s*s\b', r'\bt\s*=\s*128')
                    and has(t, r'actpos', r'position')),
   ("also surfaces the frozen torque channel ~291-293.5 s",
-   lambda t, c, m: has(t, r'29[123].{0,40}29[34]', r'\b291\b.{0,40}\b29[34]\b')
+   lambda t, c, m: has(t, r'29[123].{0,40}29[34]', r'\b291\b.{0,40}\b29[34]\b',
+                          r'06:04:5[1-3].{0,40}06:04:5[3-4]')
                    and has(t, r'torque') and has(t, r'flat|frozen|constant|stopped chang')),
+  ("also surfaces the clipped velocity channel",
+   lambda t, c, m: has(t, r'velo') and has(t, r'clip', r'saturat', r'pinned', r'\brail')),
   ("does not paste bulk sample rows",
    lambda t, c, m: dumped_rows(t) <= 10),
   ("establishes the sample rate rather than assuming it",
@@ -297,6 +307,7 @@ CHECKS = {
  'out-of-scope-authoring': [
   ("declines to author the ST function block",
    lambda t, c, m: has(t, r"(don'?t|do not|not|cannot|can'?t|won'?t).{0,40}(write|author)",
+                          r"(haven'?t|have not|didn'?t|did not) (written|authored|write|author)",
                           r'out(side)? of scope', r'not what (this|i) do', r'declin',
                           r'not the right (tool|place)')),
   # Detected by the declaration and a variable block, not by the closing
@@ -312,53 +323,143 @@ CHECKS = {
                           r'record.{0,40}(before|after)', r'confirm.{0,40}diagnos',
                           r'a recording.{0,80}(would|settle|show)', r'would settle it',
                           r'what i did not check', r're-?record.{0,60}(with|including)',
-                          r'captur\w*.{0,50}(setpoint|error word|status)')),
+                          r'captur\w*.{0,50}(setpoint|error word|status)',
+                          r'(next|new) recording.{0,40}(add|include|with)',
+                          r'\brecord the (drive|nc|axis|torque|error)')),
   ("points the authoring work somewhere else",
    lambda t, c, m: has(t, r'hand (it |this )?(off|over)', r'someone|whoever|your (plc|controls)',
                           r'st (skill|tool|authoring)', r'a different (job|tool|skill)',
                           r'plc (developer|engineer|programmer)')),
  ],
+ # A valid export, correctly padded, with the two channels on different rates.
+ # Read as one table the following error rises at 0.405 s and the torque at
+ # 0.410 s - "error first, torque reacted". But torque is sampled every 10 ms:
+ # it last read normal at 0.400, so it rose somewhere in (0.400, 0.410], and
+ # 0.405 is inside that. The order is not in the data.
+ 'multi-rate-ordering': [
+  ("notes the torque channel is sampled far slower than the following error",
+   lambda t, c, m: has(t, r'10\s*ms', r'100\s*hz', r'ten times', r'10x|10×')
+                   and has(t, r'torque')),
+  ("does not confirm the following error came first",
+   lambda t, c, m: not asserts(t, r'yes[,.].{0,80}(following error|posdiff).{0,60}(first|before)',
+                                  r'(following error|posdiff).{0,40}(came|occurred|happened|rose|started|leads?|led).{0,30}(first|before)',
+                                  r'confirms?.{0,60}(following error|posdiff).{0,40}(first|before)',
+                                  r'torque.{0,40}(react\w*|respond\w*|follow\w*|lag\w*)( to| behind)')),
+  ("does not claim the torque came first either",
+   lambda t, c, m: not asserts(t, r'torque.{0,40}(came|occurred|happened|spiked?|rose|leads?|led).{0,30}(first|before)(?!\s+(shows|appears|visible|seen))',
+                                  r'torque.{0,60}(precede|prior to)')),
+  ("says the order is inside one torque sample, so not resolvable",
+   lambda t, c, m: has(t, r'(within|inside|less than|shorter than|under) (one|a single|1) (torque )?sample',
+                          r'(somewhere )?between 0?[.,]400 and 0?[.,]410',
+                          r'0?[.,]40\d?\s*(s|ms)?\s*(and|-|–|to)\s*0?[.,]41',
+                          r'resolution', r'cannot (be )?(resolv|order|tell|determin)',
+                          r"can'?t (tell|resolve|order|say)", r'not resolvable')),
+  ("recommends re-recording torque at the fast rate",
+   lambda t, c, m: has(t, r're-?record', r'record again', r'sample.{0,40}(faster|1\s*ms|same rate)',
+                          r'same (sample )?rate', r'1\s*ms.{0,40}torque', r'torque.{0,40}1\s*ms',
+                          r'same (acquisition )?group|one group')),
+  ("does not clear the drive on this evidence",
+   lambda t, c, m: has(t, r"(cannot|can'?t|not|no).{0,40}(clear|rule out|exonerat)",
+                          r"(doesn'?t|does not|isn'?t|wouldn'?t).{0,40}(clear|grounds|send\w* the mechanics)",
+                          r'hold off', r'has no support',
+                          r'(drive|torque).{0,60}(not ruled out|still (possible|a candidate|open))',
+                          r'no.{0,30}(basis|evidence).{0,40}(mechanical|drive)',
+                          r'cannot (confirm|answer|tell)')),
+ ],
+}
+
+# Retired evals keep their checks so an old run can be regraded, but a run
+# directory without them is not reported as missing them.
+RETIRED = {
+    'saturated-channel': "tied 6/6 in iteration 1 and again at scale in iteration 2",
+    'saturated-at-scale': "tied 6/6 in iteration 2; the rail is as obvious at 12 M samples",
+    'unwired-acquisition': "the baseline grepped the GUIDs and found the dangling reference",
+    'over-specified-recording': "the baseline computed the load and proposed a triggered buffer",
 }
 
 
+def answers_of(cell):
+    """Every answer for one eval and arm: run-*/answer.md, or a lone answer.md.
+
+    Iteration 3 runs each cell three times; a difference of one check at n=1
+    is noise. Older run directories hold one answer per cell and still grade.
+    """
+    runs = sorted(cell.glob('run-*/answer.md'))
+    return runs or ([cell / 'answer.md'] if (cell / 'answer.md').exists() else [])
+
+
+def cost_of(answer):
+    """(tokens, seconds) from cost.json beside an answer, or None if not recorded.
+
+    Written by whoever ran the agent, from what the agent runner reported. The
+    skill's case at scale is cost rather than correctness, and iteration 2 could
+    not settle it because nothing here recorded usage.
+    """
+    p = answer.parent / 'cost.json'
+    if not p.exists():
+        return None
+    d = json.loads(p.read_text())
+    return d.get('tokens'), d.get('seconds')
+
+
 def main():
-    rows, summary = [], {}
+    rows, summary, costs = [], {}, {}
     for name, checks in CHECKS.items():
+        if name in RETIRED and not (ROOT / name).exists():
+            continue
         for cond in ('with_skill', 'without_skill'):
-            p = ROOT / name / cond / 'answer.md'
-            if not p.exists():
+            answers = answers_of(ROOT / name / cond)
+            if not answers:
                 rows.append((name, cond, None, 'MISSING'))
                 continue
-            t = p.read_text(encoding='utf-8', errors='replace')
-            c, m = code_of(t), commands_of(t)
-            res = [(label, bool(fn(t, c, m))) for label, fn in checks]
-            passed = sum(1 for _, ok in res if ok)
-            rows.append((name, cond, res, f"{passed}/{len(res)}"))
-            summary.setdefault(name, {})[cond] = (passed, len(res))
+            scores = []
+            for p in answers:
+                t = p.read_text(encoding='utf-8', errors='replace')
+                c, m = code_of(t), commands_of(t)
+                res = [(label, bool(fn(t, c, m))) for label, fn in checks]
+                passed = sum(1 for _, ok in res if ok)
+                scores.append(passed)
+                run = p.parent.name if p.parent.name.startswith('run-') else ''
+                rows.append((name, f"{cond} {run}".strip(), res, f"{passed}/{len(res)}"))
+                cost = cost_of(p)
+                if cost:
+                    costs.setdefault(cond, []).append(cost)
+            summary.setdefault(name, {})[cond] = (sum(scores) / len(scores),
+                                                  len(checks), scores)
 
-    print(f"{'EVAL':28s} {'WITH SKILL':>12s} {'BASELINE':>12s}   DELTA")
+    print(f"{'EVAL':28s} {'WITH SKILL':>14s} {'BASELINE':>12s}   DELTA")
     tw = tb = tn = 0
     incomplete = []
     for name in CHECKS:
         s = summary.get(name, {})
+        if not s and name in RETIRED:
+            continue
         # A missing run is not a zero - excluding it keeps the totals honest.
         if 'with_skill' not in s or 'without_skill' not in s:
             missing = [c for c in ('with_skill', 'without_skill') if c not in s]
             incomplete.append((name, missing))
-            print(f"{name:28s} {'--':>12s} {'--':>12s}   (run missing: {', '.join(missing)})")
+            print(f"{name:28s} {'--':>14s} {'--':>12s}   (run missing: {', '.join(missing)})")
             continue
-        w, n = s['with_skill']
-        b, _ = s['without_skill']
+        w, n, ws = s['with_skill']
+        b, _, bs = s['without_skill']
         tw += w; tb += b; tn += n
+        # Scores are means over the runs; tied means are flagged either way.
         flag = '   <- does not discriminate' if w == b else ''
-        print(f"{name:28s} {w:>7d}/{n:<4d} {b:>7d}/{n:<4d}   {w-b:+d}{flag}")
+        runs = f"n={len(ws)}" if len(ws) > 1 else ""
+        print(f"{name:28s} {w:>7.1f}/{n:<2d}{runs:>4s} {b:>7.1f}/{n:<4d}   {w-b:+.1f}{flag}")
     if tn:
-        print(f"{'TOTAL (complete pairs)':28s} {tw:>7d}/{tn:<4d} {tb:>7d}/{tn:<4d}   {tw-tb:+d}")
+        print(f"{'TOTAL (complete pairs)':28s} {tw:>7.1f}/{tn:<6d} {tb:>7.1f}/{tn:<4d}   {tw-tb:+.1f}")
         print(f"\npass rate: with skill {100*tw/tn:.0f}%   baseline {100*tb/tn:.0f}%")
     if incomplete:
         print(f"\n!! {len(incomplete)} eval(s) excluded from the total - run not finished:")
         for name, missing in incomplete:
             print(f"   {name}: {', '.join(missing)}")
+    for cond, got in costs.items():
+        tokens = [t for t, _ in got if t is not None]
+        secs = [s for _, s in got if s is not None]
+        print(f"cost {cond:14s} {len(got):3d} runs"
+              + (f"   mean tokens {sum(tokens) / len(tokens):,.0f}" if tokens else "")
+              + (f"   mean seconds {sum(secs) / len(secs):,.0f}" if secs else ""))
 
     print("\n" + "=" * 78 + "\nper-check detail (✓ pass, ✗ fail)\n" + "=" * 78)
     for name, cond, res, tot in rows:
@@ -371,8 +472,8 @@ def main():
 
     out = ROOT.parent / 'summary.json'
     out.parent.mkdir(parents=True, exist_ok=True)
-    json.dump({n: {c: list(v) for c, v in s.items()} for n, s in summary.items()},
-              open(out, 'w'), indent=2)
+    json.dump({n: {c: {"mean": v[0], "checks": v[1], "runs": v[2]} for c, v in s.items()}
+               for n, s in summary.items()}, open(out, 'w'), indent=2)
     print(f"\nsummary written to {out}")
 
 

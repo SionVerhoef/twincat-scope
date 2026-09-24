@@ -68,6 +68,7 @@ from make_real_fixtures import (  # noqa: E402
     max_skew_ms,
     sample,
     spec,
+    write_comma,
     write_tab,
 )
 
@@ -111,6 +112,11 @@ SPIKE_ROW = 200       # ActTorque spike: 0.400 s read naively, 0.800 s in truth
 STEP_DELTA = 4.0      # following error jumps, in the same units as the channel
 SPIKE_DELTA = 45.0    # torque spike, three samples wide
 SPIKE_WIDTH = 3
+
+# The multi-rate export: 1 ms and 10 ms groups, both correctly padded.
+MULTIRATE = "press_line_export.csv"
+MULTIRATE_ERROR_ROW = 405    # following error steps at 0.405 s
+MULTIRATE_TORQUE_ROW = 410   # first torque sample to read high: 0.410 s
 
 
 def build_columns(groups, rows, rng, events):
@@ -297,6 +303,28 @@ def write_scaled(out, rows=SCALE_ROWS, axes=SCALE_AXES):
     }
 
 
+def write_multirate(out):
+    """A valid, padded export with the two channels asked about on different rates.
+
+    Group 0 samples at 1 ms and carries the following error, which steps at
+    0.405 s. Group 1 samples at 10 ms and carries the torque: it reads normal
+    at 0.400 s and high at 0.410 s. Read as one table, error first by 5 ms. On
+    the data, the torque rose somewhere in (0.400, 0.410], and 0.405 is inside
+    it: the order is not in the file, however valid the file is.
+    """
+    groups = [spec(3, 1, 1, port=501), spec(2, 10, 1, port=851)]
+    names = [["PosDiff", "ActPos", "SetPos"], ["ActTorque", "ActCurrent"]]
+    events = {
+        (0, 0): {"kind": "step", "row": MULTIRATE_ERROR_ROW, "delta": STEP_DELTA},
+        # One slow sample wide: padding repeats it on the next nine rows.
+        (1, 0): {"kind": "spike", "row": MULTIRATE_TORQUE_ROW,
+                 "delta": SPIKE_DELTA, "width": 1},
+    }
+    columns, truth = build_columns(groups, ROWS, random.Random(11), events)
+    meta = write_comma(out / MULTIRATE, groups, columns, truth, ROWS, names=names)
+    return meta
+
+
 NULL_GUID = "00000000-0000-0000-0000-000000000000"
 DANGLING = "deadbeef-0000-4000-8000-000000000000"
 
@@ -344,6 +372,7 @@ def main():
     skewed = write_skewed(out)
     planted = write_planted(out)
     unwired = write_unwired(out)
+    multirate = write_multirate(out)
     scaled = write_scaled(out, args.scale_rows) if args.scale else None
 
     truth = {
@@ -363,6 +392,18 @@ def main():
         UNWIRED: {
             "why": "display channel references an AcquisitionGUID no acquisition carries",
             "acquisition_guid": unwired,
+        },
+        MULTIRATE: {
+            "why": "valid export; the two channels are on 1 ms and 10 ms groups",
+            "max_skew_ms": multirate["max_skew_ms"],
+            "the_trap": {
+                "following_error_step_s": MULTIRATE_ERROR_ROW / 1000.0,
+                "torque_last_normal_s": (MULTIRATE_TORQUE_ROW - 10) / 1000.0,
+                "torque_first_high_s": MULTIRATE_TORQUE_ROW / 1000.0,
+                "naive_conclusion": "following error first by 5 ms, torque reacted",
+                "honest_conclusion": "the 5 ms gap is inside one 10 ms torque sample; "
+                                     "the order is not in the data",
+            },
         },
     }
     if scaled is not None:

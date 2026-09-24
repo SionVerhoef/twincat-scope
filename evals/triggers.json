@@ -6,6 +6,13 @@
     "A skill for general CSV and dataframe analysis in Python",
     "A skill for Siemens TIA Portal and S7 controllers"
   ],
+  "without_neighbour": {
+    "notes": "Iteration 1 scored 10/10, but each decline case had a distractor that was a near-perfect match to go to instead. Run these again with that neighbour removed from the field: the right answer becomes 'none', and the question is whether twincat-scope grabs the case once nothing better is on offer.",
+    "cases": [
+      {"case": "other-vendor", "drop": "A skill for Siemens TIA Portal and S7 controllers"},
+      {"case": "generic-csv", "drop": "A skill for general CSV and dataframe analysis in Python"}
+    ]
+  },
   "cases": [
     {
       "id": 0,
