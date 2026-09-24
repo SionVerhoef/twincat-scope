@@ -20,7 +20,7 @@ Run 2026-09-23. **n = 3 per cell**, which is the README's floor for calling a di
 
 Prompts were the brief's exactly, with two identical additions to both arms. First, "Work from
 /tmp/evalstage (cd there before any command)", because a subagent starts in the session's working
-directory rather than in the stage. The brief's "Do not read anything under /projects/twincat-scope"
+directory rather than in the stage. The brief's "Do not read anything under <repository checkout>"
 line is what keeps the answer key out of reach. Second, "Do not send any notifications", because
 subagents inherit a global instruction to send push notifications on completion. No answer reports
 reading the repository, and no baseline reports reading `skill/`.
