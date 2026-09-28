@@ -1687,7 +1687,11 @@ def parquet_pool_checks():
                         "--rows", "40000", "--channels", "20", "-o", str(csv)],
                        check=True, capture_output=True)
         run("ingest", csv, "-o", cache)
-        out = subprocess.run([sys.executable, "-c", probe, str(TCSCOPE), str(cache)],
+        # Through uv with the analysis dependencies, like BASE_CMD: this file's
+        # own interpreter has no pyarrow (CI runs it bare).
+        python = ([_UV, "run", "--quiet", "--with", "numpy", "--with", "pyarrow", "python"]
+                  if _UV else [sys.executable])
+        out = subprocess.run([*python, "-c", probe, str(TCSCOPE), str(cache)],
                              capture_output=True, text=True)
     try:
         peak, table_bytes = map(int, out.stdout.split())
