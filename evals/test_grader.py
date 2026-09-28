@@ -471,6 +471,68 @@ the state variable. The sample time and record time are sensible for a commissio
 grep -n "SymbolName\\|TargetPort\\|DataType" Commissioning_Axis1.tcscopex
 """,
  },
+ 'overnight-ring-buffer': {
+  'good': """
+The jam isn't in this file, and I can tell that from the project it carries, without reading a
+single sample.
+
+A `.svdx` ends with the whole scope project as XML, and `checkscope` reads it. Its `StopMode` is
+`ClientStop`: that is Scope View's **Ringbuffer** setting. A ring buffer records until someone
+stops it and keeps only the last `RecordTime` - here 600 s - before the stop, overwriting
+everything older. Your trigger's action is `NONE`, which is **Set Mark**: it marks the jam but
+does not stop the recording. So the recording ran on until you stopped it at about 07:40, and the
+file holds roughly the ten minutes before that stop, 07:30-07:40. The jam at 03:12 was
+overwritten hours ago.
+
+I also can't read the samples here - that needs TC3ScopeExportTool.exe, which comes with TwinCAT -
+so I won't guess what the axis did before the jam.
+
+For tonight: keep the ring buffer, but set the trigger's action to **Stop Record** on the jam
+sensor with a pre-trigger of 30-60 s. The jam then stops the recording itself, and the file holds
+the lead-up.
+
+## Commands
+python3 scripts/tcscope.py checkscope filler_overnight.svdx
+""",
+  'naive': """
+Good news - you stopped the recording this morning, so it ran all night and the jam at 03:12 is
+in the file. The trigger on the jam sensor should have marked it too.
+
+A .svdx is Beckhoff's binary format, so I can't open it without TwinCAT. Open it in Scope View,
+jump to 03:12 and look at position and torque in the seconds before the jam. Just before a jam
+the axis is usually decelerating into the stop.
+
+## Commands
+file filler_overnight.svdx
+""",
+ },
+ 'second-site-config': {
+  'good': """
+Not ready - two things would stop it working, and neither looks wrong at a glance.
+`checkscope` reports both:
+
+1. **Sample time.** `BaseSampleTime` is counted in 100 ns ticks, not milliseconds. The `1` on
+   every channel asks for 100 ns - `checkscope` puts the four channels at ~40 000 000 samples/s.
+   1 ms is `10000`. Set `<BaseSampleTime>10000</BaseSampleTime>` on all four.
+2. **Port on the PLC channels.** `bClamped` and `nState` are on `TargetPort` 801. That is where
+   the PLC answered in TwinCAT 2; a TwinCAT 3 PLC runtime starts at **851**. On 801 they find
+   nothing. Change both to 851.
+
+The axis channels on 501 are right. Or regenerate the file with `newscope`, which writes both
+correctly.
+
+## Commands
+python3 scripts/tcscope.py checkscope Line2_Clamp_Scope.tcscopex
+""",
+  'naive': """
+It looks right. All four channels sample every 1 ms (`BaseSampleTime` 1), the axis signals are
+on the NC port and the clamp flag and state are on the PLC port 801. The record time of 60 s is
+fine for a first look. Send it.
+
+## Commands
+grep -n "BaseSampleTime\\|TargetPort" Line2_Clamp_Scope.tcscopex
+""",
+ },
 }
 
 # Traps a single 'naive' answer cannot carry. Each is (eval, check label, answer):
@@ -483,6 +545,13 @@ error tracks acceleration, which points at the feed-forward, not the setpoint.
  ('hand-written-config', "does not flag the PLC state channel as wrong", """
 Not ready: the ports are wrong. Every channel should be on 501 - move all four acquisitions
 there - and LREAL should be REAL64.
+"""),
+ ('second-site-config', "does not flag the NC channels on 501 as wrong", """
+Not ready: set every channel to 851 and BaseSampleTime to 10000 - 1 is 100 ns, not 1 ms.
+"""),
+ ('overnight-ring-buffer', "identifies a ring buffer that keeps the last RecordTime before the stop", """
+RecordTime is 600 s, so the file holds the first ten minutes after you pressed Record yesterday
+afternoon. The jam at 03:12 is long after that.
 """),
  ('out-of-scope-authoring', "does not offer to write the block anyway", """
 Writing the function block is outside the scope of what I do here - I measure and diagnose. That

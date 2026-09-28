@@ -1,23 +1,24 @@
 {
   "skill_name": "twincat-scope",
-  "notes": "Each prompt is run twice: once by an agent told to read and follow the skill, once by an agent answering from its own knowledge with the skill withheld. Baseline is the same prompt, same fixture, same working directory. {FIXTURES} is substituted with the staged fixture directory at run time. Assertions are checkable from the answer text plus the '## Commands' section both arms are required to append. Selection rule, learned from twincat-st iteration 1: an eval earns its place only if a capable model without the skill is plausibly, confidently WRONG - not merely less polished. Prompts that a good baseline already handles measure nothing and were left out on purpose, which is why there is no 'declines to author safety logic' eval here. ITERATION 2: needle-at-scale and saturated-at-scale are the same two traps against a 600,000-row, 20-channel, 12-million-sample fixture, because their 20,000-row twins scored 6/6 in both arms - a haystack small enough to tip onto the table measures nothing. Their fixture is written by `make_eval_fixture.py --scale`. ITERATION 3: four evals retired because a capable baseline passed them unaided (see 'retired'); the needles ask for a ranked list; multi-rate-ordering is new. Every cell runs three times, and each run records tokens and seconds in cost.json beside its answer. ITERATION 4: needle-at-scale and multi-rate-ordering retired after full-mark ties at n=3. Generic signal-analysis traps have now three times failed to separate the arms, so the two new evals each need a Scope/TwinCAT fact a generalist lacks and start from a Scope file rather than a CSV: armed-but-not-recording (.svdx, TriggerAction NONE is Set Mark) and hand-written-config (.tcscopex, NC symbols on 501 and Scope's own type names). The needle fixture is now uneven point-to-point motion with drift and friction in Scope View's own dialect, with no 'Synthetic scope export' preamble. out-of-scope-authoring is staged alone beside an empty data/, and its decline check needs the scope reason. Each answer may also carry a judge.json (see README, 'Judge read').",
+  "notes": "Each prompt is run twice: once by an agent told to read and follow the skill, once by an agent answering from its own knowledge with the skill withheld. Baseline is the same prompt, same fixture, same working directory. {FIXTURES} is substituted with the staged fixture directory at run time. Assertions are checkable from the answer text plus the '## Commands' section both arms are required to append. Selection rule, learned from twincat-st iteration 1: an eval earns its place only if a capable model without the skill is plausibly, confidently WRONG - not merely less polished. Prompts that a good baseline already handles measure nothing and were left out on purpose, which is why there is no 'declines to author safety logic' eval here. ITERATION 2: needle-at-scale and saturated-at-scale are the same two traps against a 600,000-row, 20-channel, 12-million-sample fixture, because their 20,000-row twins scored 6/6 in both arms - a haystack small enough to tip onto the table measures nothing. Their fixture is written by `make_eval_fixture.py --scale`. ITERATION 3: four evals retired because a capable baseline passed them unaided (see 'retired'); the needles ask for a ranked list; multi-rate-ordering is new. Every cell runs three times, and each run records tokens and seconds in cost.json beside its answer. ITERATION 4: needle-at-scale and multi-rate-ordering retired after full-mark ties at n=3. Generic signal-analysis traps have now three times failed to separate the arms, so the two new evals each need a Scope/TwinCAT fact a generalist lacks and start from a Scope file rather than a CSV: armed-but-not-recording (.svdx, TriggerAction NONE is Set Mark) and hand-written-config (.tcscopex, NC symbols on 501 and Scope's own type names). The needle fixture is now uneven point-to-point motion with drift and friction in Scope View's own dialect, with no 'Synthetic scope export' preamble. out-of-scope-authoring is staged alone beside an empty data/, and its decline check needs the scope reason. Each answer may also carry a judge.json (see README, 'Judge read'). ITERATION 5: armed-but-not-recording retired - its baselines read TriggerAction NONE, a 60 s RecordTime and AutoStop off the plain XML and reached the answer without Scope knowledge (judge 2.00 vs 1.00, checks +0.7). Replaced by overnight-ring-buffer, where the answer rests on what StopMode ClientStop means. second-site-config is a second configuration eval in the pattern that separated the arms most in iteration 4. Every eval is staged alone: make_eval_fixture.py writes fixtures/stages/<eval>/data/.",
   "component_coverage": {
     "references/data-triage.md": [
       "needle-in-the-haystack"
     ],
     "references/export-tool.md": [
-      "broken-cross-group",
-      "armed-but-not-recording"
+      "broken-cross-group"
     ],
     "references/scope-configuration.md": [
       "hand-written-config",
-      "armed-but-not-recording"
+      "second-site-config",
+      "overnight-ring-buffer"
     ],
     "scripts/tcscope.py": [
       "broken-cross-group",
       "needle-in-the-haystack",
-      "armed-but-not-recording",
-      "hand-written-config"
+      "hand-written-config",
+      "second-site-config",
+      "overnight-ring-buffer"
     ],
     "SKILL.md scope boundary": [
       "out-of-scope-authoring"
@@ -60,7 +61,8 @@
         "Does not paste bulk sample rows into the answer",
         "Establishes sample rate and duration before drawing conclusions rather than assuming them",
         "Runs an orienting or summarising step before asking for raw rows"
-      ]
+      ],
+      "retire_if": "Iteration 5 judge gap below 0.5 (iteration 4: 2.00 vs 1.33, checks tied for the fourth round)."
     },
     {
       "id": 5,
@@ -76,25 +78,7 @@
         "Offers the measurement half instead - verifying the diagnosis, or specifying what to record after the change",
         "Points the authoring work somewhere else rather than simply refusing"
       ],
-      "stage": "Run from a directory holding only an empty data/ (the generator writes one as fixtures/empty_stage/): in iteration 3 agents found the other evals' fixtures and diagnosed those instead."
-    },
-    {
-      "id": 9,
-      "name": "armed-but-not-recording",
-      "prompt": "We get an intermittent jam on the filler, roughly once a night. Yesterday afternoon I set up a trigger on the jam sensor in Scope View, pressed Record and left it running. The alarm log says the jam happened at 03:12. This morning I saved the recording: {FIXTURES}/filler_overnight.svdx. I don't have TwinCAT on this laptop. Can you find the jam in it and tell me what the axis was doing just before?",
-      "expected_output": "Does not go looking for 03:12 in the samples. Reads the project that a .svdx carries after its samples and finds the trigger's action is NONE - Scope View's Set Mark - which marks a release but starts or stops nothing. With a 60 s RecordTime and no restart, the file is one fixed 60 s window from when Record was pressed, so a jam hours later is not in it. Says the samples cannot be read here without the export tool, and proposes a Stop Record trigger with a pre-trigger (or a restarting recording) for tonight.",
-      "files": [
-        "{FIXTURES}/filler_overnight.svdx"
-      ],
-      "ground_truth": "The .svdx is sample bytes followed by the project XML. That project has a TriggerModule with one enabled TriggerGroup, TriggerAction NONE, RecordTime 600000000 ticks (60 s), AutoRestartRecord false, RestartRecord false. checkscope on the .svdx reports trigger_action NONE, fixed_window true and the fixed-window warning naming Set Mark. The trap: a configured trigger on the jam sensor reads as 'armed', and a generalist either promises to find 03:12 once exported or says only that TwinCAT is needed. The sample bytes are random: nothing can or should be read from them.",
-      "assertions": [
-        "Reads the scope project out of the .svdx rather than giving up on the binary",
-        "Identifies the trigger action as NONE / Set Mark, which marks but does not start or stop the recording",
-        "States that the recording is a fixed 60 s window, so a jam at 03:12 is not in it",
-        "Does NOT claim or imply the jam at 03:12 is in the file",
-        "Recommends a trigger that decides what is recorded - Stop Record with a pre-trigger, or Start Record, or a restarting recording - before tonight",
-        "Does not invent sample values or a description of the axis before the jam"
-      ]
+      "stage": "Run from a copy of fixtures/stages/out-of-scope-authoring/ - an empty data/."
     },
     {
       "id": 10,
@@ -110,6 +94,41 @@
         "Identifies that the NC axis channels must be on port 501, not 851",
         "Identifies LREAL as the wrong type name - Scope needs REAL64",
         "Does not flag the PLC state channel on 851 as wrong",
+        "Gives a concrete fix for both, or regenerates the file"
+      ]
+    },
+    {
+      "id": 11,
+      "name": "overnight-ring-buffer",
+      "prompt": "We get an intermittent jam on the filler, roughly once a night. Yesterday afternoon I set up a trigger on the jam sensor in Scope View, pressed Record and left it running all night. The alarm log says the jam happened at 03:12. I stopped the recording at about 07:40 this morning and saved it: {FIXTURES}/filler_overnight.svdx. I don't have TwinCAT on this laptop. Can you find the jam in it and tell me what the axis was doing just before?",
+      "expected_output": "Does not go looking for 03:12 in the samples. Reads the project a .svdx carries after its samples: StopMode ClientStop is Scope View's Ringbuffer, which records until someone stops it and keeps the last RecordTime (600 s) before the stop. The trigger's action is NONE - Set Mark - so the jam did not stop it; the 07:40 stop did, and the file holds roughly 07:30-07:40. The jam is not in it. Says the samples cannot be read here without the export tool, and proposes a Stop Record trigger on the jam sensor with a pre-trigger for tonight.",
+      "files": [
+        "{FIXTURES}/filler_overnight.svdx"
+      ],
+      "ground_truth": "The .svdx is sample bytes (random, sized like ten minutes of four channels) followed by the project XML: StopMode ClientStop, RecordTime 6000000000 ticks (600 s), one enabled TriggerGroup with TriggerAction NONE and no pre-trigger. checkscope on the .svdx reports ring_buffer true, trigger_action NONE, and the warning that a ring buffer keeps the last 600 s before the stop. The trap: 'ClientStop' plus 'I stopped it this morning' reads as 'the whole night is in the file, export it and look at 03:12'.",
+      "assertions": [
+        "Reads the scope project out of the .svdx rather than giving up on the binary",
+        "Identifies the recording as a ring buffer (StopMode ClientStop) that keeps only the last RecordTime before the stop",
+        "States that the file covers about the ten minutes before the morning stop, so the 03:12 jam is not in it",
+        "Does NOT claim or imply the jam at 03:12 is in the file",
+        "Says the trigger (Set Mark / NONE) did not stop the recording, and recommends a Stop Record trigger with a pre-trigger",
+        "Does not invent sample values or a description of the axis before the jam"
+      ]
+    },
+    {
+      "id": 12,
+      "name": "second-site-config",
+      "prompt": "I set up this scope config by hand for our second line - axis 2 actual position and following error, plus the clamp flag and the station state, everything sampled every 1 ms: {FIXTURES}/Line2_Clamp_Scope.tcscopex. The site engineer will load it tomorrow without me. Can you check it's right before I send it?",
+      "expected_output": "Says it is not right. BaseSampleTime is in 100 ns ticks, so the 1 written on every channel asks for 100 ns, not 1 ms - 1 ms is 10000. And the two PLC channels are on port 801, where a TwinCAT 2 PLC answered; a TwinCAT 3 PLC runtime starts at 851, so they find nothing. The NC channels on 501 are correct. Gives the fix for both, or regenerates the file.",
+      "files": [
+        "{FIXTURES}/Line2_Clamp_Scope.tcscopex"
+      ],
+      "ground_truth": "Generated by the skill's own newscope, then written the way someone does it by hand: BaseSampleTime 1 on all four acquisitions, TargetPort 801 on MAIN.fbClamp2.bClamped (BIT) and MAIN.fbStation2.nState (INT16). Axes.Axis2.ActPos and .PosDiff are REAL64 on 501 and correct. checkscope reports ~40 000 000 samples/s and a warning per PLC channel that no TwinCAT 3 PLC runtime answers below 851. The trap: the user asked for 1 ms and the file says 1, and 801 is the PLC port in TwinCAT 2 documentation. What Scope itself does with a 100 ns request has not been measured; the answer should not claim it.",
+      "assertions": [
+        "Says the configuration is not ready as written",
+        "Identifies BaseSampleTime 1 as 100 ns, not 1 ms, and gives 10000 for 1 ms",
+        "Identifies the PLC channels' port 801 as wrong for TwinCAT 3, which uses 851",
+        "Does not flag the NC channels on 501 as wrong",
         "Gives a concrete fix for both, or regenerates the file"
       ]
     }
@@ -144,6 +163,11 @@
       "name": "multi-rate-ordering",
       "id": 8,
       "why": "Iteration 3: full marks in both arms at n=3. Reasoning about the slower channel's sample interval is generic, not Scope-specific."
+    },
+    {
+      "name": "armed-but-not-recording",
+      "id": 9,
+      "why": "Iteration 4, isolated re-runs: 6.0 vs 5.3 on the checks, judge 2.00 vs 1.00. The baselines found the XML at the end of the .svdx and read TriggerAction NONE, RecordTime 60 s and AutoStop, which say 'stops after a minute' in plain words. Only naming NONE as Set Mark needed Scope knowledge."
     }
   ]
 }
