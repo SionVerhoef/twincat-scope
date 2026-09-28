@@ -27,10 +27,17 @@ Each eval below is built around a specific wrong answer that is easy to reach an
 | Eval | The trap |
 |---|---|
 | `broken-cross-group` | Read as one table, the export says torque spiked *before* the following error. Its own clock says *after*. Neither is defensible — the export is broken. The naive read inverts cause and effect. |
-| `armed-but-not-recording` | A `.svdx` saved after a night "armed" on the jam sensor. The trigger is configured — and its action is `NONE`, Scope View's *Set Mark*, which starts and stops nothing. The file is one fixed 60 s window, and the 03:12 jam is hours outside it. The answer is in the project at the end of the `.svdx`, not in its samples. |
+| `overnight-ring-buffer` | A `.svdx` left running all night on the jam sensor and stopped at 07:40. Its `StopMode` is `ClientStop` — Scope View's *Ringbuffer* — so it kept only the last 600 s before the stop, and its trigger is *Set Mark*, which stopped nothing. "ClientStop" reads as "recorded until you stopped it"; the 03:12 jam was overwritten hours before. |
+| `second-site-config` | A hand-written `.tcscopex` for "everything every 1 ms": `BaseSampleTime` 1 on every channel (100 ns — 1 ms is 10000) and the PLC channels on 801, TwinCAT 2's PLC port. The NC channels on 501 are right. |
 | `hand-written-config` | A hand-written `.tcscopex` with the NC axis channels on 851 and typed `LREAL`. Both look right to anyone who knows the PLC side — 851 is the PLC's port, `LREAL` its type — and neither records: NC symbols live on 501, and Scope reads `LREAL` as VOID. |
 | `needle-in-the-haystack` | The glitch is 3 samples in 20,000, among uneven moves, dwells, drift and friction that look like events too. Kept as a cheap regression check, not as a discriminator. |
 | `out-of-scope-authoring` | The diagnosis is done and the fix is obviously a few lines of ST. Writing it is the natural next move and the wrong one — and declining on the merits while offering to write it anyway is not declining. |
+
+**Retired in iteration 5**: `armed-but-not-recording`. Its baselines found the XML at the end of
+the `.svdx` and read `TriggerAction NONE`, a 60 s `RecordTime` and `AutoStop`, which say "stops
+after a minute" in plain words; only naming `NONE` as *Set Mark* needed Scope knowledge.
+`overnight-ring-buffer` keeps the scenario and puts the answer on what `ClientStop` means.
+`needle-in-the-haystack` carries a `retire_if` in `evals.json`: a judge gap under 0.5 next round.
 
 **Retired in iteration 4**, after full-mark ties at n=3: `needle-at-scale` (a baseline writes a
 script and prints a summary at 12 million samples as readily as at 20,000) and `multi-rate-ordering`
@@ -67,11 +74,12 @@ python3 evals/make_eval_fixture.py           # writes evals/fixtures/
 ```
 
 For the live evals it writes `clamp_station_export.csv`, `axis1_run_20260722.csv`,
-`filler_overnight.svdx` and `Commissioning_Axis1.tcscopex`, and `empty_stage/data/`. The two Scope
-files are built from this skill's own `newscope` output with the trap written in, so they are as
-well-formed as the generator — only the trap is wrong. The `.svdx` sample bytes are random: the
-answer is in the project at its tail, and without `TC3ScopeExportTool.exe` nobody can read samples
-anyway. `--scale` still writes the retired 127 MB fixture.
+`filler_overnight.svdx`, `Commissioning_Axis1.tcscopex` and `Line2_Clamp_Scope.tcscopex`, and then
+`stages/<eval>/data/` holding each eval's own files — nothing else. The three Scope files are built
+from this skill's own `newscope` output with the trap written in, so they are as well-formed as the
+generator — only the trap is wrong. The `.svdx` sample bytes are random, sized like ten minutes of
+its four channels: the answer is in the project at its tail, and without `TC3ScopeExportTool.exe`
+nobody can read samples anyway. `--scale` still writes the retired 127 MB fixture.
 
 Regenerable and gitignored, like every other fixture in this repo. Ground truth is written to
 `evals/ground_truth.json` — one directory *up* from the data, never beside it.
@@ -83,9 +91,12 @@ working inside the repo can read the answer key. The fixture names here are alre
 `clamp_station_export.csv`, not `skewed_export.csv` — but staging outside the repo is what makes
 the baseline arm honest.
 
-**Stage every eval on its own**: one directory per run, holding only the files that eval's
-`files` lists (and `skill/` for the skill arm). `out-of-scope-authoring` gets a copy of
-`empty_stage/`, just an empty `data/`. Agents list the folder and read whatever is in it. In
+**Stage every eval on its own**: one directory per run, holding a copy of `stages/<eval>/` (and
+`skill/` for the skill arm). `out-of-scope-authoring`'s stage is just an empty `data/`.
+`stage_runs.py stage` does exactly this, under neutral shuffled ids, writes each run's prompt with
+the additions below, and keeps the id-to-arm map in one file outside the repository;
+`stage_runs.py collect` files the answers back under `runs/<name>/` for `grade.py`. Agents list
+the folder and read whatever is in it. In
 iteration 3 the out-of-scope agents diagnosed the other evals' recordings instead of answering.
 In iteration 4, baselines on `hand-written-config` read the right port and type out of the
 `.svdx` staged for another eval, and that eval tied until it was re-run alone. It then separated

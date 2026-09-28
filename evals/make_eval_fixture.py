@@ -462,6 +462,7 @@ def write_unwired(out):
 
 TCSCOPE = ROOT / "scripts" / "tcscope.py"
 ARMED = "filler_overnight.svdx"
+RING_SECONDS = 600
 HANDWRITTEN = "Commissioning_Axis1.tcscopex"
 # NC axis fields plus one PLC state variable, as someone would write them for a
 # commissioning visit. The symbol spelling is the one SKILL.md uses.
@@ -519,38 +520,107 @@ SET_MARK_GROUP = (
     "</TriggerGroup></SubMember>")
 
 
-def write_armed(out):
-    """A saved recording whose trigger never decided what was recorded.
+def write_ring_buffer(out):
+    """A recording left running overnight as a ring buffer, stopped in the morning.
 
-    A .svdx is the samples in binary followed by the whole project as XML. This
-    one's project has a trigger group - so it looks armed - whose action is
-    Set Mark (NONE): it marks a release and starts or stops nothing. With a
-    60 s RecordTime and no restart, the file holds one fixed 60 s window from
-    when Record was pressed, and an event hours later is not in it.
+    Iteration 4's version of this eval gave a fixed 60 s window (AutoStop), and
+    the baselines read that off the plain XML without any Scope knowledge. Here
+    the project's StopMode is ClientStop - Scope View's "Ringbuffer" property,
+    as a real save showed - with a 600 s RecordTime. A ring buffer records until
+    someone stops it and keeps the last RecordTime before the stop. The trigger
+    is Set Mark (NONE), so the jam did not stop it: the user did, hours later,
+    and the file holds the ten minutes before that. "ClientStop" reads as
+    "recorded until you stopped it", which is exactly the wrong conclusion.
+
+    The trigger's channel condition is still left out: its schema has not been
+    seen in a real file, and the answer no longer depends on it.
     """
-    work = out / "_armed.tcscopex"
-    src = generated_project(work, "MAIN.fbFiller.bJamSensor:BOOL,MAIN.fbFiller.nState:INT,"
-                                  "Axes.Axis1.ActPos,Axes.Axis1.ActTorque")
+    work = out / "_ring.tcscopex"
+    subprocess.run([sys.executable, str(TCSCOPE), "newscope",
+                    str(ROOT / "templates" / "axis-diagnosis.tcscopex"), "-o", str(work),
+                    "--channels", "MAIN.fbFiller.bJamSensor:BOOL,MAIN.fbFiller.nState:INT,"
+                                  "Axes.Axis1.ActPos,Axes.Axis1.ActTorque",
+                    "--netid", "1.2.3.4.1.1", "--record-time", str(RING_SECONDS)],
+                   check=True, capture_output=True)
+    src = work.read_text(encoding="utf-8-sig")
     work.unlink()
     src, n = re.subn(r"(<TriggerModule[^>]*>\s*)<SubMember />", r"\1" + SET_MARK_GROUP,
                      src, count=1)
     if n != 1:
         raise SystemExit("template has no empty TriggerModule to arm")
-    # Stand-in sample bytes; nothing reads them without the export tool.
-    rng = random.Random(3120)
-    samples = bytes(rng.randrange(256) for _ in range(480_000))
+    if src.count("<StopMode>AutoStop</StopMode>") != 1:
+        raise SystemExit("template has no StopMode to turn into a ring buffer")
+    src = src.replace("<StopMode>AutoStop</StopMode>", "<StopMode>ClientStop</StopMode>")
+    # Stand-in sample bytes, sized like ten minutes of these four channels at
+    # 1 ms, so the file's size says nothing a whole night would.
+    samples = random.Random(3120).randbytes(RING_SECONDS * 1000 * 20)
     (out / ARMED).write_bytes(samples + src.encode("utf-8"))
     return {
-        "why": "the trigger group's action is NONE (Set Mark): it marks, it does not "
-               "start or stop the recording; RecordTime 60 s, no restart",
-        "record_seconds": 60,
+        "why": "StopMode ClientStop is Scope View's Ringbuffer: it keeps the last "
+               f"{RING_SECONDS} s before the stop; the trigger is Set Mark (NONE), so the "
+               "user's stop in the morning ended it, not the jam",
+        "record_seconds": RING_SECONDS,
+        "stop_mode": "ClientStop",
         "trigger_action": "NONE",
-        "the_trap": "a configured trigger on the jam sensor reads as 'armed to catch the "
-                    "jam'; the recording is one fixed 60 s window and cannot hold an "
-                    "event hours later",
+        "the_trap": "'ClientStop' reads as 'recorded all night until you stopped it', so "
+                    "the 03:12 jam should be in the file; it holds only the ten minutes "
+                    "before the morning stop",
         "samples_note": "the sample bytes are random: the answer is in the project, and "
                         "an agent without the export tool cannot read samples anyway",
     }
+
+
+SECOND_SITE = "Line2_Clamp_Scope.tcscopex"
+SECOND_SITE_CHANNELS = ("Axes.Axis2.ActPos,Axes.Axis2.PosDiff,"
+                        "MAIN.fbClamp2.bClamped:BOOL,MAIN.fbStation2.nState:INT")
+
+
+def write_second_site(out):
+    """A second hand-written config: 1 ms meant, 100 ns written, and a TC2 port.
+
+    BaseSampleTime is in 100 ns ticks - 10000 is 1 ms, as every real file shows -
+    and someone asked for "everything every 1 ms" writes 1. And 801 is where the
+    PLC runtime answered in TwinCAT 2; a TwinCAT 3 PLC starts at 851, so the
+    PLC channels find nothing. Both look right to anyone who knows the PLC side
+    or older documentation. The NC channels on 501 are correct, so the file is
+    not uniformly wrong.
+    """
+    src = generated_project(out / SECOND_SITE, SECOND_SITE_CHANNELS)
+    if src.count("<BaseSampleTime>10000</BaseSampleTime>") != 4:
+        raise SystemExit("expected four channels at 1 ms to rewrite")
+    src = src.replace("<BaseSampleTime>10000</BaseSampleTime>",
+                      "<BaseSampleTime>1</BaseSampleTime>")
+    src = src.replace("<TargetPort>851</TargetPort>", "<TargetPort>801</TargetPort>")
+    (out / SECOND_SITE).write_text(src, encoding="utf-8-sig")
+    return {
+        "why": "BaseSampleTime 1 on all four channels is 100 ns, not 1 ms (1 ms is "
+               "10000); the two PLC channels are on 801, a TwinCAT 2 port - TC3 PLC "
+               "runtimes start at 851; the NC channels on 501 are correct",
+        "defects": {"sample_time": {"channels": 4, "written": 1, "correct": 10000},
+                    "port": {"channels": 2, "written": 801, "correct": 851}},
+        "the_trap": "the user asked for 1 ms and the file says 1; 801 is the PLC port in "
+                    "TwinCAT 2 documentation",
+    }
+
+
+def write_stages(out):
+    """One directory per eval, holding only that eval's own files.
+
+    Agents list the folder and read whatever is in it. In iteration 4 a shared
+    folder let baselines read the right type names out of another eval's .svdx,
+    and one eval tied until it was re-run alone. Copy stages/<eval>/ per run.
+    """
+    import shutil
+    evals = json.loads((Path(__file__).parent / "evals.json").read_text())["evals"]
+    stages = out / "stages"
+    if stages.exists():
+        shutil.rmtree(stages)
+    for e in evals:
+        data = stages / e["name"] / "data"
+        data.mkdir(parents=True)
+        for f in e["files"]:
+            shutil.copy2(out / Path(f).name, data / Path(f).name)
+    return sorted(p.name for p in stages.iterdir())
 
 
 def main():
@@ -573,11 +643,9 @@ def main():
     unwired = write_unwired(out)
     multirate = write_multirate(out)
     handwritten = write_handwritten(out)
-    armed = write_armed(out)
+    armed = write_ring_buffer(out)
+    second_site = write_second_site(out)
     scaled = write_scaled(out, args.scale_rows) if args.scale else None
-    # out-of-scope-authoring is staged on its own, beside an empty data/: in
-    # iteration 3 its agents found the other evals' files and diagnosed those.
-    (out / "empty_stage" / "data").mkdir(parents=True, exist_ok=True)
 
     truth = {
         SKEWED: {
@@ -611,13 +679,16 @@ def main():
         },
         HANDWRITTEN: handwritten,
         ARMED: armed,
+        SECOND_SITE: second_site,
     }
     if scaled is not None:
         truth[SCALED] = scaled
     # One directory up, deliberately: see the module docstring.
     (Path(__file__).parent / "ground_truth.json").write_text(json.dumps(truth, indent=2))
+    stages = write_stages(out)
     print(json.dumps({"ok": True, "out": str(out),
-                      "written": sorted(p.name for p in out.iterdir())}, indent=2))
+                      "written": sorted(p.name for p in out.iterdir()),
+                      "stages": stages}, indent=2))
 
 
 if __name__ == "__main__":

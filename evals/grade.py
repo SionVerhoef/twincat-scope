@@ -436,11 +436,58 @@ CHECKS = {
                           r'targetport.{0,40}501', r'datatype.{0,40}real64',
                           r'change.{0,60}(501|real64)', r'set.{0,40}(501|real64)')),
  ],
+ # A ring buffer (StopMode ClientStop) with a Set Mark trigger, stopped by the
+ # user in the morning: the file holds the ten minutes before the stop.
+ 'overnight-ring-buffer': [
+  ("reads the project out of the .svdx",
+   lambda t, c, m: has(t, r'checkscope', r'stopmode', r'clientstop', r'recordtime', r'<\?xml',
+                          r'project.{0,60}(end|tail|after the samples|embedded|inside)',
+                          r'xml.{0,40}(end|tail|inside|embedded)')),
+  ("identifies a ring buffer that keeps the last RecordTime before the stop",
+   lambda t, c, m: has(t, r'ring ?buffer', r'clientstop', r'rolling')
+                   and has(t, r'(last|final|most recent)\s+(\d+\s*(s|min|seconds|minutes)|ten minutes|10 minutes|600)',
+                          r'before (the|you|your|it was|it) ?stop', r'overwrit\w*')),
+  ("says the file covers the minutes before the morning stop, so not 03:12",
+   lambda t, c, m: has(t, r'07:[23]\d', r'(ten|10) minutes before', r'600\s*s\b.{0,60}before',
+                          r'before (the|you|your) ?(morning )?stop')
+                   and has(t, r'03:12')),
+  ("does not claim the jam at 03:12 is in the file",
+   lambda t, c, m: not asserts(t, r'(jam|fault|event).{0,40}(is|was|should be)\s+(in|captured|recorded)',
+                                  r'(found|see|shows?|captured)\s+the jam',
+                                  r'whole night\s+(is|was)\s+(in|recorded|captured)',
+                                  r'at 03:12.{0,40}(the axis|position|torque)\s+(was|is)')),
+  ("says Set Mark did not stop it, and recommends Stop Record with a pre-trigger",
+   lambda t, c, m: has(t, r'stop\s+record') and has(t, r'pre-?trigger')),
+  ("does not invent what the axis was doing",
+   lambda t, c, m: not has(t, r'before\s+(the|a)\s+jam.{0,60}(axis|torque|position)\s+(was|were|is|rose|dropped|spiked)',
+                              r'the axis\s+(was|is)\s+(\w+\s+){0,3}(moving|accelerat|stopped|stall|decelerat)')),
+ ],
+ # A second hand-written config: BaseSampleTime 1 (100 ns, meant as 1 ms) on
+ # every channel, and the PLC channels on 801, TwinCAT 2's PLC port.
+ 'second-site-config': [
+  ("says it is not ready as written",
+   lambda t, c, m: has(t, r'\bnot (right|ready|correct)', r'will not record', r"won'?t record",
+                          r'(two|2) (problems|issues|defects|mistakes)', r'\bno\b[,.]',
+                          r'(problem|issue|wrong)')
+                   and not asserts(t, r'(looks|is) (right|correct|good|fine|sound)\b(?!.{0,30}except)')),
+  ("BaseSampleTime 1 is 100 ns, not 1 ms - 1 ms is 10000",
+   lambda t, c, m: has(t, r'100\s*ns', r'0[.,]1\s*[µu]s', r'100 nanosecond') and has(t, r'10\s*000|10,000')),
+  ("port 801 is wrong for TwinCAT 3, which starts at 851",
+   lambda t, c, m: has(t, r'\b801\b') and has(t, r'\b851\b')),
+  ("does not flag the NC channels on 501 as wrong",
+   lambda t, c, m: not has(t, r'501[^.\n]{0,60}(is wrong|should be (on )?(port )?851|must be 851)',
+                              r'(all|every|each) (channel|acquisition)s?[^.\n]{0,40}\b851\b')),
+  ("gives a concrete fix, or regenerates the file",
+   lambda t, c, m: has(t, r'newscope', r'<basesampletime>10000', r'basesampletime.{0,40}10\s*000',
+                          r'change.{0,60}(10\s*000|851)', r'set.{0,40}(10\s*000|851)')),
+ ],
 }
 
 # Retired evals keep their checks so an old run can be regraded, but a run
 # directory without them is not reported as missing them.
 RETIRED = {
+    'armed-but-not-recording': "iteration 4: baselines read NONE, 60 s and AutoStop off the "
+                               "plain XML; replaced by overnight-ring-buffer",
     'needle-at-scale': "tied at full marks in iteration 3, n=3",
     'multi-rate-ordering': "tied at full marks in iteration 3, n=3; the reasoning is generic",
     'saturated-channel': "tied 6/6 in iteration 1 and again at scale in iteration 2",
