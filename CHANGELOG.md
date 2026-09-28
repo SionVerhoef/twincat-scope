@@ -4,6 +4,58 @@
 
 First working version. Not yet published.
 
+### Field review of 8bf9230: the export tool's options, run on a real recording
+
+A field test ran `TC3ScopeExportTool.exe` on real recordings, once per CSV option, then the
+options that matter again from Scope View's own dialog (`evals/field-review-8bf9230.md`). It
+found five defects in the reader, two in `checkscope`, one in the tests and three rough edges
+an agent hit in the CLI. Each is now held by a check that fails on the previous code.
+
+- **An export with no header rows is refused.** Header preset *None* writes the data and
+  nothing above it. The reader took column 0 as the only time column and turned the slower
+  group's clock into a channel. A 60 s recording of two groups came back as one 30 s group of
+  three channels, with `ok: true`.
+- **Blank and Colon separators are refused by name.** Both are options in Scope's export.
+  They were refused as "no numeric rows", or as `,` used twice, which pointed the user at the
+  wrong setting.
+- **`checkscope` reads a `.svdx`.** A saved recording ends with its whole project as XML.
+  `checkscope` died on the binary before it with a `UnicodeDecodeError` traceback. It now
+  checks that project, and a file with no project in it is refused in JSON.
+- **The test fixtures were written wrong on Windows.** `Path.write_text` turns each `\n` into
+  `\r\n`, so every `"\r\n"`-joined fixture came out as `\r\r\n`. There, 2 checks failed and
+  the suite then crashed.
+  Fixtures are now written with `newline=""`, and a check rejects any `\r\r\n`.
+- **A trigger-info table is no header.** A headerless export with *Include trigger info*
+  has the release table above the data, and that got it past the refusal above: one 30 s
+  group of three channels again, `ok: true`.
+- **An export with no time column is refused.** Scope View's Timelines *None* writes values
+  only, and the first was read as the clock (`t_last` before `t_first`, `ok: true`). A group
+  whose time column runs backwards in over 1% of its steps is now refused, with Timelines
+  named in the fix; a single reset is counted as `time_backsteps` instead.
+- **`checkscope` judges a trigger by what it does.** Only *Start/Stop Record* and
+  *Start/Stop Subsave* change what is recorded; display, export and reporting actions left
+  a fixed window without the warning. `NONE` is named as Scope View's *Set Mark*. Each
+  trigger group's pre- and post-trigger are reported in seconds (`trigger_groups`), since
+  Scope keeps a hidden pre-trigger. A Stop Record pre-trigger longer than the record window
+  is warned about, and a disabled trigger group counts for nothing.
+- **`ingest -o` is optional.** Without it the Parquet goes to the cache dir, named by the
+  recording's stem and a hash of its path, and `output` says where.
+- **Argument errors are JSON.** A missing argument, unknown verb or unknown flag was the one
+  answer printed as plain text.
+- **`ingest` reports `time_columns`, not `groups`.** On a per-channel export it said 33 where
+  `manifest` listed 5 merged entries.
+- `correlate`'s cross-group note names both groups ("from its own 1 axis" before).
+- `SKILL.md` tells the agent to quote an error code only from the recording or a named
+  source. An agent in the field offered NC error IDs from memory.
+
+`references/export-tool.md` now records what was measured. The tool ignores the export
+settings saved in a `.svdx`, and only `config=` changes its output. At the same export range
+it writes the same samples as Scope View. It ignores interpolation, and with Timelines *None* it
+writes no file. Its FILETIME ticks are UTC. The options it honours are marked
+tool-verified, each with its `CSVProperties` element name. Scope View's own defaults are now
+recorded beside them: `,`/`.` with a **Name-only header**, so the settings table now tells
+users to change the header to *Full*. The dialog remembers the last settings used.
+
 ### Scope View's CSV export options
 
 Users export the same recording with different settings. Variants of a real two-rate export

@@ -126,6 +126,11 @@ order — this section is the summary of record; the full write-ups are in `eval
 - **Later rounds** (`evals/field-review-6872161.md`, `evals/field-review-44d4951.md`):
   Scope View's own CSV export and copy collapsing, flag layout tried and reverted, and false
   rails on still axes — each measured in the field and folded back into the tool.
+- **Export options** (`evals/field-review-8bf9230.md`): every CSV option run through the
+  export tool's `config=` and most through Scope View's own dialog, including the first
+  user-exported `;` file; a 600 s, 33-channel recording ingested in 16.7 s; and an agent
+  that picked the skill up unnamed. Headerless, *Timelines None*, Blank and Colon exports are
+  now refused instead of misread.
 
 What stands behind the tool:
 
@@ -140,9 +145,8 @@ What stands behind the tool:
 - The analysis verbs are tested against those structural fixtures and against synthetic ones
   with planted defects — a step, a 3-sample spike, a flatline, a clipped channel.
 
-What is **not** proven: the analysis verbs have run against one real recording of a generated
-file, not against the variety of the 19 exports, and the `;` delimiter has still not been
-seen in a real file.
+What is **not** proven: the analysis verbs have run against two real recording shapes, not
+against the variety of the 19 exports.
 
 `SKILL.md` rule 3 tells the agent never to claim something is verified when it is not. The
 same honesty applies to the skill itself.

@@ -59,7 +59,9 @@ Two things follow for how you work:
 - **`ingest` to Parquet first if you will ask more than two questions.** Every verb re-parses
   the CSV from scratch. On the 10 M-sample file: one 13.6 s ingest turns 143.6 MB into an
   11 MB Parquet, after which the same verbs take 1.8–3.3 s instead of 15–16 s. Two questions
-  pay it back.
+  pay it back. It saves time, not memory: on a real 600 s, 33-channel recording the Parquet
+  verbs took 1.2–1.3 s against ~9 s from the CSV, but peaked at ~500 MB against ~330–360 MB
+  (`evals/field-review-8bf9230.md`).
 - **The output stays tiny at every size.** Across the whole table `manifest` returns ~5.9 KB
   and `events` ~28 KB. That is the point of the ladder — the file grew 50×, the answer did
   not grow at all.

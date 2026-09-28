@@ -44,6 +44,7 @@ Both say so rather than implying otherwise.
 
 import argparse
 import copy
+import hashlib
 import json
 import math
 import os
@@ -83,6 +84,20 @@ PLACEHOLDER_NAMES = {"signal", "channel", "untitled", "none"}
 # height between them, and traces sharing a band share one auto-scaled axis.
 BANDS_PER_CHART_WARN = 6
 CHANNELS_PER_BAND_WARN = 8
+
+# A trigger group's TriggerAction as the file writes it -> the name in Scope
+# View's dropdown, in the enum's order (TwinCAT.Scope2 TriggerEventAction).
+TRIGGER_ACTION_UI = {
+    "NONE": "Set Mark", "START_RECORD": "Start Record", "STOP_RECORD": "Stop Record",
+    "STOP_DISPLAY": "Stop Display", "RESTART_DISPLAY": "Restart Display",
+    "START_SUBSAVE": "Start Subsave", "STOP_SUBSAVE": "Stop Subsave", "EXPORT": "Export",
+    "REPORT_TRIGGER": "Reporting Trigger", "REPORT_DATA": "Reporting Collector",
+    "REPORT_DATA_TRIGGER": "Reporting Collector + Trigger",
+}
+# The actions that decide what is recorded. The Subsave pair is inferred from
+# its name; only Start and Stop Record were observed in a real project.
+TRIGGER_ACTIONS_RECORDING = frozenset({
+    "START_RECORD", "STOP_RECORD", "START_SUBSAVE", "STOP_SUBSAVE"})
 
 
 # --------------------------------------------------------------------------
@@ -142,7 +157,7 @@ def need(module):
 #
 # Two dialects: TAB with European decimal commas and 17 metadata rows, and ','
 # with '.' decimals and a Name row only. ';' appeared in none of the 19 real
-# files but the synthetic EU fixture uses it, so it stays supported.
+# files, but Scope View writes it when asked and a real ';' export read cleanly.
 # --------------------------------------------------------------------------
 
 # A metadata row repeats its key at every group start, so these double as the
@@ -164,6 +179,9 @@ MS_PER_S = 1000.0
 # export is broken: the slow groups were never repeat-padded and run off their
 # own wall clock. Cross-group timing on such a file means nothing.
 BROKEN_SKEW_MULTIPLE = 10
+
+
+BARE_NUMBER = re.compile(r"[-+]?\d+(?:[.,]\d+)?(?:[eE][-+]?\d+)?")
 
 
 def _looks_numeric(field, decimal):
@@ -223,6 +241,26 @@ def _probe_decimal(candidate_rows, delim):
                     ok += _looks_numeric(field, candidate)
         scores[candidate] = ok / total if total else 0.0
     return "," if scores[","] > scores["."] else "."
+
+
+def _unsupported_separator(lines, nonblank):
+    """Name the separator if the data is split by one this reader does not take.
+
+    Scope's CSV export also offers Blank and Colon. Header fields hold both a
+    space and a ':' (a path, a clock time), so neither can be read here - but
+    left to the vote below, such a file is reported as having no numeric rows,
+    or as using ',' twice, and the user is sent to fix the wrong setting."""
+    # Each piece must be a bare number on its own. _looks_numeric is too
+    # forgiving here: it strips a padding TAB and reads '0.5,' as a number, and
+    # then 'a, b' or a TAB file with padded cells looked Blank-separated.
+    tail = [lines[i] for i in nonblank[-20:]]
+    for sep, label in ((":", "':' (Colon)"), (" ", "a blank")):
+        split = [ln.split(sep) for ln in tail if sep in ln]
+        clean = [r for r in split if len(r) > 1 and all(
+            BARE_NUMBER.fullmatch(f) for f in r if f)]
+        if split and len(clean) >= 0.8 * len(tail):
+            return label
+    return None
 
 
 def _find_data_row(lines, nonblank, delim, decimal, ncols):
@@ -367,6 +405,15 @@ def sniff_csv(path, sample_bytes=200_000):
     if not nonblank:
         fail(f"{path} is empty")
 
+    unsupported = _unsupported_separator(lines, nonblank)
+    if unsupported:
+        fail(
+            f"{path} separates its fields with {unsupported}, which this reader "
+            "does not take: the header fields contain the same character",
+            "Re-export with TAB or ';' as the CSV separator (',' with '.' as the "
+            "decimal mark also works) - see references/export-tool.md",
+        )
+
     best = _probe_delimiter(lines, nonblank)
     if best is None:
         fail(
@@ -405,8 +452,31 @@ def sniff_csv(path, sample_bytes=200_000):
 
     meta =_metadata_rows(lines, nonblank, delim, ncols, data_start)
     groups = _parse_groups(meta, ncols, decimal)
+    # Include trigger info writes a table of trigger releases above the data,
+    # headed TriggerGroup. It says nothing about the columns, so it and what
+    # follows it are no header - on a headerless export it was taken for one.
+    table = next((i for i in header
+                  if lines[i].split(delim)[0].strip().strip('"') == "TriggerGroup"),
+                 data_start)
+    header = [i for i in header if i < table]
+    # A header preset without Name or SymbolName (None, or a subset keeping
+    # only the preamble or Unit rows) leaves nothing that says where one group
+    # ends and the next starts. With more than one value column the flat
+    # reading below would turn a slower group's clock into a channel. A plain
+    # CSV with a row naming its columns is still read flat.
+    def names_row(i):
+        fields = [f.strip().strip('"') for f in lines[i].split(delim)]
+        return (len(fields) == ncols and fields[0] not in METADATA_KEYS
+                and any(f and not _looks_numeric(f, decimal) for f in fields))
+    if groups is None and ncols > 2 and not any(names_row(i) for i in header):
+        fail(
+            f"{path} has no header row naming its columns, so they cannot be told apart: "
+            "a Scope export gives every acquisition group its own time column",
+            "Re-export with a header - the fullest Header configuration preset, "
+            "or leave TC3ScopeExportTool.exe on its default",
+        )
     if groups is None:
-        groups = _flat_group(lines, data_start, delim, decimal, ncols)
+        groups = _flat_group(lines, table, delim, decimal, ncols)
 
     return {
         "delimiter": delim,
@@ -550,6 +620,8 @@ def _finalise_group(np, group, raw):
     group["raw_ms"] = raw
     group["time"] = raw / MS_PER_S
     group["time_nan_count"] = int((~finite).sum())
+    # Steps where the clock went back: a reset, or one damaged row.
+    group["time_backsteps"] = int(np.count_nonzero(np.diff(raw[finite]) < 0))
 
     # First row of each distinct timestamp, non-finite times dropped: a blank
     # cell in a time column otherwise poisons every median taken over np.diff.
@@ -648,6 +720,9 @@ def _stream_lines(path):
 # since 1601) instead of ms since the first sample. Any date since 1601 is
 # above this; ms since the first sample would need 300 years of recording.
 FILETIME_MIN = 1e16
+
+# Beyond this share of its steps running backwards, a "time" column is a value.
+TIME_BACKSTEP_FRACTION = 0.01
 FILETIME_TICKS_PER_MS = 10_000
 
 
@@ -710,7 +785,26 @@ def load_csv(path):
     for group in info["groups"]:
         for channel in group["channels"]:
             channel["values"] = data[:, channel["column"]]
-        groups.append(_finalise_group(np, group, data[:, group["time_column"]]))
+        group = _finalise_group(np, group, data[:, group["time_column"]])
+        # Timelines None writes no time column at all, and the first value
+        # column is read as one. A signal steps back about as often as it
+        # steps forward; a clock does so rarely if ever - a reset, one damaged
+        # row - and those are counted, not grounds for refusing the file.
+        stamps = group["raw_ms"][np.isfinite(group["raw_ms"])]
+        steps = np.diff(stamps)
+        back = np.flatnonzero(steps < 0)
+        moving = int(np.count_nonzero(steps))
+        if back.size and (back.size > TIME_BACKSTEP_FRACTION * moving
+                          or stamps[-1] < stamps[0]):
+            fail(
+                f"{path}: group {group['id']}'s time column (column "
+                f"{group['time_column']}) runs backwards, {stamps[back[0]]:g} to "
+                f"{stamps[back[0] + 1]:g} ms, so it is not a time column",
+                "The export has no time column - was it made with Timelines 'None'? "
+                "Re-export with Timelines 'For each sample time' - see "
+                "references/export-tool.md",
+            )
+        groups.append(group)
     info["rows"] = int(data.shape[0])
     return collapse_copies(np, Recording(groups, info))
 
@@ -1021,7 +1115,15 @@ def cmd_ingest(args):
 
     intermediate = str(src) if src != Path(args.input) else None
     rec = load_csv(src)
-    out = Path(args.output)
+    if args.output:
+        out = Path(args.output)
+    else:
+        # Scope's default names (Record_1.svdx) repeat from project to project,
+        # so the stem alone would let one recording overwrite another's cache.
+        tag = hashlib.sha1(str(Path(args.input).resolve()).encode(),
+                           usedforsecurity=False).hexdigest()[:8]
+        out = cache_dir() / f"{Path(args.input).stem}-{tag}.parquet"
+        out.parent.mkdir(parents=True, exist_ok=True)
     pa = need("pyarrow")
     from pyarrow import parquet as pq
     columns, layout = parquet_payload(rec)
@@ -1029,7 +1131,7 @@ def cmd_ingest(args):
         {PARQUET_META_KEY: json.dumps(layout).encode()})
     pq.write_table(table, out)
     emit({"ok": True, "input": str(args.input), "output": str(out),
-          "rows": rec.info.get("rows"), "groups": len(rec.groups),
+          "rows": rec.info.get("rows"), "time_columns": len(rec.groups),
           "channels": len(rec.channels), "columns": list(columns),
           "delimiter": rec.info.get("delimiter"), "decimal": rec.info.get("decimal"),
           "intermediate_csv": intermediate,
@@ -1112,6 +1214,8 @@ def cmd_manifest(args):
             "gaps": group["gaps"],
             "port": next((ch["port"] for ch in group["channels"] if ch["port"]), None),
         })
+        if group["time_backsteps"]:
+            groups[-1]["time_backsteps"] = group["time_backsteps"]
 
     # The fastest group stands for the file in the flat fields below, which
     # exist so a single-group export reads the way it always did.
@@ -1660,8 +1764,8 @@ def cmd_correlate(args):
                 row["groups"] = [ca["group"], cb["group"]]
             if resampled:
                 row["resampled"] = (
-                    f"b was linearly resampled from its own {cb['group']} axis onto "
-                    f"a's, because the two groups do not share a clock")
+                    f"b was linearly resampled from group {cb['group']}'s time axis onto "
+                    f"group {ca['group']}'s, because the two groups do not share a clock")
             pairs.append(row)
 
     pairs.sort(key=lambda p: -abs(p["correlation"]))
@@ -1808,10 +1912,26 @@ def cmd_plot(args):
 # --------------------------------------------------------------------------
 
 def read_tcscopex(path):
+    """Parse a scope project - a .tcscopex, or the copy a saved .svdx carries.
+
+    An .svdx is the samples in binary followed by the whole project as plain
+    UTF-8 XML, so the project is the last <?xml ...> in the file."""
     raw = Path(path).read_bytes()
     if raw.startswith(BOM):
         raw = raw[len(BOM):]
-    return ET.fromstring(raw.decode("utf-8"))
+    # Anchored on the project element, not the first '<': sample bytes can
+    # start with 0x3C, and the project may embed an XML declaration of its own.
+    if not raw.lstrip(b" \t\r\n").startswith((b"<?xml", b"<ScopeProject")):
+        project = raw.rfind(b"<ScopeProject")
+        if project < 0:
+            fail(f"{path} holds no scope project: neither a .tcscopex nor an "
+                 ".svdx with its project saved at the end.")
+        start = raw.rfind(b"<?xml", 0, project)
+        raw = raw[start if start >= 0 else project:]
+    try:
+        return ET.fromstring(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ET.ParseError) as exc:
+        fail(f"{path} is not a readable scope project: {exc}")
 
 
 def write_tcscopex(root, path):
@@ -3176,26 +3296,69 @@ def cmd_checkscope(args):
         restart_text = root.findtext(".//RestartRecord")
     auto_restart = (restart_text or "").strip().lower() == "true"
 
-    # Reported exactly as written. A configured TriggerModule can still carry
-    # TriggerAction NONE, and then it starts nothing: the window is as fixed as
-    # with no trigger at all.
-    trigger_action = root.findtext(".//TriggerAction")
-    if trigger_action is not None:
-        trigger_action = trigger_action.strip()
-    action_none = (trigger_action or "").upper() == "NONE"
+    # Reported exactly as written. Only an action that starts, stops or
+    # sub-saves the recording decides what gets recorded. The rest - Set Mark
+    # (written NONE), the display, export and reporting actions - fire and are
+    # logged, but the window stays as fixed as with no trigger at all.
+    # A disabled group fires nothing, so it neither records nor only marks.
+    trigger_groups = []
+    if trigger_sub is not None:
+        for node in trigger_sub.findall("TriggerGroup"):
+            action = node.findtext("TriggerAction")
+            if action is None:
+                continue
+            enabled = (node.findtext("Enabled") or "true").strip().lower() != "false"
+            group = {"action": action.strip(), "enabled": enabled}
+            for tag, key in (("PretriggerTime", "pretrigger_seconds"),
+                             ("PosttriggerTime", "posttrigger_seconds")):
+                ticks = (node.findtext(tag) or "").strip()
+                group[key] = int(ticks) / TICKS_PER_MS / 1000.0 if ticks.isdigit() else None
+            trigger_groups.append(group)
+    trigger_action = trigger_groups[0]["action"] if trigger_groups else None
+    active = [g for g in trigger_groups if g["enabled"]]
+    actions = [g["action"].upper() for g in active]
+    records_on_trigger = any(a in TRIGGER_ACTIONS_RECORDING for a in actions)
+    all_disabled = bool(trigger_groups) and not active
+    unknown = sorted({g["action"] for g in active
+                      if g["action"].upper() not in TRIGGER_ACTION_UI})
+    if unknown:
+        warnings.append(
+            f"TriggerAction {', '.join(unknown)} is not one this skill knows, so "
+            "whether the trigger decides what is recorded is not judged here."
+        )
+    only_marks = bool(actions) and not records_on_trigger and not unknown
 
-    fixed_window = not auto_restart and (action_none or (record_seconds and not has_trigger))
+    no_trigger = not has_trigger or all_disabled
+    fixed_window = not auto_restart and (only_marks or (record_seconds and no_trigger))
     if fixed_window:
         window = f"a fixed {record_seconds:g} s window" if record_seconds else "a fixed window"
-        why = ("TriggerAction is NONE, so the trigger starts nothing"
-               if action_none else "no trigger configured")
+        if only_marks:
+            named = ", ".join(sorted({f"{g['action']} ({TRIGGER_ACTION_UI[g['action'].upper()]})"
+                                      for g in active}))
+            why = (f"TriggerAction is {named}, which marks or reports the event "
+                   "but does not start or stop the recording")
+        else:
+            why = ("every trigger group is disabled" if all_disabled
+                   else "no trigger configured")
         warnings.append(
             f"records {window} ({why}, and the recording does not restart). "
             "For a fault you can reproduce on demand that is fine. For an intermittent "
             "one the chance of catching it is roughly the window divided by the mean "
             "time between occurrences - a 60 s window on an hourly fault is under 2%. "
-            "A trigger with a pre-trigger keeps the seconds before the event instead."
+            "A Stop Record trigger with a pre-trigger keeps the seconds before the "
+            "event instead."
         )
+    # Only Stop Record uses a pre-trigger. Scope keeps one it no longer shows
+    # after the action is switched away, so elsewhere it is reported, not
+    # warned about. Scope itself accepts one longer than the window.
+    for g in active:
+        pre = g["pretrigger_seconds"]
+        if (g["action"].upper() == "STOP_RECORD" and pre and record_seconds
+                and pre > record_seconds):
+            warnings.append(
+                f"The pre-trigger ({pre:g} s, TriggerAction {g['action']}) is longer "
+                f"than the {record_seconds:g} s record window, so it cannot all be kept."
+            )
 
     # The one check that needs the program, not just the file: does each symbol
     # exist, and at the width written? Done by hand, it would have caught every
@@ -3223,6 +3386,7 @@ def cmd_checkscope(args):
           "record_seconds": record_seconds,
           "trigger_configured": has_trigger,
           "trigger_action": trigger_action,
+          "trigger_groups": trigger_groups,
           "fixed_window": bool(fixed_window),
           "auto_restart_record": auto_restart,
           "problems": problems, "warnings": warnings})
@@ -3231,8 +3395,19 @@ def cmd_checkscope(args):
 
 # --------------------------------------------------------------------------
 
+class JsonArgumentParser(argparse.ArgumentParser):
+    """Argument errors in JSON as well, like every other failure: argparse's
+    own plain text on stderr is the one answer a caller could not parse.
+    Subcommand parsers inherit this class."""
+
+    def error(self, message):
+        emit({"ok": False, "error": f"{self.prog}: {message}",
+              "fix": self.format_usage().strip()})
+        raise SystemExit(2)
+
+
 def build_parser():
-    p = argparse.ArgumentParser(
+    p = JsonArgumentParser(
         prog="tcscope.py",
         description="Create TwinCAT 3 Scope configurations and triage recorded data.",
     )
@@ -3242,7 +3417,8 @@ def build_parser():
 
     q = sub.add_parser("ingest", help="convert .svdx/CSV to Parquet")
     q.add_argument("input")
-    q.add_argument("-o", "--output", required=True)
+    q.add_argument("-o", "--output",
+                   help="Parquet to write (default: the cache dir; the path is reported)")
     q.set_defaults(func=cmd_ingest)
 
     q = sub.add_parser("manifest", help="channels, rate, duration, gaps")

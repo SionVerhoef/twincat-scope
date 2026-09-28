@@ -192,6 +192,22 @@ def real_fixture_checks():
           and single["groups"][0].get("groups") == "0-59"
           and "groups_note" in single,
           str(single.get("groups", [{}])[0])[:80])
+    with tempfile.TemporaryDirectory() as tmp:
+        ing = run("ingest", REAL / "real_tab_pergroup_single.csv", "-o", Path(tmp) / "s.parquet")
+        check("ingest names its count for what it counts: 60 time columns, not 60 'groups'",
+              ing.get("time_columns") == 60 and "groups" not in ing,
+              str({k: ing.get(k) for k in ("time_columns", "groups", "error")}))
+
+    # Argument errors come back as JSON like every other failure, not as
+    # argparse's plain text on stderr.
+    for argv, what in ((("ingest",), "a missing argument"),
+                       (("nosuchverb",), "an unknown verb"),
+                       (("stats", "x.csv", "--no-such-flag"), "an unknown flag")):
+        bad = run(*argv, expect_ok=False)
+        check(f"{what} is reported as JSON",
+              bad.get("ok") is False and "non-JSON" not in (bad.get("error") or "")
+              and "usage" in (bad.get("fix") or ""),
+              str(bad.get("error"))[:120])
 
     # --- the broken export --------------------------------------------------
     broken = run("manifest", REAL / "real_tab_pergroup_skewed.csv")
@@ -248,8 +264,10 @@ def real_fixture_checks():
           f"{len(cross.get('refused_pairs', []))} refused")
     allowed = run("correlate", REAL / "real_tab_2group.csv", "--channels", "ActTorque",
                   "--allow-cross-group")
-    check("correlate says so when it resamples across groups",
-          any(p.get("resampled") for p in allowed.get("pairs", [])))
+    check("correlate says so when it resamples across groups, naming both groups",
+          any(re.search(r"from group \d+'s time axis onto group \d+'s", p.get("resampled") or "")
+              for p in allowed.get("pairs", [])),
+          str([p.get("resampled") for p in allowed.get("pairs", [])][:1]))
     check("correlate documents its lag sign",
           "a' leads 'b" in (allowed.get("lag_sign") or ""))
 
@@ -746,7 +764,7 @@ def write_folded_export(path, rows=200):
         for spec in groups:
             row += [decimal_comma(f"{i * 8.0:.6f}"), decimal_comma(f"{spec[4][i]:.6f}")]
         lines.append("\t".join(row))
-    path.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
+    path.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8", newline="")
     return parent
 
 
@@ -778,7 +796,7 @@ def write_hand_export(path, rows=200):
              ",".join(["Name"] + [name for name, _ in columns])]
     for i in range(rows):
         lines.append(",".join([f"{i * 8.0:.1f}"] + [f"{v[i]:g}" for _, v in columns]))
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
 
 
 def write_still_export(path, rows=6000, seed=7):
@@ -803,7 +821,7 @@ def write_still_export(path, rows=6000, seed=7):
         enum = 0.0 if i < 300 else (10.0 if i < 4560 else 200.0)
         velo = max(-60.0, min(60.0, 100.0 * math.sin(i / 150.0)))
         lines.append(f"{i * 8.0:.1f},{still:.7f},{enum:g},{velo:.6f},500")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
 
 
 def long_correlate_checks(rows=300_000, delay=25):
@@ -827,7 +845,7 @@ def long_correlate_checks(rows=300_000, delay=25):
         for i in range(rows):
             lines.append(f"{float(i):.1f},{a[i + delay]:.6f},"
                          f"{a[i] + rng.gauss(0, 0.1):.6f}")
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
         start = time.monotonic()
         co = run("correlate", path, "--channels", "A,B")
         took = time.monotonic() - start
@@ -1577,7 +1595,7 @@ def two_rate_checks():
         cut[data + 100] = "\t".join(cut[data + 100].split("\t")[:3])
         cut[data + 200] = cut[data + 200].split("\t")[0]
         damaged = Path(tmp) / "damaged.csv"
-        damaged.write_text("\r\n".join(cut) + "\r\n", encoding="utf-8")
+        damaged.write_text("\r\n".join(cut) + "\r\n", encoding="utf-8", newline="")
         man = run("manifest", damaged)
         check("a row cut off mid-group is counted as malformed, not padded",
               man.get("malformed_rows") == 2
@@ -1588,7 +1606,7 @@ def two_rate_checks():
         # on: the width they suggest is the short one, not the file's.
         small = Path(tmp) / "small.csv"
         small.write_text("\r\n".join(lines[:data + 10] + lines[-40:]) + "\r\n",
-                         encoding="utf-8")
+                         encoding="utf-8", newline="")
         man = run("manifest", small)
         check("a small file ending in short rows keeps its full width and decimal comma",
               man.get("ncols") == 4 and man.get("decimal") == ","
@@ -1651,17 +1669,23 @@ def export_option_checks():
                 return text.splitlines()
         raise AssertionError("no padding puts the sample boundary mid-row")
 
+    # Include trigger info: a table of trigger releases after the preamble.
+    releases = ["TriggerGroup\tCount\tReleaseTime\tComment",
+                "Trigger Group\t1\t18648\t", "Trigger Group\t2\t54276\t",
+                "Trigger Group\t3\t58204\t", ""]
+
     variants = {
         # Bigger than sniff_csv's 200 kB sample, cut mid-row: see cut_mid_row.
         "tab_integers": cut_mid_row("\t"),
         "semicolon": cut_mid_row(";"),
         "full_timestamp": head + [filetime(r) for r in rows],
         "eof_tag": lines + ["EOF"],
+        "trigger_info": head[:6] + releases + head[6:] + rows,
     }
     with tempfile.TemporaryDirectory() as tmp:
         for option, text in variants.items():
             path = Path(tmp) / f"{option}.csv"
-            path.write_text("\r\n".join(text) + "\r\n", encoding="utf-8")
+            path.write_text("\r\n".join(text) + "\r\n", encoding="utf-8", newline="")
             man = run("manifest", path)
             check(f"export option '{option}' reads as the same two groups over 60 s",
                   same_recording(man),
@@ -1681,11 +1705,144 @@ def export_option_checks():
 
         both = Path(tmp) / "comma_comma.csv"
         both.write_text("\r\n".join(ln.replace("\t", ",") for ln in lines) + "\r\n",
-                        encoding="utf-8")
+                        encoding="utf-8", newline="")
         man = run("manifest", both, expect_ok=False)
         check("',' as both separator and decimal mark is refused, not half-read",
               man.get("ok") is False and "decimal mark" in (man.get("error") or ""),
               str(man.get("error") or man.get("rows")))
+
+        # Header preset None: the tool writes the data rows and EOF, nothing
+        # else - no preamble, no Name row. Read as one group with column 0 for
+        # time, the 4 ms group's clock became a channel and ok came back true.
+        bare = Path(tmp) / "no_header.csv"
+        bare.write_text("\r\n".join(rows + ["EOF"]) + "\r\n", encoding="utf-8", newline="")
+        man = run("manifest", bare, expect_ok=False)
+        check("an export with no header rows is refused, not read as one group",
+              man.get("ok") is False and "header" in (man.get("error") or ""),
+              str(man.get("error") or [(g.get("n_samples"), g.get("t_last"))
+                                       for g in expand_groups(man)]))
+
+        # Scope View and the tool also offer Blank and Colon separators.
+        colon = Path(tmp) / "colon.csv"
+        colon.write_text("\r\n".join(ln.replace("\t", ":") for ln in lines) + "\r\n",
+                         encoding="utf-8", newline="")
+        man = run("manifest", colon, expect_ok=False)
+        check("a Colon-separated export is refused as such, with the separators that are read",
+              man.get("ok") is False and "':'" in (man.get("error") or "")
+              and "TAB" in (man.get("fix") or ""),
+              str(man.get("error")) + " | " + str(man.get("fix")))
+
+        # Blank quotes any header field holding a space; the data is bare.
+        blank = Path(tmp) / "blank.csv"
+        blank.write_text("\r\n".join(ln.replace("\t", " ") for ln in lines) + "\r\n",
+                         encoding="utf-8", newline="")
+        man = run("manifest", blank, expect_ok=False)
+        check("a Blank-separated export is refused as such",
+              man.get("ok") is False and "blank" in (man.get("error") or ""),
+              str(man.get("error")) + " | " + str(man.get("fix")))
+
+        # Header None with Include trigger info: the release table is the only
+        # thing above the data. It is not a header - it says nothing about
+        # where a group starts - but it did make the file look like it had one.
+        tabled = Path(tmp) / "no_header_trigger_info.csv"
+        tabled.write_text("\r\n".join(releases + rows + ["EOF"]) + "\r\n",
+                          encoding="utf-8", newline="")
+        man = run("manifest", tabled, expect_ok=False)
+        check("an export with only a trigger-info table above the data is refused as headerless",
+              man.get("ok") is False and "header" in (man.get("error") or ""),
+              str(man.get("error") or [(g.get("n_samples"), g.get("t_last"))
+                                       for g in expand_groups(man)]))
+
+        # Timelines None: every time column left out, the Name row kept. The
+        # first value column was read as the clock, and ran backwards.
+        def untimed(row):
+            fields = row.split("\t")
+            return "\t".join(f for i, f in enumerate(fields) if i not in (0, 2))
+        timeless = Path(tmp) / "timelines_none.csv"
+        timeless.write_text("\r\n".join(["Name\tActPos\tbFlag"]
+                                        + [untimed(r) for r in rows]) + "\r\n",
+                            encoding="utf-8", newline="")
+        man = run("manifest", timeless, expect_ok=False)
+        check("an export with no time column (Timelines None) is refused, not read off a value",
+              man.get("ok") is False and "Timelines" in (man.get("fix") or ""),
+              str(man.get("error") or [(g.get("t_first"), g.get("t_last"))
+                                       for g in expand_groups(man)]))
+
+        # A space beside the delimiter is padding, not a Blank separator.
+        spaced = Path(tmp) / "comma_space.csv"
+        spaced.write_text("Name, A, B\n" + "".join(
+            f"{i:.1f}, {i % 7 * 0.125:.3f}, {i % 3 * 0.25:.2f}\n" for i in range(50)),
+            encoding="utf-8", newline="")
+        man = run("manifest", spaced)
+        check("a ',' file with a space after each comma still reads",
+              man.get("ok") is True and man.get("rows") == 50, str(man.get("error")))
+        padded = Path(tmp) / "tab_padded.csv"
+        padded.write_text("\r\n".join(head + ["\t".join(f + " " for f in r.split("\t"))
+                                              for r in rows]) + "\r\n",
+                          encoding="utf-8", newline="")
+        man = run("manifest", padded)
+        check("a TAB file whose cells carry a trailing space still reads",
+              same_recording(man), str(man.get("error")))
+
+        # One reset in a real time column is counted, not grounds for refusal.
+        reset = list(rows)
+        fields = reset[5000].split("\t")
+        fields[0] = "0,000000"
+        reset[5000] = "\t".join(fields)
+        once = Path(tmp) / "one_reset.csv"
+        once.write_text("\r\n".join(head + reset) + "\r\n", encoding="utf-8", newline="")
+        man = run("manifest", once)
+        check("a time column that steps back once is read, and the step counted",
+              man.get("ok") is True
+              and [g.get("time_backsteps") for g in expand_groups(man)][0] == 1,
+              str(man.get("error") or [g.get("time_backsteps") for g in expand_groups(man)]))
+
+        # A header subset without Name or SymbolName says no more about where a
+        # group starts than no header at all.
+        subset = Path(tmp) / "no_name_rows.csv"
+        subset.write_text("\r\n".join([ln for ln in head if ln.split("\t")[0]
+                                       not in ("Name", "SymbolName")] + rows) + "\r\n",
+                          encoding="utf-8", newline="")
+        man = run("manifest", subset, expect_ok=False)
+        check("a header with no Name or SymbolName row is refused like no header",
+              man.get("ok") is False and "header" in (man.get("error") or ""),
+              str(man.get("error") or [(g.get("n_samples"), g.get("t_last"))
+                                       for g in expand_groups(man)]))
+
+
+def svdx_checkscope_checks():
+    """A saved recording (.svdx) is the samples in binary, then the whole scope
+    project as plain UTF-8 XML at the tail - no BOM, as the export tool leaves
+    it. checkscope on one used to die in a UnicodeDecodeError traceback."""
+    tpl = ROOT / "templates" / "axis-diagnosis.tcscopex"
+    project = tpl.read_bytes()
+    if project.startswith(b"\xef\xbb\xbf"):
+        project = project[3:]
+    samples = bytes([0x32, 0x0D, 0x08, 0, 0, 0, 0, 0, 0xF1, 0xBC]) + bytes(range(256)) * 40
+    with tempfile.TemporaryDirectory() as tmp:
+        svdx = Path(tmp) / "recording.svdx"
+        svdx.write_bytes(samples + b"\0" * 20 + project)
+        from_svdx = run("checkscope", svdx)
+        from_tpl = run("checkscope", tpl)
+        keys = ("ok", "trigger_configured", "trigger_action", "fixed_window",
+                "record_seconds", "load_band")
+        check("checkscope reads the project a .svdx carries at its tail",
+              from_svdx.get("ok") is True
+              and all(from_svdx.get(k) == from_tpl.get(k) for k in keys),
+              str({k: from_svdx.get(k) for k in keys + ("error",)}))
+
+        # Sample bytes may begin with 0x3C ('<'); that is not a project.
+        angled = Path(tmp) / "angled.svdx"
+        angled.write_bytes(b"<" + samples + b"\0" * 20 + project)
+        check("a .svdx whose samples start with '<' is still read from its tail",
+              run("checkscope", angled).get("ok") is True)
+
+        junk = Path(tmp) / "junk.svdx"
+        junk.write_bytes(samples)
+        bad = run("checkscope", junk, expect_ok=False)
+        check("a file with no scope project in it is refused as JSON, not a traceback",
+              bad.get("ok") is False and "non-JSON" not in (bad.get("error") or ""),
+              str(bad.get("error"))[:160])
 
 
 def ingest_cache_checks():
@@ -1723,6 +1880,28 @@ def ingest_cache_checks():
               and sorted(p.name for p in project.iterdir()) == ["rec.svdx"],
               str(out.get("intermediate_csv") or out.get("error")))
 
+        # Without -o the Parquet goes to the cache dir too, and says where.
+        # Two recordings with Scope's default name must not share one file.
+        other = tmp / "other"
+        other.mkdir()
+        (other / "rec.svdx").write_bytes(b"not read by the stand-in")
+        outs = []
+        for rec in (svdx, other / "rec.svdx"):
+            proc = subprocess.run([*BASE_CMD, "ingest", str(rec)],
+                                  capture_output=True, text=True, env=env)
+            try:
+                outs.append(json.loads(proc.stdout))
+            except ValueError:
+                outs.append({"error": proc.stdout[:200] + proc.stderr[:200]})
+        paths = [Path(o.get("output") or "") for o in outs]
+        check("ingest without -o writes to the cache dir, one file per recording",
+              all(o.get("ok") is True for o in outs)
+              and all(p.parent == tmp / "cache" / "tcscope" and p.suffix == ".parquet"
+                      and p.is_file() for p in paths)
+              and paths[0] != paths[1]
+              and sorted(p.name for p in project.iterdir()) == ["rec.svdx"],
+              str([o.get("output") or o.get("error") for o in outs]))
+
 
 def main():
     subprocess.run([sys.executable, str(ROOT / "tests" / "make_fixture.py")],
@@ -1730,6 +1909,13 @@ def main():
     subprocess.run([sys.executable, str(ROOT / "tests" / "make_real_fixtures.py")],
                    check=True, capture_output=True)
     truth = json.loads((FIXTURES / "ground_truth.json").read_text())["planted"]
+
+    # Path.write_text translates "\n" on Windows, so a "\r\n"-joined fixture
+    # written without newline="" comes out as "\r\r\n" and every line doubles.
+    doubled = [p.name for p in sorted(FIXTURES.rglob("*.csv"))
+               if b"\r\r\n" in p.read_bytes()]
+    check("generated fixtures end their lines in one CRLF, as the export tool does",
+          not doubled, str(doubled))
 
     # --- both locales must parse identically -----------------------------
     us = run("manifest", FIXTURES / "planted.csv")
@@ -1874,7 +2060,8 @@ def main():
             # the window is still fixed. The value is reported exactly as written.
             text = a.read_bytes().decode("utf-8-sig")
             armed = re.sub(r"(<TriggerModule[^>]*>\s*)<SubMember />",
-                           r"\1<SubMember><TriggerAction>@ACTION@</TriggerAction></SubMember>",
+                           r"\1<SubMember><TriggerGroup><TriggerAction>@ACTION@</TriggerAction>"
+                           r"</TriggerGroup></SubMember>",
                            text, count=1)
             none = Path(tmp) / "none.tcscopex"
             none.write_bytes(b"\xef\xbb\xbf" + armed.replace("@ACTION@", "NONE").encode("utf-8"))
@@ -1897,6 +2084,67 @@ def main():
                 "<AutoRestartRecord>false", "<AutoRestartRecord>true").encode("utf-8"))
             check("TriggerAction NONE on a re-arming recording is not a fixed window",
                   run("checkscope", rearm).get("fixed_window") is False)
+            check("TriggerAction NONE is named as Scope View's Set Mark",
+                  any("Set Mark" in w for w in chk_none.get("warnings", [])),
+                  str(chk_none.get("warnings")))
+
+            # Only an action that starts, stops or sub-saves the recording
+            # changes what is kept. A display, export or reporting trigger fires
+            # and is logged, and the window stays fixed.
+            def action(value, extra=""):
+                path = Path(tmp) / f"action_{value}.tcscopex"
+                path.write_bytes(b"\xef\xbb\xbf" + armed.replace(
+                    "@ACTION@</TriggerAction>", f"{value}</TriggerAction>{extra}").encode("utf-8"))
+                return run("checkscope", path)
+            for value in ("STOP_DISPLAY", "EXPORT", "REPORT_TRIGGER"):
+                got = action(value)
+                check(f"TriggerAction {value} still records a fixed window",
+                      got.get("fixed_window") is True
+                      and any(value in w and "fixed" in w for w in got.get("warnings", [])),
+                      str(got.get("warnings")))
+            for value in ("START_RECORD", "STOP_RECORD"):
+                got = action(value)
+                check(f"TriggerAction {value} is not a fixed window",
+                      got.get("fixed_window") is False
+                      and not any("fixed" in w for w in got.get("warnings", [])),
+                      str(got.get("warnings")))
+
+            # Pre-/post-trigger are 100 ns ticks. Scope keeps a pre-trigger it
+            # hides (switched from Stop Record to Set Mark), and accepts one
+            # longer than the window without complaint.
+            got = action("STOP_RECORD", "<PretriggerTime>3000000000</PretriggerTime>"
+                                        "<PosttriggerTime>50000000</PosttriggerTime>")
+            group = (got.get("trigger_groups") or [{}])[0]
+            check("pre- and post-trigger are reported in seconds",
+                  group.get("pretrigger_seconds") == 300.0
+                  and group.get("posttrigger_seconds") == 5.0, str(group))
+            check("a pre-trigger longer than the record window is warned about",
+                  any("pre-trigger" in w and "longer" in w for w in got.get("warnings", [])),
+                  str(got.get("warnings")))
+            got = action("NONE", "<PretriggerTime>3000000000</PretriggerTime>")
+            check("a hidden pre-trigger is reported, but not warned about where it is unused",
+                  (got.get("trigger_groups") or [{}])[0].get("pretrigger_seconds") == 300.0
+                  and not any("pre-trigger (" in w for w in got.get("warnings", [])),
+                  str(got.get("trigger_groups")) + str(got.get("warnings")))
+
+            # A disabled group fires nothing: a lone disabled Start Record is a
+            # fixed window. Several groups: one that records is enough.
+            got = action("START_RECORD", "<Enabled>false</Enabled>")
+            check("a disabled Start Record group leaves a fixed window",
+                  got.get("fixed_window") is True
+                  and (got.get("trigger_groups") or [{}])[0].get("enabled") is False
+                  and any("disabled" in w for w in got.get("warnings", [])),
+                  str(got.get("warnings")))
+            got = action("NONE", "</TriggerGroup><TriggerGroup>"
+                                 "<TriggerAction>STOP_RECORD</TriggerAction>")
+            check("Set Mark plus Stop Record: two groups reported, not a fixed window",
+                  [g.get("action") for g in got.get("trigger_groups") or []]
+                  == ["NONE", "STOP_RECORD"] and got.get("fixed_window") is False,
+                  str(got.get("trigger_groups")))
+            got = action("SomeAction")
+            check("an unknown TriggerAction is named in a warning, not judged",
+                  any("SomeAction" in w and "not one this skill knows" in w
+                      for w in got.get("warnings", [])), str(got.get("warnings")))
 
     stream_split_checks()
     real_fixture_checks()
@@ -1911,6 +2159,7 @@ def main():
     two_rate_checks()
     export_option_checks()
     ingest_cache_checks()
+    svdx_checkscope_checks()
     shareability_checks()
     retarget_checks()
     tmc_checks()
