@@ -20,6 +20,11 @@ comment, so that field is not free for PLC channels. A hand-written comment repl
 survives a save, and the CSV export's `SymbolComment` row then carries the hand-written text
 instead of the declaration comment.
 
+**Saving in XAE: name the menu item.** After edits in the scope's Properties grid, Ctrl+S did
+not reach the scope editor — seven changed settings were not written. *File → Save
+<name>.tcscopex*, with the scope's node selected in Solution Explorer, saved them
+(`evals/field-review-79660f4.md`). Tell a user that, not "save the project".
+
 ## Byte conventions
 
 Match them or the file may not load, and will certainly produce a noisy diff:
