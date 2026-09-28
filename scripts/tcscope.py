@@ -44,6 +44,7 @@ Both say so rather than implying otherwise.
 
 import argparse
 import copy
+import hashlib
 import json
 import math
 import os
@@ -1092,7 +1093,14 @@ def cmd_ingest(args):
 
     intermediate = str(src) if src != Path(args.input) else None
     rec = load_csv(src)
-    out = Path(args.output)
+    if args.output:
+        out = Path(args.output)
+    else:
+        # Scope's default names (Record_1.svdx) repeat from project to project,
+        # so the stem alone would let one recording overwrite another's cache.
+        tag = hashlib.sha1(str(Path(args.input).resolve()).encode()).hexdigest()[:8]
+        out = cache_dir() / f"{Path(args.input).stem}-{tag}.parquet"
+        out.parent.mkdir(parents=True, exist_ok=True)
     pa = need("pyarrow")
     from pyarrow import parquet as pq
     columns, layout = parquet_payload(rec)
@@ -1100,7 +1108,7 @@ def cmd_ingest(args):
         {PARQUET_META_KEY: json.dumps(layout).encode()})
     pq.write_table(table, out)
     emit({"ok": True, "input": str(args.input), "output": str(out),
-          "rows": rec.info.get("rows"), "groups": len(rec.groups),
+          "rows": rec.info.get("rows"), "time_columns": len(rec.groups),
           "channels": len(rec.channels), "columns": list(columns),
           "delimiter": rec.info.get("delimiter"), "decimal": rec.info.get("decimal"),
           "intermediate_csv": intermediate,
@@ -1731,8 +1739,8 @@ def cmd_correlate(args):
                 row["groups"] = [ca["group"], cb["group"]]
             if resampled:
                 row["resampled"] = (
-                    f"b was linearly resampled from its own {cb['group']} axis onto "
-                    f"a's, because the two groups do not share a clock")
+                    f"b was linearly resampled from group {cb['group']}'s time axis onto "
+                    f"group {ca['group']}'s, because the two groups do not share a clock")
             pairs.append(row)
 
     pairs.sort(key=lambda p: -abs(p["correlation"]))
@@ -3352,8 +3360,19 @@ def cmd_checkscope(args):
 
 # --------------------------------------------------------------------------
 
+class JsonArgumentParser(argparse.ArgumentParser):
+    """Argument errors in JSON as well, like every other failure: argparse's
+    own plain text on stderr is the one answer a caller could not parse.
+    Subcommand parsers inherit this class."""
+
+    def error(self, message):
+        emit({"ok": False, "error": f"{self.prog}: {message}",
+              "fix": self.format_usage().strip()})
+        raise SystemExit(2)
+
+
 def build_parser():
-    p = argparse.ArgumentParser(
+    p = JsonArgumentParser(
         prog="tcscope.py",
         description="Create TwinCAT 3 Scope configurations and triage recorded data.",
     )
@@ -3363,7 +3382,8 @@ def build_parser():
 
     q = sub.add_parser("ingest", help="convert .svdx/CSV to Parquet")
     q.add_argument("input")
-    q.add_argument("-o", "--output", required=True)
+    q.add_argument("-o", "--output",
+                   help="Parquet to write (default: the cache dir; the path is reported)")
     q.set_defaults(func=cmd_ingest)
 
     q = sub.add_parser("manifest", help="channels, rate, duration, gaps")

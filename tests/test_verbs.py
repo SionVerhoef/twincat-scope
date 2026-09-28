@@ -192,6 +192,22 @@ def real_fixture_checks():
           and single["groups"][0].get("groups") == "0-59"
           and "groups_note" in single,
           str(single.get("groups", [{}])[0])[:80])
+    with tempfile.TemporaryDirectory() as tmp:
+        ing = run("ingest", REAL / "real_tab_pergroup_single.csv", "-o", Path(tmp) / "s.parquet")
+        check("ingest names its count for what it counts: 60 time columns, not 60 'groups'",
+              ing.get("time_columns") == 60 and "groups" not in ing,
+              str({k: ing.get(k) for k in ("time_columns", "groups", "error")}))
+
+    # Argument errors come back as JSON like every other failure, not as
+    # argparse's plain text on stderr.
+    for argv, what in ((("ingest",), "a missing argument"),
+                       (("nosuchverb",), "an unknown verb"),
+                       (("stats", "x.csv", "--no-such-flag"), "an unknown flag")):
+        bad = run(*argv, expect_ok=False)
+        check(f"{what} is reported as JSON",
+              bad.get("ok") is False and "non-JSON" not in (bad.get("error") or "")
+              and "usage" in (bad.get("fix") or ""),
+              str(bad.get("error"))[:120])
 
     # --- the broken export --------------------------------------------------
     broken = run("manifest", REAL / "real_tab_pergroup_skewed.csv")
@@ -248,8 +264,10 @@ def real_fixture_checks():
           f"{len(cross.get('refused_pairs', []))} refused")
     allowed = run("correlate", REAL / "real_tab_2group.csv", "--channels", "ActTorque",
                   "--allow-cross-group")
-    check("correlate says so when it resamples across groups",
-          any(p.get("resampled") for p in allowed.get("pairs", [])))
+    check("correlate says so when it resamples across groups, naming both groups",
+          any(re.search(r"from group \d+'s time axis onto group \d+'s", p.get("resampled") or "")
+              for p in allowed.get("pairs", [])),
+          str([p.get("resampled") for p in allowed.get("pairs", [])][:1]))
     check("correlate documents its lag sign",
           "a' leads 'b" in (allowed.get("lag_sign") or ""))
 
@@ -1814,6 +1832,28 @@ def ingest_cache_checks():
               and out.get("intermediate_csv") == str(tmp / "cache" / "tcscope" / "rec.csv")
               and sorted(p.name for p in project.iterdir()) == ["rec.svdx"],
               str(out.get("intermediate_csv") or out.get("error")))
+
+        # Without -o the Parquet goes to the cache dir too, and says where.
+        # Two recordings with Scope's default name must not share one file.
+        other = tmp / "other"
+        other.mkdir()
+        (other / "rec.svdx").write_bytes(b"not read by the stand-in")
+        outs = []
+        for rec in (svdx, other / "rec.svdx"):
+            proc = subprocess.run([*BASE_CMD, "ingest", str(rec)],
+                                  capture_output=True, text=True, env=env)
+            try:
+                outs.append(json.loads(proc.stdout))
+            except ValueError:
+                outs.append({"error": proc.stdout[:200] + proc.stderr[:200]})
+        paths = [Path(o.get("output") or "") for o in outs]
+        check("ingest without -o writes to the cache dir, one file per recording",
+              all(o.get("ok") is True for o in outs)
+              and all(p.parent == tmp / "cache" / "tcscope" and p.suffix == ".parquet"
+                      and p.is_file() for p in paths)
+              and paths[0] != paths[1]
+              and sorted(p.name for p in project.iterdir()) == ["rec.svdx"],
+              str([o.get("output") or o.get("error") for o in outs]))
 
 
 def main():

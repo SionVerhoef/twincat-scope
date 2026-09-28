@@ -66,7 +66,8 @@ Windows; on Linux or macOS (and in this repo's CI) the same commands are `python
 4. **Convert the `.svdx` with `ingest`, once** — everything downstream runs in seconds
    against Parquet instead of minutes against CSV. The export tool's intermediate CSV goes to
    the cache dir (`%LOCALAPPDATA%\tcscope\cache`, `$XDG_CACHE_HOME/tcscope` elsewhere),
-   never beside the `.svdx`; `intermediate_csv` names it. A CSV exported from Scope View by
+   never beside the `.svdx`; `intermediate_csv` names it. Without `-o` the Parquet goes there
+   too, and `output` names it — pass that path to every later verb. A CSV exported from Scope View by
    hand depends on the user's export settings. Ask for them, or advise the ones in
    `references/export-tool.md` (*Exporting from Scope View by hand*). Exact copies
    of a channel drawn in several tabs are collapsed and reported (`copies_collapsed`), and a
