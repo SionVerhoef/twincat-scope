@@ -194,7 +194,7 @@ def write_comma(path, groups, columns, truth, rows, blanks=False, names=None):
                     blank_cells += 1
         lines.append(delim.join(row))
 
-    path.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
+    path.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8", newline="")
     return {
         "delimiter": ",", "decimal": ".", "columns": ncols,
         "data_line": len(lines) - rows + 1, "rows": rows,
@@ -292,7 +292,7 @@ def write_tab(path, groups, columns, truth, rows, wrap_comments=False, symbols=N
         lines.append(delim.join(decimal_comma(cell) for cell in row))
 
     text = "\r\n".join(lines) + "\r\n"
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text, encoding="utf-8", newline="")
 
     physical = text.splitlines()
     data_line = len(physical) - rows + 1

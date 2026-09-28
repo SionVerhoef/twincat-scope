@@ -746,7 +746,7 @@ def write_folded_export(path, rows=200):
         for spec in groups:
             row += [decimal_comma(f"{i * 8.0:.6f}"), decimal_comma(f"{spec[4][i]:.6f}")]
         lines.append("\t".join(row))
-    path.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
+    path.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8", newline="")
     return parent
 
 
@@ -778,7 +778,7 @@ def write_hand_export(path, rows=200):
              ",".join(["Name"] + [name for name, _ in columns])]
     for i in range(rows):
         lines.append(",".join([f"{i * 8.0:.1f}"] + [f"{v[i]:g}" for _, v in columns]))
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
 
 
 def write_still_export(path, rows=6000, seed=7):
@@ -803,7 +803,7 @@ def write_still_export(path, rows=6000, seed=7):
         enum = 0.0 if i < 300 else (10.0 if i < 4560 else 200.0)
         velo = max(-60.0, min(60.0, 100.0 * math.sin(i / 150.0)))
         lines.append(f"{i * 8.0:.1f},{still:.7f},{enum:g},{velo:.6f},500")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
 
 
 def long_correlate_checks(rows=300_000, delay=25):
@@ -827,7 +827,7 @@ def long_correlate_checks(rows=300_000, delay=25):
         for i in range(rows):
             lines.append(f"{float(i):.1f},{a[i + delay]:.6f},"
                          f"{a[i] + rng.gauss(0, 0.1):.6f}")
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
         start = time.monotonic()
         co = run("correlate", path, "--channels", "A,B")
         took = time.monotonic() - start
@@ -1577,7 +1577,7 @@ def two_rate_checks():
         cut[data + 100] = "\t".join(cut[data + 100].split("\t")[:3])
         cut[data + 200] = cut[data + 200].split("\t")[0]
         damaged = Path(tmp) / "damaged.csv"
-        damaged.write_text("\r\n".join(cut) + "\r\n", encoding="utf-8")
+        damaged.write_text("\r\n".join(cut) + "\r\n", encoding="utf-8", newline="")
         man = run("manifest", damaged)
         check("a row cut off mid-group is counted as malformed, not padded",
               man.get("malformed_rows") == 2
@@ -1588,7 +1588,7 @@ def two_rate_checks():
         # on: the width they suggest is the short one, not the file's.
         small = Path(tmp) / "small.csv"
         small.write_text("\r\n".join(lines[:data + 10] + lines[-40:]) + "\r\n",
-                         encoding="utf-8")
+                         encoding="utf-8", newline="")
         man = run("manifest", small)
         check("a small file ending in short rows keeps its full width and decimal comma",
               man.get("ncols") == 4 and man.get("decimal") == ","
@@ -1661,7 +1661,7 @@ def export_option_checks():
     with tempfile.TemporaryDirectory() as tmp:
         for option, text in variants.items():
             path = Path(tmp) / f"{option}.csv"
-            path.write_text("\r\n".join(text) + "\r\n", encoding="utf-8")
+            path.write_text("\r\n".join(text) + "\r\n", encoding="utf-8", newline="")
             man = run("manifest", path)
             check(f"export option '{option}' reads as the same two groups over 60 s",
                   same_recording(man),
@@ -1681,11 +1681,70 @@ def export_option_checks():
 
         both = Path(tmp) / "comma_comma.csv"
         both.write_text("\r\n".join(ln.replace("\t", ",") for ln in lines) + "\r\n",
-                        encoding="utf-8")
+                        encoding="utf-8", newline="")
         man = run("manifest", both, expect_ok=False)
         check("',' as both separator and decimal mark is refused, not half-read",
               man.get("ok") is False and "decimal mark" in (man.get("error") or ""),
               str(man.get("error") or man.get("rows")))
+
+        # Header preset None: the tool writes the data rows and EOF, nothing
+        # else - no preamble, no Name row. Read as one group with column 0 for
+        # time, the 4 ms group's clock became a channel and ok came back true.
+        bare = Path(tmp) / "no_header.csv"
+        bare.write_text("\r\n".join(rows + ["EOF"]) + "\r\n", encoding="utf-8", newline="")
+        man = run("manifest", bare, expect_ok=False)
+        check("an export with no header rows is refused, not read as one group",
+              man.get("ok") is False and "header" in (man.get("error") or ""),
+              str(man.get("error") or [(g.get("n_samples"), g.get("t_last"))
+                                       for g in expand_groups(man)]))
+
+        # Scope View and the tool also offer Blank and Colon separators.
+        colon = Path(tmp) / "colon.csv"
+        colon.write_text("\r\n".join(ln.replace("\t", ":") for ln in lines) + "\r\n",
+                         encoding="utf-8", newline="")
+        man = run("manifest", colon, expect_ok=False)
+        check("a Colon-separated export is refused as such, with the separators that are read",
+              man.get("ok") is False and "':'" in (man.get("error") or "")
+              and "TAB" in (man.get("fix") or ""),
+              str(man.get("error")) + " | " + str(man.get("fix")))
+
+        # Blank quotes any header field holding a space; the data is bare.
+        blank = Path(tmp) / "blank.csv"
+        blank.write_text("\r\n".join(ln.replace("\t", " ") for ln in lines) + "\r\n",
+                         encoding="utf-8", newline="")
+        man = run("manifest", blank, expect_ok=False)
+        check("a Blank-separated export is refused as such",
+              man.get("ok") is False and "blank" in (man.get("error") or ""),
+              str(man.get("error")) + " | " + str(man.get("fix")))
+
+
+def svdx_checkscope_checks():
+    """A saved recording (.svdx) is the samples in binary, then the whole scope
+    project as plain UTF-8 XML at the tail - no BOM, as the export tool leaves
+    it. checkscope on one used to die in a UnicodeDecodeError traceback."""
+    tpl = ROOT / "templates" / "axis-diagnosis.tcscopex"
+    project = tpl.read_bytes()
+    if project.startswith(b"\xef\xbb\xbf"):
+        project = project[3:]
+    samples = bytes([0x32, 0x0D, 0x08, 0, 0, 0, 0, 0, 0xF1, 0xBC]) + bytes(range(256)) * 40
+    with tempfile.TemporaryDirectory() as tmp:
+        svdx = Path(tmp) / "recording.svdx"
+        svdx.write_bytes(samples + b"\0" * 20 + project)
+        from_svdx = run("checkscope", svdx)
+        from_tpl = run("checkscope", tpl)
+        keys = ("ok", "trigger_configured", "trigger_action", "fixed_window",
+                "record_seconds", "load_band")
+        check("checkscope reads the project a .svdx carries at its tail",
+              from_svdx.get("ok") is True
+              and all(from_svdx.get(k) == from_tpl.get(k) for k in keys),
+              str({k: from_svdx.get(k) for k in keys + ("error",)}))
+
+        junk = Path(tmp) / "junk.svdx"
+        junk.write_bytes(samples)
+        bad = run("checkscope", junk, expect_ok=False)
+        check("a file with no scope project in it is refused as JSON, not a traceback",
+              bad.get("ok") is False and "non-JSON" not in (bad.get("error") or ""),
+              str(bad.get("error"))[:160])
 
 
 def ingest_cache_checks():
@@ -1730,6 +1789,13 @@ def main():
     subprocess.run([sys.executable, str(ROOT / "tests" / "make_real_fixtures.py")],
                    check=True, capture_output=True)
     truth = json.loads((FIXTURES / "ground_truth.json").read_text())["planted"]
+
+    # Path.write_text translates "\n" on Windows, so a "\r\n"-joined fixture
+    # written without newline="" comes out as "\r\r\n" and every line doubles.
+    doubled = [p.name for p in sorted(FIXTURES.rglob("*.csv"))
+               if b"\r\r\n" in p.read_bytes()]
+    check("generated fixtures end their lines in one CRLF, as the export tool does",
+          not doubled, str(doubled))
 
     # --- both locales must parse identically -----------------------------
     us = run("manifest", FIXTURES / "planted.csv")
@@ -1911,6 +1977,7 @@ def main():
     two_rate_checks()
     export_option_checks()
     ingest_cache_checks()
+    svdx_checkscope_checks()
     shareability_checks()
     retarget_checks()
     tmc_checks()

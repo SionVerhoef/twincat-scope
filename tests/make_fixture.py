@@ -83,7 +83,7 @@ def write(path, rows, delimiter, decimal):
         delimiter.join(fmt(v * MS_PER_S if i == 0 else v) for i, v in enumerate(row))
         for row in rows
     )
-    path.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
+    path.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8", newline="")
 
 
 def main():

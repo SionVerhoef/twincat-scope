@@ -172,11 +172,14 @@ Verified: unedited generated files **recorded** on a real machine — NC axis ch
 and PLC `BIT`/`INT16`/`REAL64` on 851, with the dark theme, and once end to end through a
 Scope View trigger, the real export tool and `ingest`/`manifest`. The CSV reader was
 measured against 19 genuine exports (both dialects, all three alignment states);
-`checkscope` has read 7 real Beckhoff-authored projects. One real 60 s recording, exported
-from Scope View with interpolation *None* and with repeat padding, reads to the same 30001 and
-15001 samples over 60 s either way.
+`checkscope` has read 7 real Beckhoff-authored projects, and reads the project a saved
+`.svdx` carries. One real 60 s recording, exported from Scope View with interpolation *None*
+and with repeat padding, reads to the same 30001 and 15001 samples over 60 s either way.
+With the default export range (4 ms shorter at the start) the tool and Scope View export the
+same 29999 and 15000 samples. The tool's `config=` option was run once per CSV setting on that
+recording: every layout read correctly or was refused by name.
 
 Not verified: the analysis verbs against the variety of those 19 exports (one real recording
-so far), the `;` delimiter in a real file, and most Scope View export options
-(`references/export-tool.md` marks each one). Rule 3 applies to this skill's own claims:
-report at exactly that precision.
+so far), a `;` file that a user exported, and Scope View's own handling of *Timelines* and
+*Shift* interpolation (`references/export-tool.md` marks each one). Rule 3 applies to this
+skill's own claims: report at exactly that precision.

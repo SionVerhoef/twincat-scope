@@ -225,6 +225,23 @@ def _probe_decimal(candidate_rows, delim):
     return "," if scores[","] > scores["."] else "."
 
 
+def _unsupported_separator(lines, nonblank):
+    """Name the separator if the data is split by one this reader does not take.
+
+    Scope's CSV export also offers Blank and Colon. Header fields hold both a
+    space and a ':' (a path, a clock time), so neither can be read here - but
+    left to the vote below, such a file is reported as having no numeric rows,
+    or as using ',' twice, and the user is sent to fix the wrong setting."""
+    tail = [lines[i] for i in nonblank[-20:]]
+    for sep, label in ((":", "':' (Colon)"), (" ", "a blank")):
+        split = [ln.split(sep) for ln in tail if sep in ln]
+        clean = [r for r in split if len(r) > 1 and all(
+            _looks_numeric(f, ".") or _looks_numeric(f, ",") for f in r if f.strip())]
+        if split and len(clean) >= 0.8 * len(tail):
+            return label
+    return None
+
+
 def _find_data_row(lines, nonblank, delim, decimal, ncols):
     """The first row that is entirely data.
 
@@ -367,6 +384,15 @@ def sniff_csv(path, sample_bytes=200_000):
     if not nonblank:
         fail(f"{path} is empty")
 
+    unsupported = _unsupported_separator(lines, nonblank)
+    if unsupported:
+        fail(
+            f"{path} separates its fields with {unsupported}, which this reader "
+            "does not take: the header fields contain the same character",
+            "Re-export with TAB or ';' as the CSV separator (',' with '.' as the "
+            "decimal mark also works) - see references/export-tool.md",
+        )
+
     best = _probe_delimiter(lines, nonblank)
     if best is None:
         fail(
@@ -405,6 +431,16 @@ def sniff_csv(path, sample_bytes=200_000):
 
     meta =_metadata_rows(lines, nonblank, delim, ncols, data_start)
     groups = _parse_groups(meta, ncols, decimal)
+    # Header preset None writes the data and nothing above it. With more than
+    # one value column nothing says where one group ends and the next starts,
+    # so the flat reading below would turn a slower group's clock into a channel.
+    if groups is None and not header and ncols > 2:
+        fail(
+            f"{path} has no header rows, so its columns cannot be told apart: "
+            "a Scope export gives every acquisition group its own time column",
+            "Re-export with a header - the fullest Header configuration preset, "
+            "or leave TC3ScopeExportTool.exe on its default",
+        )
     if groups is None:
         groups = _flat_group(lines, data_start, delim, decimal, ncols)
 
@@ -1808,10 +1844,23 @@ def cmd_plot(args):
 # --------------------------------------------------------------------------
 
 def read_tcscopex(path):
+    """Parse a scope project - a .tcscopex, or the copy a saved .svdx carries.
+
+    An .svdx is the samples in binary followed by the whole project as plain
+    UTF-8 XML, so the project is the last <?xml ...> in the file."""
     raw = Path(path).read_bytes()
     if raw.startswith(BOM):
         raw = raw[len(BOM):]
-    return ET.fromstring(raw.decode("utf-8"))
+    if not raw.lstrip().startswith(b"<"):
+        start = raw.rfind(b"<?xml")
+        if start < 0 or b"<ScopeProject" not in raw[start:]:
+            fail(f"{path} holds no scope project: neither a .tcscopex nor an "
+                 ".svdx with its project saved at the end.")
+        raw = raw[start:]
+    try:
+        return ET.fromstring(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ET.ParseError) as exc:
+        fail(f"{path} is not a readable scope project: {exc}")
 
 
 def write_tcscopex(root, path):

@@ -4,6 +4,33 @@
 
 First working version. Not yet published.
 
+### Field review of 8bf9230: the export tool's options, run on a real recording
+
+A field test ran `TC3ScopeExportTool.exe` on real recordings, once per CSV option
+(`evals/field-review-8bf9230.md`). It found three defects in the reader and one in the tests.
+Each is now held by a check that fails on the previous code.
+
+- **An export with no header rows is refused.** Header preset *None* writes the data and
+  nothing above it. The reader took column 0 as the only time column and turned the slower
+  group's clock into a channel. A 60 s recording of two groups came back as one 30 s group of
+  three channels, with `ok: true`.
+- **Blank and Colon separators are refused by name.** Both are options in Scope's export.
+  They were refused as "no numeric rows", or as `,` used twice, which pointed the user at the
+  wrong setting.
+- **`checkscope` reads a `.svdx`.** A saved recording ends with its whole project as XML.
+  `checkscope` died on the binary before it with a `UnicodeDecodeError` traceback. It now
+  checks that project, and a file with no project in it is refused in JSON.
+- **The test fixtures were written wrong on Windows.** `Path.write_text` turns each `\n` into
+  `\r\n`, so every `"\r\n"`-joined fixture came out as `\r\r\n`. There, 2 checks failed and
+  the suite then crashed.
+  Fixtures are now written with `newline=""`, and a check rejects any `\r\r\n`.
+
+`references/export-tool.md` now records what was measured. The tool ignores the export
+settings saved in a `.svdx`, and only `config=` changes its output. At the same export range
+it writes the same samples as Scope View. It ignores interpolation, and with Timelines *None* it
+writes no file. Its FILETIME ticks are UTC. The options it honours are marked
+tool-verified, each with its `CSVProperties` element name.
+
 ### Scope View's CSV export options
 
 Users export the same recording with different settings. Variants of a real two-rate export
