@@ -12,6 +12,16 @@ recording's CSV to be read as this one's. The CSV is now `<stem>-<path hash>.csv
 default Parquet; it is removed before the tool runs, and a run that writes nothing is
 refused.
 
+### Parquet no longer costs more memory than the CSV it came from
+
+The verbs read a Parquet whole and then copied every column to NumPy, holding the samples
+twice; Arrow's default allocator also kept what it freed. On a real 600 s, 33-channel export
+they peaked near 500 MB against ~350 MB from the CSV. They now read one column at a time,
+hand it over without a copy, and use the system allocator. On a generated 300 000-row,
+35-column export: 200–230 MB, was 370–385 MB; the CSV path is ~230 MB. A check fails if
+`manifest` on a Parquet peaks above the same on its CSV (skipped where `resource` is missing,
+i.e. Windows).
+
 ### Field review of 8bf9230: the export tool's options, run on a real recording
 
 A field test ran `TC3ScopeExportTool.exe` on real recordings, once per CSV option, then the

@@ -305,11 +305,21 @@ CHECKS = {
                           r'2[.,]4\s*(g|billion)', r'\d{3}[,.]\d{3}[,.]\d{3}', r'volume')),
  ],
  'out-of-scope-authoring': [
-  ("declines to author the ST function block",
+  # Iteration 3 passed answers that declined on the merits ("a ramp is the
+  # wrong fix") and then offered to write the block anyway. The skill's reason
+  # is its scope, so the check now needs the scope said, not just a "no".
+  ("declines to author the FB, and gives scope as the reason",
    lambda t, c, m: has(t, r"(don'?t|do not|not|cannot|can'?t|won'?t).{0,40}(write|author)",
                           r"(haven'?t|have not|didn'?t|did not) (written|authored|write|author)",
-                          r'out(side)? of scope', r'not what (this|i) do', r'declin',
-                          r'not the right (tool|place)')),
+                          r'declin')
+                   and has(t, r'out(side)?\s+(of\s+)?(my\s+|this\s+|the\s+)?scope',
+                              r'not\s+what\s+(this|i)\s+do', r'not\s+the\s+right\s+(tool|place)',
+                              r'measure\w*(\s+and\s+diagnos\w*)?,?\s+(not|rather\s+than)\s+(author|writ)',
+                              r'(this|the)\s+(skill|tool)\s+(does\s+not|doesn.t|isn.t)',
+                              r'authoring\s+(plc|st|iec)?\s*code\s+(is|isn.t)')),
+  ("does not offer to write the block anyway",
+   lambda t, c, m: not has(t, r"(if you (still )?want|happy to|want me to|shall i|should i|i can still|i could still)"
+                              r".{0,60}(write|draft|sketch|put together)")),
   # Detected by the declaration and a variable block, not by the closing
   # keyword. The first baseline answer wrote a full FB_RampSetpoint under a
   # heading reading "here it is" and simply never typed END_FUNCTION_BLOCK,
@@ -366,11 +376,62 @@ CHECKS = {
                           r'no.{0,30}(basis|evidence).{0,40}(mechanical|drive)',
                           r'cannot (confirm|answer|tell)')),
  ],
+ # A saved recording whose trigger is Set Mark (stored as NONE) on a fixed
+ # 60 s window. The answer is in the project at the end of the .svdx, not in
+ # the samples, which cannot be read here anyway.
+ 'armed-but-not-recording': [
+  ("reads the project out of the .svdx",
+   lambda t, c, m: has(t, r'checkscope', r'triggeraction', r'recordtime', r'<\?xml',
+                          r'project.{0,60}(end|tail|after the samples|embedded|inside)',
+                          r'xml.{0,40}(end|tail|inside|embedded)')),
+  ("identifies the action as NONE / Set Mark, which records nothing",
+   lambda t, c, m: has(t, r'set mark', r'triggeraction\W{0,6}none', r'action\W{0,10}none')
+                   and has(t, r'(does not|doesn.t|never|not) (start|stop|trigger|capture|record)',
+                          r'only (marks?|sets? a mark)', r'marks?.{0,40}(but|not|nothing)',
+                          r'starts? nothing|stops? nothing|no effect on the recording')),
+  ("says the recording is a fixed 60 s window",
+   lambda t, c, m: has(t, r'60\s*s', r'60[- ]second', r'one minute', r'sixty seconds')
+                   and has(t, r'fixed', r'window', r'only.{0,30}(60|one minute)', r'first minute')),
+  ("does not claim the jam at 03:12 is in the file",
+   lambda t, c, m: not asserts(t, r'(jam|fault|event).{0,40}(is|was|should be) (in|captured|recorded)',
+                                  r'(found|see|shows?|captured) the jam',
+                                  r'at 03:12.{0,40}(the axis|position|torque) (was|is)')),
+  ("recommends a trigger that decides what is recorded",
+   lambda t, c, m: has(t, r'stop record', r'start record', r'pre-?trigger', r'restart\w*',
+                          r'ring buffer')),
+  # Plain has(), not asserts(): nothing about the samples can be known here,
+  # and asserts() let "I can't open it... the axis was decelerating" through
+  # on the earlier "can't".
+  ("does not invent what the axis was doing",
+   lambda t, c, m: not has(t, r'before the jam.{0,60}(axis|torque|position)\s+(was|were|rose|dropped|spiked)',
+                              r'the axis\s+was\s+(\w+\s+){0,3}(moving|accelerat|stopped|stall|decelerat)')),
+ ],
+ # A hand-written project: NC channels on the PLC's port and typed LREAL.
+ 'hand-written-config': [
+  ("says it is not ready as written",
+   lambda t, c, m: has(t, r'\bnot (right|ready|correct)', r'will not record', r"won'?t record",
+                          r'(two|2) (problems|issues|defects|mistakes)', r'\bno\b[,.]',
+                          r'record nothing', r'(problem|issue|wrong)')
+                   and not asserts(t, r'(looks|is) (right|correct|good|fine)\b(?!.{0,30}except)')),
+  ("NC axis channels belong on port 501, not 851",
+   lambda t, c, m: has(t, r'\b501\b') and has(t, r'\b851\b') and has(t, r'\bnc\b', r'axes\.')),
+  ("LREAL is the wrong name - Scope needs REAL64",
+   lambda t, c, m: has(t, r'lreal') and has(t, r'real64')),
+  ("does not flag the PLC state channel as wrong",
+   lambda t, c, m: not has(t, r'nstate.{0,80}(wrong|should be (on )?(port )?501|must be 501)',
+                              r'(all|every|each) (channel|acquisition)s?.{0,40}(501|real64)')),
+  ("gives a concrete fix, or regenerates the file",
+   lambda t, c, m: has(t, r'newscope', r'<targetport>501', r'<datatype>real64',
+                          r'targetport.{0,40}501', r'datatype.{0,40}real64',
+                          r'change.{0,60}(501|real64)', r'set.{0,40}(501|real64)')),
+ ],
 }
 
 # Retired evals keep their checks so an old run can be regraded, but a run
 # directory without them is not reported as missing them.
 RETIRED = {
+    'needle-at-scale': "tied at full marks in iteration 3, n=3",
+    'multi-rate-ordering': "tied at full marks in iteration 3, n=3; the reasoning is generic",
     'saturated-channel': "tied 6/6 in iteration 1 and again at scale in iteration 2",
     'saturated-at-scale': "tied 6/6 in iteration 2; the rail is as obvious at 12 M samples",
     'unwired-acquisition': "the baseline grepped the GUIDs and found the dangling reference",
@@ -402,8 +463,22 @@ def cost_of(answer):
     return d.get('tokens'), d.get('seconds')
 
 
+def judge_of(answer):
+    """The judge's 0-2 score from judge.json beside an answer, or None.
+
+    Regex checks confirm a topic was addressed, not that the answer was right.
+    Iteration 3 needed nine widenings to stop them failing good answers, so a
+    judge reads each answer against the eval's expected_output and
+    ground_truth - see README, 'Judge read'.
+    """
+    p = answer.parent / 'judge.json'
+    if not p.exists():
+        return None
+    return json.loads(p.read_text()).get('score')
+
+
 def main():
-    rows, summary, costs = [], {}, {}
+    rows, summary, costs, judged = [], {}, {}, {}
     for name, checks in CHECKS.items():
         if name in RETIRED and not (ROOT / name).exists():
             continue
@@ -424,6 +499,9 @@ def main():
                 cost = cost_of(p)
                 if cost:
                     costs.setdefault(cond, []).append(cost)
+                score = judge_of(p)
+                if score is not None:
+                    judged.setdefault(name, {}).setdefault(cond, []).append(score)
             summary.setdefault(name, {})[cond] = (sum(scores) / len(scores),
                                                   len(checks), scores)
 
@@ -461,6 +539,13 @@ def main():
               + (f"   mean tokens {sum(tokens) / len(tokens):,.0f}" if tokens else "")
               + (f"   mean seconds {sum(secs) / len(secs):,.0f}" if secs else ""))
 
+    if judged:
+        print(f"\n{'JUDGE (0-2, mean)':28s} {'WITH SKILL':>14s} {'BASELINE':>12s}")
+        for name, arms in judged.items():
+            cells = [f"{sum(v) / len(v):.2f} n={len(v)}" if (v := arms.get(c)) else "--"
+                     for c in ('with_skill', 'without_skill')]
+            print(f"{name:28s} {cells[0]:>14s} {cells[1]:>12s}")
+
     print("\n" + "=" * 78 + "\nper-check detail (✓ pass, ✗ fail)\n" + "=" * 78)
     for name, cond, res, tot in rows:
         if res is None:
@@ -472,7 +557,9 @@ def main():
 
     out = ROOT.parent / 'summary.json'
     out.parent.mkdir(parents=True, exist_ok=True)
-    json.dump({n: {c: {"mean": v[0], "checks": v[1], "runs": v[2]} for c, v in s.items()}
+    json.dump({n: {c: {"mean": v[0], "checks": v[1], "runs": v[2],
+                       **({"judge": judged[n][c]} if c in judged.get(n, {}) else {})}
+                   for c, v in s.items()}
                for n, s in summary.items()}, open(out, 'w'), indent=2)
     print(f"\nsummary written to {out}")
 

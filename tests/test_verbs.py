@@ -824,6 +824,40 @@ def write_still_export(path, rows=6000, seed=7):
     path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
 
 
+def parquet_memory_checks(rows=150_000, channels=33):
+    """Parquet is the fast path, and must not be the fat one.
+
+    Reading the whole table and then copying it to NumPy held every sample
+    twice: on a real 600 s, 33-channel export the Parquet verbs peaked near
+    500 MB against ~350 MB from the CSV. Peak RSS of the whole child tree is
+    what counts, and `resource` reports it where it exists (not on Windows).
+    """
+    try:
+        import resource  # noqa: F401 - only probing that it exists
+    except ImportError:
+        return
+    probe = ("import resource, subprocess, sys; "
+             "subprocess.run(sys.argv[1:], capture_output=True); "
+             "print(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)")
+
+    def peak(path):
+        out = subprocess.run([sys.executable, "-c", probe, *BASE_CMD, "manifest", str(path)],
+                             capture_output=True, text=True).stdout.strip()
+        return int(out) if out.isdigit() else None
+
+    with tempfile.TemporaryDirectory() as tmp:
+        csv = Path(tmp) / "wide.csv"
+        pq = Path(tmp) / "wide.parquet"
+        subprocess.run([sys.executable, str(ROOT / "tests" / "make_scale_fixture.py"),
+                        "--rows", str(rows), "--channels", str(channels), "-o", str(csv)],
+                       check=True, capture_output=True)
+        run("ingest", csv, "-o", pq)
+        from_csv, from_pq = peak(csv), peak(pq)
+        check("manifest on the Parquet peaks no higher than on the CSV it came from",
+              from_csv and from_pq and from_pq <= from_csv,
+              f"parquet {from_pq} vs csv {from_csv} (ru_maxrss units)")
+
+
 def long_correlate_checks(rows=300_000, delay=25):
     """correlate on a recording long enough to be a real one.
 
@@ -2177,6 +2211,7 @@ def main():
     export_copy_checks()
     still_channel_checks()
     long_correlate_checks()
+    parquet_memory_checks()
     two_rate_checks()
     export_option_checks()
     ingest_cache_checks()

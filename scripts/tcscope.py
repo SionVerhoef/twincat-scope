@@ -929,11 +929,16 @@ def load_parquet(path):
     from column names: without it every group's time axis collapses back into
     one, which is exactly the defect ingest used to reintroduce silently.
     """
-    need("pyarrow")
+    pa = need("pyarrow")
     np = need("numpy")
     from pyarrow import parquet as pq
-    table = pq.read_table(path)
-    blob = (table.schema.metadata or {}).get(PARQUET_META_KEY)
+    # Peak memory, measured on 84 MB of samples: read_table then to_numpy
+    # held the Arrow table and a NumPy copy at once (~335 MB, above the CSV
+    # path). One column at a time, handed over without a copy, on the system
+    # allocator - Arrow's default pool keeps what it frees - it is ~160 MB.
+    pa.set_memory_pool(pa.system_memory_pool())
+    source = pq.ParquetFile(path)
+    blob = (source.schema_arrow.metadata or {}).get(PARQUET_META_KEY)
     if not blob:
         fail(
             f"{path} carries no group layout - it was written by an older ingest",
@@ -942,7 +947,8 @@ def load_parquet(path):
     layout = json.loads(blob.decode())
 
     def column(name):
-        return table.column(name).to_numpy(zero_copy_only=False).astype(float)
+        # Read-only: a view on Arrow's buffer. Nothing downstream writes to it.
+        return source.read(columns=[name]).column(0).to_numpy().astype(float, copy=False)
 
     groups = []
     for entry in layout["groups"]:
@@ -961,8 +967,8 @@ def load_parquet(path):
             })
         groups.append(_finalise_group(np, group, seconds * MS_PER_S))
 
-    return Recording(groups, {"source": "parquet", "rows": table.num_rows,
-                              "columns": len(table.column_names),
+    return Recording(groups, {"source": "parquet", "rows": source.metadata.num_rows,
+                              "columns": len(source.schema_arrow.names),
                               "copies_collapsed": layout.get("copies_collapsed", []),
                               "malformed_rows": layout.get("malformed_rows", 0),
                               "start_filetime": layout.get("start_filetime")})
