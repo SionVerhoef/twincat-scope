@@ -1748,11 +1748,18 @@ def parquet_pool_checks():
     holding the table is the data, not a duplicate. NumPy reports to
     tracemalloc, so this runs everywhere, Windows included - unlike the RSS
     comparison in parquet_memory_checks.
+
+    tracemalloc counts every Python allocation, and on a fresh machine - CI,
+    every time - the first load also compiles the modules load_parquet
+    imports lazily: 3.09x the table, against 1.71x warm, for the same code.
+    So the file is loaded once before measuring. Arrow's pool peak is the
+    same for both loads, since the first one is released before the second.
     """
     probe = (
         "import sys, tracemalloc, importlib.util, pyarrow as pa\n"
         "spec = importlib.util.spec_from_file_location('tcscope', sys.argv[1])\n"
         "mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)\n"
+        "rec = mod.load_parquet(sys.argv[2]); del rec\n"
         "tracemalloc.start()\n"
         "rec = mod.load_parquet(sys.argv[2])\n"
         "numpy_peak = tracemalloc.get_traced_memory()[1]\n"
@@ -1778,9 +1785,9 @@ def parquet_pool_checks():
     except ValueError:
         peak, table_bytes = None, None
     check("load_parquet holds the samples once, not in Arrow and NumPy both",
-          # Old reader: 4.42x; the field round's copy-per-column fix: 1.87x;
-          # zero-copy: 1.71x. The ~0.6x above 1 is each group's time arrays.
-          peak is not None and peak < 2.5 * table_bytes,
+          # Measured after the warm-up load: old reader 2.64x, zero-copy 1.41x.
+          # The part above 1x is each group's time arrays.
+          peak is not None and peak < 2.0 * table_bytes,
           f"arrow+numpy peak={peak} table={table_bytes} {out.stderr[-200:]}")
 
 
