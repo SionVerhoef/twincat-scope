@@ -17,15 +17,33 @@ Every fix from the 8bf9230 round held on real exports and real projects
   `ring_buffer` and, when no trigger stops the recording, says to stop it soon after the fault
   or add a Stop Record trigger.
 
-- **A Parquet recording is read one column at a time.** `load_parquet` read the whole table
-  into Arrow, then copied each column out of it. On a real 600 s export (33 channels, 151 MB
-  of samples) Arrow's pool peaked at 200 MB, and `manifest`, `stats` and `events` peaked
-  518-534 MB, about 190 MB above the same verbs on the CSV. Now the pool peaks at 9.6 MB and
-  the verbs at 304-334 MB, with byte-identical output. A check fails if Arrow's pool peak
-  reaches a third of the table.
+- **The Parquet memory defect was found on a real export too.** On a 600 s, 33-channel
+  recording (151 MB of samples), `manifest`, `stats` and `events` peaked at 518-534 MB from the
+  Parquet against 326-340 MB from the CSV. The field round's own per-column fix brought them to
+  304-334 MB with byte-identical output. The fix that shipped is the one below ("Parquet no longer
+  costs more memory"), which does the same without copying; the field round's check on Arrow's
+  pool peak is kept beside it, because it also runs on Windows.
 
 `references/export-tool.md` now describes the tool's `channel=`, `start=` and `end=`: the
 range is FILETIME ticks, and any other format is ignored without an error.
+
+### `ingest` never answers from another recording's CSV
+
+The export tool's CSV went to the cache as `<stem>.csv`, so two recordings with Scope's
+default name shared it, and a tool run that exited 0 without writing anything left the last
+recording's CSV to be read as this one's. The CSV is now `<stem>-<path hash>.csv`, like the
+default Parquet; it is removed before the tool runs, and a run that writes nothing is
+refused.
+
+### Parquet no longer costs more memory than the CSV it came from
+
+The verbs read a Parquet whole and then copied every column to NumPy, holding the samples
+twice; Arrow's default allocator also kept what it freed. On a real 600 s, 33-channel export
+they peaked near 500 MB against ~350 MB from the CSV. They now read one column at a time,
+hand it over without a copy, and use the system allocator. On a generated 300 000-row,
+35-column export: 200–230 MB, was 370–385 MB; the CSV path is ~230 MB. A check fails if
+`manifest` on a Parquet peaks above the same on its CSV (skipped where `resource` is missing,
+i.e. Windows).
 
 ### Field review of 8bf9230: the export tool's options, run on a real recording
 

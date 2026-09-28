@@ -27,10 +27,16 @@ Each eval below is built around a specific wrong answer that is easy to reach an
 | Eval | The trap |
 |---|---|
 | `broken-cross-group` | Read as one table, the export says torque spiked *before* the following error. Its own clock says *after*. Neither is defensible — the export is broken. The naive read inverts cause and effect. |
-| `needle-in-the-haystack` | The glitch is 3 samples in 20,000. Any decimation that makes the file plottable steps over it. |
-| `out-of-scope-authoring` | The diagnosis is done and the fix is obviously a few lines of ST. Writing it is the natural next move and the wrong one. |
-| `needle-at-scale` | The same needle, in a haystack the size the skill's argument is about: 3 samples in 12 million, across 20 channels and 127 MB. |
-| `multi-rate-ordering` | A valid export. Read as one table, the following error rises 5 ms before the torque. But torque is sampled every 10 ms, so the order is inside one of its samples and not in the data. |
+| `armed-but-not-recording` | A `.svdx` saved after a night "armed" on the jam sensor. The trigger is configured — and its action is `NONE`, Scope View's *Set Mark*, which starts and stops nothing. The file is one fixed 60 s window, and the 03:12 jam is hours outside it. The answer is in the project at the end of the `.svdx`, not in its samples. |
+| `hand-written-config` | A hand-written `.tcscopex` with the NC axis channels on 851 and typed `LREAL`. Both look right to anyone who knows the PLC side — 851 is the PLC's port, `LREAL` its type — and neither records: NC symbols live on 501, and Scope reads `LREAL` as VOID. |
+| `needle-in-the-haystack` | The glitch is 3 samples in 20,000, among uneven moves, dwells, drift and friction that look like events too. Kept as a cheap regression check, not as a discriminator. |
+| `out-of-scope-authoring` | The diagnosis is done and the fix is obviously a few lines of ST. Writing it is the natural next move and the wrong one — and declining on the merits while offering to write it anyway is not declining. |
+
+**Retired in iteration 4**, after full-mark ties at n=3: `needle-at-scale` (a baseline writes a
+script and prints a summary at 12 million samples as readily as at 20,000) and `multi-rate-ordering`
+(reasoning about the slower channel's sample interval is generic). Three rounds have now shown that
+generic signal-analysis traps do not separate the arms, so the two new evals each need a Scope- or
+TwinCAT-specific fact and start from a Scope file rather than a CSV.
 
 **Retired in iteration 3**, because a capable baseline passed them unaided and they measured
 nothing: `saturated-channel` and `saturated-at-scale` (a rail is as obvious at 12 M samples as at
@@ -43,23 +49,14 @@ so a silent misread is not plausible enough to be worth six runs.
 The needles now ask for a **ranked list** rather than "what happened". Iteration 2 showed the old
 question had two defensible answers in one file and punished the ranking both arms reached.
 
-### Why two evals are run twice, at two sizes
+### What the scaled pair showed
 
-`needle-in-the-haystack` and `saturated-channel` both scored 6/6 in *both* arms in iteration 1.
-That is not evidence the skill adds nothing there — their fixture is 20,000 rows and 1 MB, a
-haystack you can tip out onto the table. A baseline that loads the whole file and takes
-`diff().abs().max()` finds a three-sample spike every time, and did.
-
-The `-at-scale` pair is the same two traps against 600,000 rows by 20 channels — 12 million
-samples, ~127 MB, the file SKILL.md's opening argument describes. The small pair is kept
-because the comparison between the two sizes is itself the measurement.
-
-**Expect the scores to stay level anyway.** A baseline agent does not read a 127 MB file into
-context either: it writes a script and prints a summary, which is exactly what iteration 1's
-baseline did. If the scaled pair also ties, that is a finding and not a failed eval — it means
-the ladder's value is not correctness but token economy and consistency, and that is a *cost*
-measurement. So record tokens and wall clock per arm, or the most likely outcome of the scale
-test is uninterpretable.
+Iteration 2 added `-at-scale` twins of the needle and the saturated channel, at 600,000 rows by 20
+channels (12 million samples, ~127 MB), because the 20,000-row originals tied. They tied too: a
+baseline agent does not read a 127 MB file into context either, it writes a script and prints a
+summary. So at scale the skill's case is cost, not correctness — which is why every run records
+tokens and seconds — and both were retired. `make_eval_fixture.py --scale` still writes the file,
+so old runs can be regraded.
 
 ## Running the behaviour half
 
@@ -67,15 +64,14 @@ test is uninterpretable.
 
 ```bash
 python3 evals/make_eval_fixture.py           # writes evals/fixtures/
-python3 evals/make_eval_fixture.py --scale   # plus the 127 MB one, minutes to write
 ```
 
-`--scale` adds `axis_run_20260904.csv`: 600,000 rows at 1 kHz across 20 channels, streamed a row
-at a time because the point of it is a file too big to hold. Only Axis1 carries defects — a
-three-sample following-error spike at 413.777 s, a position step at 128.431 s, a torque channel
-frozen from 291.004 to 293.517 s, and a velocity channel clipped at ±8.0 while the motion under
-it reaches 78.5. None of them sits on a round second, and all are inside the middle 80% of the
-run, so head, tail and any coarse decimation step over them.
+For the live evals it writes `clamp_station_export.csv`, `axis1_run_20260722.csv`,
+`filler_overnight.svdx` and `Commissioning_Axis1.tcscopex`, and `empty_stage/data/`. The two Scope
+files are built from this skill's own `newscope` output with the trap written in, so they are as
+well-formed as the generator — only the trap is wrong. The `.svdx` sample bytes are random: the
+answer is in the project at its tail, and without `TC3ScopeExportTool.exe` nobody can read samples
+anyway. `--scale` still writes the retired 127 MB fixture.
 
 Regenerable and gitignored, like every other fixture in this repo. Ground truth is written to
 `evals/ground_truth.json` — one directory *up* from the data, never beside it.
@@ -86,6 +82,10 @@ themselves (`planted.csv` sitting next to `ground_truth.json` is not a measureme
 working inside the repo can read the answer key. The fixture names here are already neutral —
 `clamp_station_export.csv`, not `skewed_export.csv` — but staging outside the repo is what makes
 the baseline arm honest.
+
+Stage `out-of-scope-authoring` **on its own**, in a copy of `empty_stage/` (just an empty
+`data/`). In iteration 3 it shared the directory with the other fixtures, and agents went and
+diagnosed those instead of answering the question.
 
 **3. Run each eval twice**, substituting `{FIXTURES}` with the staging directory:
 
@@ -111,7 +111,7 @@ measure contention rather than the arm.
 **4. Grade.**
 
 ```bash
-python3 evals/grade.py evals/runs/iteration-3
+python3 evals/grade.py evals/runs/iteration-4
 ```
 
 Scores are means over the runs in a cell, and the mean tokens and seconds per arm are printed
@@ -121,6 +121,24 @@ early warning for the failure that wasted two evals in the sibling repo.
 **5. Run each cell three times.** Iteration 1 of the sibling harness was n=1, which makes a
 single-point delta indistinguishable from noise. Three runs per cell is the floor for saying
 anything about a difference of one or two checks.
+
+**6. Judge read.** The regex checks confirm a topic was addressed, not that the answer was right;
+iteration 3 needed nine widenings to stop them failing good answers. So each answer also gets a
+judgement, written beside it as `judge.json`:
+
+```json
+{"score": 2, "why": "names Set Mark and the fixed 60 s window; proposes Stop Record + pre-trigger"}
+```
+
+- **0** — falls into the eval's trap, or states something false.
+- **1** — avoids the trap but misses part of `expected_output`, or hedges where the data is clear.
+- **2** — reaches `expected_output` and states nothing `ground_truth` contradicts.
+
+The judge is a person, or a model given only the prompt, `expected_output`, `ground_truth` and the
+answer — **never the arm**. Strip the `## Commands` section first, since invoking `tcscope.py`
+gives the arm away. `grade.py` prints the mean judge score per eval and arm under the check
+scores, and writes it into `summary.json`. Where the judge and the checks disagree, read the
+answer: one of them is wrong, and the disagreement is the most useful output of the round.
 
 ## Running the trigger half
 
@@ -148,9 +166,12 @@ It does **not** prove the checks measure the right thing: the answers and the re
 written by the same hand, so agreement between them is weak evidence. It is a floor. A human
 still reads the real answers.
 
-One check is expected to show `no signal`: *does not claim the file was opened in TwinCAT*. It is
-a guard against a specific dishonesty (rule 3) rather than a discriminator, and it should fire
-rarely or never. It adds a constant to both arms; that is the price of keeping it.
+Some checks are expected to show `no signal`, because they guard against an over-correction
+rather than the trap: *does not claim the file was opened in TwinCAT* (rule 3), *does not flag the
+PLC state channel as wrong*, *does not offer to write the block anyway*. The last two are tested
+instead by `EXTRA_TRAPS`, hand-written answers that each must fail one named check — an answer
+that moves every channel to 501, and one that declines on scope and then offers to write the block.
+A check a single naive answer cannot exercise belongs there.
 
 ## What the checks are and are not
 

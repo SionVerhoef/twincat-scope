@@ -202,6 +202,14 @@ writable float array (zero-copy arrays come back read-only). Regression check
 - It fails if `pyarrow.default_memory_pool().max_memory()` reaches a third of the table. On
   that fixture 79660f4 gives 1.30× and the patch 0.22×.
 
+**Merged differently.** The same defect had been fixed on the development machine in the
+meantime (PR #29): one column at a time too, but handed to NumPy without a copy, on the system
+allocator. Zero-copy arrays are views on Arrow's buffers, so there the pool *is* the data and a
+pool-only limit cannot pass. The field round's check was kept, renamed `parquet_pool_checks`,
+and now counts Arrow's pool and NumPy's allocations together, against 2.5× the table: 79660f4
+gives 4.42×, the field round's fix 1.87×, the merged zero-copy fix 1.71×. The R3 figures above
+are for the field round's version; the merged one was not measured on R3.
+
 ### H2 — a clean command trajectory reports its rests and none of its moves (not fixed)
 
 On a noise-free setpoint (SetPos, SetVelo), the first difference is constant during a move. So

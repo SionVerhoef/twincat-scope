@@ -824,6 +824,40 @@ def write_still_export(path, rows=6000, seed=7):
     path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
 
 
+def parquet_memory_checks(rows=150_000, channels=33):
+    """Parquet is the fast path, and must not be the fat one.
+
+    Reading the whole table and then copying it to NumPy held every sample
+    twice: on a real 600 s, 33-channel export the Parquet verbs peaked near
+    500 MB against ~350 MB from the CSV. Peak RSS of the whole child tree is
+    what counts, and `resource` reports it where it exists (not on Windows).
+    """
+    try:
+        import resource  # noqa: F401 - only probing that it exists
+    except ImportError:
+        return
+    probe = ("import resource, subprocess, sys; "
+             "subprocess.run(sys.argv[1:], capture_output=True); "
+             "print(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)")
+
+    def peak(path):
+        out = subprocess.run([sys.executable, "-c", probe, *BASE_CMD, "manifest", str(path)],
+                             capture_output=True, text=True).stdout.strip()
+        return int(out) if out.isdigit() else None
+
+    with tempfile.TemporaryDirectory() as tmp:
+        csv = Path(tmp) / "wide.csv"
+        pq = Path(tmp) / "wide.parquet"
+        subprocess.run([sys.executable, str(ROOT / "tests" / "make_scale_fixture.py"),
+                        "--rows", str(rows), "--channels", str(channels), "-o", str(csv)],
+                       check=True, capture_output=True)
+        run("ingest", csv, "-o", pq)
+        from_csv, from_pq = peak(csv), peak(pq)
+        check("manifest on the Parquet peaks no higher than on the CSV it came from",
+              from_csv and from_pq and from_pq <= from_csv,
+              f"parquet {from_pq} vs csv {from_csv} (ru_maxrss units)")
+
+
 def long_correlate_checks(rows=300_000, delay=25):
     """correlate on a recording long enough to be a real one.
 
@@ -1623,20 +1657,29 @@ def two_rate_checks():
               str([g.get("n_samples") for g in back]))
 
 
-def parquet_memory_checks():
+def parquet_pool_checks():
     """load_parquet read the whole table into Arrow and then copied every
     column out of it. On a real 600 s export (33 channels, 151 MB of samples)
     Arrow's pool peaked at 200 MB and a Parquet verb sat ~190 MB above the
-    CSV path. Read one column at a time, the pool holds little more than one.
+    CSV path.
+
+    What counts is Arrow's pool and NumPy's own allocations together: read
+    without a copy, the arrays are views on Arrow's buffers, so the pool
+    holding the table is the data, not a duplicate. NumPy reports to
+    tracemalloc, so this runs everywhere, Windows included - unlike the RSS
+    comparison in parquet_memory_checks.
     """
     probe = (
-        "import sys, importlib.util, pyarrow as pa\n"
+        "import sys, tracemalloc, importlib.util, pyarrow as pa\n"
         "spec = importlib.util.spec_from_file_location('tcscope', sys.argv[1])\n"
         "mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)\n"
+        "tracemalloc.start()\n"
         "rec = mod.load_parquet(sys.argv[2])\n"
+        "numpy_peak = tracemalloc.get_traced_memory()[1]\n"
         "from pyarrow import parquet as pq\n"
         "size = pq.ParquetFile(sys.argv[2]).metadata\n"
-        "print(pa.default_memory_pool().max_memory(), size.num_rows * 8 * size.num_columns)\n")
+        "print(pa.default_memory_pool().max_memory() + numpy_peak,"
+        " size.num_rows * 8 * size.num_columns)\n")
     with tempfile.TemporaryDirectory() as tmp:
         csv = Path(tmp) / "wide.csv"
         cache = Path(tmp) / "wide.parquet"
@@ -1647,12 +1690,15 @@ def parquet_memory_checks():
         out = subprocess.run([sys.executable, "-c", probe, str(TCSCOPE), str(cache)],
                              capture_output=True, text=True)
     try:
-        pool_peak, table_bytes = map(int, out.stdout.split())
+        peak, table_bytes = map(int, out.stdout.split())
     except ValueError:
-        pool_peak, table_bytes = None, None
-    check("load_parquet never holds the whole table in Arrow at once",
-          pool_peak is not None and pool_peak < table_bytes / 3,
-          f"pool peak={pool_peak} table={table_bytes} {out.stderr[-200:]}")
+        peak, table_bytes = None, None
+    check("load_parquet holds the samples once, not in Arrow and NumPy both",
+          # Old reader: 4.42x; the field round's copy-per-column fix: 1.87x;
+          # zero-copy: 1.71x. The ~0.6x above 1 is each group's time arrays.
+          peak is not None and peak < 2.5 * table_bytes,
+          f"arrow+numpy peak={peak} table={table_bytes} {out.stderr[-200:]}")
+
 
 
 def export_option_checks():
@@ -1906,9 +1952,11 @@ def ingest_cache_checks():
             out = json.loads(proc.stdout)
         except ValueError:
             out = {"error": proc.stdout[:200] + proc.stderr[:200]}
+        csv = Path(out.get("intermediate_csv") or "")
         check("ingest writes its intermediate CSV to the cache dir",
               out.get("ok") is True
-              and out.get("intermediate_csv") == str(tmp / "cache" / "tcscope" / "rec.csv")
+              and csv.parent == tmp / "cache" / "tcscope"
+              and re.fullmatch(r"rec-[0-9a-f]{8}\.csv", csv.name)
               and sorted(p.name for p in project.iterdir()) == ["rec.svdx"],
               str(out.get("intermediate_csv") or out.get("error")))
 
@@ -1926,6 +1974,9 @@ def ingest_cache_checks():
             except ValueError:
                 outs.append({"error": proc.stdout[:200] + proc.stderr[:200]})
         paths = [Path(o.get("output") or "") for o in outs]
+        csvs = [o.get("intermediate_csv") for o in outs]
+        check("two recordings with the same file name get their own intermediate CSV",
+              all(csvs) and csvs[0] != csvs[1], str(csvs))
         check("ingest without -o writes to the cache dir, one file per recording",
               all(o.get("ok") is True for o in outs)
               and all(p.parent == tmp / "cache" / "tcscope" and p.suffix == ".parquet"
@@ -1933,6 +1984,22 @@ def ingest_cache_checks():
               and paths[0] != paths[1]
               and sorted(p.name for p in project.iterdir()) == ["rec.svdx"],
               str([o.get("output") or o.get("error") for o in outs]))
+
+        # The real tool exits 0 and writes nothing for some settings. The CSV
+        # an earlier run left under the same name must not be read instead.
+        silent = tmp / "silent_export_tool"
+        silent.write_text("#!/bin/sh\nexit 0\n")
+        silent.chmod(0o755)
+        proc = subprocess.run([*BASE_CMD, "ingest", str(svdx), "-o", str(tmp / "stale.parquet")],
+                              capture_output=True, text=True,
+                              env={**env, "TCSCOPE_EXPORT_TOOL": str(silent)})
+        try:
+            stale = json.loads(proc.stdout)
+        except ValueError:
+            stale = {"error": "non-JSON: " + proc.stdout[:200] + proc.stderr[:200]}
+        check("an export tool that writes nothing is refused, not answered from a stale CSV",
+              stale.get("ok") is False and "wrote no file" in (stale.get("error") or ""),
+              str(stale.get("error"))[:160])
 
 
 def main():
@@ -2211,8 +2278,9 @@ def main():
     export_copy_checks()
     still_channel_checks()
     long_correlate_checks()
-    two_rate_checks()
     parquet_memory_checks()
+    two_rate_checks()
+    parquet_pool_checks()
     export_option_checks()
     ingest_cache_checks()
     svdx_checkscope_checks()
