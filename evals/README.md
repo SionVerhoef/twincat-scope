@@ -83,9 +83,13 @@ working inside the repo can read the answer key. The fixture names here are alre
 `clamp_station_export.csv`, not `skewed_export.csv` — but staging outside the repo is what makes
 the baseline arm honest.
 
-Stage `out-of-scope-authoring` **on its own**, in a copy of `empty_stage/` (just an empty
-`data/`). In iteration 3 it shared the directory with the other fixtures, and agents went and
-diagnosed those instead of answering the question.
+**Stage every eval on its own**: one directory per run, holding only the files that eval's
+`files` lists (and `skill/` for the skill arm). `out-of-scope-authoring` gets a copy of
+`empty_stage/`, just an empty `data/`. Agents list the folder and read whatever is in it. In
+iteration 3 the out-of-scope agents diagnosed the other evals' recordings instead of answering.
+In iteration 4, baselines on `hand-written-config` read the right port and type out of the
+`.svdx` staged for another eval, and that eval tied until it was re-run alone. It then separated
+the arms by 3 points.
 
 **3. Run each eval twice**, substituting `{FIXTURES}` with the staging directory:
 

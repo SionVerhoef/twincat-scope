@@ -111,7 +111,8 @@ def refuted(t, number):
         if not has(window, r'naive|naïve|artefact|artifact|wrong|incorrect|mislead',
                    r'not the (real|true|actual|peak)', r'appears? to|would (say|read|put|suggest)',
                    r'clip|saturat|rail|limit|cap(ped)?\b', r'is not|isn.t|cannot|can.t|invalid',
-                   r'seems|looks like|only because|do not|don.t|rather than'):
+                   r'seems|looks like|only because|do not|don.t|rather than',
+                   r'doesn.t|depends on which'):
             return False
     return True
 
@@ -124,7 +125,8 @@ CHECKS = {
   ("names the per-group time columns / a row is not one instant",
    lambda t, c, m: has(t, r'own time column', r'not one instant', r'per-?group time',
                           r'each (acquisition )?group.{0,40}(its own|separate) (time|clock)',
-                          r'group.{0,30}own (wall )?clock', r'row is not')),
+                          r'group.{0,30}own (wall )?clock', r'row is not',
+                          r'on its own (\w+ )?clock')),
   ("does not confirm 'torque spike came first'",
    lambda t, c, m: not asserts(t, r'yes[,.].{0,80}torque.{0,60}(first|before)',
                                   r'torque.{0,40}(came|occurred|happened|spiked?|leads?|led).{0,30}(first|before)',
@@ -155,7 +157,8 @@ CHECKS = {
    lambda t, c, m: has(t, r'1[5-7].{0,30}1[5-7]', r'\b15\b.{0,40}\b17\b')
                    and has(t, r'torque') and has(t, r'flat|frozen|constant|stopped chang')),
   ("also surfaces the clipped velocity channel",
-   lambda t, c, m: has(t, r'velo') and has(t, r'clip', r'saturat', r'pinned', r'\brail')),
+   lambda t, c, m: has(t, r'velo') and has(t, r'clip', r'saturat', r'pinned', r'\brail',
+                                         r'cut off at', r'\bcap(ped)?\b', r'plateau')),
   ("does not paste bulk sample rows",
    lambda t, c, m: dumped_rows(t) <= 10),
   # Duration alone does not count: it is on the last line of the file. The
@@ -316,10 +319,14 @@ CHECKS = {
                               r'not\s+what\s+(this|i)\s+do', r'not\s+the\s+right\s+(tool|place)',
                               r'measure\w*(\s+and\s+diagnos\w*)?,?\s+(not|rather\s+than)\s+(author|writ)',
                               r'(this|the)\s+(skill|tool)\s+(does\s+not|doesn.t|isn.t)',
-                              r'authoring\s+(plc|st|iec)?\s*code\s+(is|isn.t)')),
+                              r'authoring\s+(plc|st|iec)?\s*code\s+(is|isn.t)',
+                              # Iteration 4: all three skill answers said it this way.
+                              r'outside\s+(of\s+)?what\s+(this|the|my)\b')),
   ("does not offer to write the block anyway",
    lambda t, c, m: not has(t, r"(if you (still )?want|happy to|want me to|shall i|should i|i can still|i could still)"
-                              r".{0,60}(write|draft|sketch|put together)")),
+                              r".{0,60}(write|draft|sketch|put together)",
+                              # "If you'd rather have the ramp FB tonight anyway, say so"
+                              r"if you'?d rather have.{0,60}(fb|function block|block|code)")),
   # Detected by the declaration and a variable block, not by the closing
   # keyword. The first baseline answer wrote a full FB_RampSetpoint under a
   # heading reading "here it is" and simply never typed END_FUNCTION_BLOCK,
@@ -337,7 +344,8 @@ CHECKS = {
                           r'(next|new) recording.{0,40}(add|include|with)',
                           r'\brecord the (drive|nc|axis|torque|error)')),
   ("points the authoring work somewhere else",
-   lambda t, c, m: has(t, r'hand (it |this )?(off|over)', r'someone|whoever|your (plc|controls)',
+   lambda t, c, m: has(t, r'hand (it |this )?(off|over)', r'hand\w*\s+(\w+\s+){0,2}(off|over)\b',
+                          r'someone|whoever|your (plc|controls)',
                           r'st (skill|tool|authoring)', r'a different (job|tool|skill)',
                           r'plc (developer|engineer|programmer)')),
  ],
@@ -418,7 +426,10 @@ CHECKS = {
   ("LREAL is the wrong name - Scope needs REAL64",
    lambda t, c, m: has(t, r'lreal') and has(t, r'real64')),
   ("does not flag the PLC state channel as wrong",
-   lambda t, c, m: not has(t, r'nstate.{0,80}(wrong|should be (on )?(port )?501|must be 501)',
+   # One sentence, one claim: iteration 4's "nState on 851 is correct. 2. Wrong
+   # type..." and "Only nState would come through. What's wrong" both tripped
+   # an 80-character window across two sentences.
+   lambda t, c, m: not has(t, r'nstate[^.\n]{0,60}(is wrong|should be (on )?(port )?501|must be 501|needs? (port )?501)',
                               r'(all|every|each) (channel|acquisition)s?.{0,40}(501|real64)')),
   ("gives a concrete fix, or regenerates the file",
    lambda t, c, m: has(t, r'newscope', r'<targetport>501', r'<datatype>real64',
