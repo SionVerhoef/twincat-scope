@@ -3307,6 +3307,10 @@ def cmd_checkscope(args):
     if restart_text is None:
         restart_text = root.findtext(".//RestartRecord")
     auto_restart = (restart_text or "").strip().lower() == "true"
+    # Scope View's project property "Ringbuffer" is saved as StopMode:
+    # AutoStop when off, ClientStop when on. A ring buffer records until
+    # someone stops it and keeps the last RecordTime - not a fixed window.
+    ring_buffer = (root.findtext("StopMode") or "").strip() == "ClientStop"
 
     # Reported exactly as written. Only an action that starts, stops or
     # sub-saves the recording decides what gets recorded. The rest - Set Mark
@@ -3341,7 +3345,16 @@ def cmd_checkscope(args):
     only_marks = bool(actions) and not records_on_trigger and not unknown
 
     no_trigger = not has_trigger or all_disabled
-    fixed_window = not auto_restart and (only_marks or (record_seconds and no_trigger))
+    fixed_window = (not auto_restart and not ring_buffer
+                    and (only_marks or (record_seconds and no_trigger)))
+    if ring_buffer and not records_on_trigger:
+        kept = f"the last {record_seconds:g} s" if record_seconds else "the last RecordTime"
+        warnings.append(
+            f"runs as a ring buffer (StopMode ClientStop, 'Ringbuffer' in Scope View): "
+            f"it records until someone stops it and keeps {kept} before the stop. "
+            "Stop it soon after the fault, or add a Stop Record trigger so the "
+            "event stops it."
+        )
     if fixed_window:
         window = f"a fixed {record_seconds:g} s window" if record_seconds else "a fixed window"
         if only_marks:
@@ -3401,6 +3414,7 @@ def cmd_checkscope(args):
           "trigger_groups": trigger_groups,
           "fixed_window": bool(fixed_window),
           "auto_restart_record": auto_restart,
+          "ring_buffer": ring_buffer,
           "problems": problems, "warnings": warnings})
     return 0 if not problems else 1
 

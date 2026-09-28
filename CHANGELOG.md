@@ -4,6 +4,29 @@
 
 First working version. Not yet published.
 
+### Field review of 79660f4: the G fixes on real files, and Parquet at half the memory
+
+Every fix from the 8bf9230 round held on real exports and real projects
+(`evals/field-review-79660f4.md`). Two defects were new:
+
+- **A ring-buffer recording is no longer called a fixed window.** Scope View's project
+  property *Ringbuffer* is saved as `StopMode`: `AutoStop` off, `ClientStop` on. A ring buffer
+  records until someone stops it and keeps the last `RecordTime`. `checkscope` never read
+  `StopMode`, so 4 of 25 real files were told they recorded "a fixed … window" with no trigger,
+  with advice about catching intermittent faults that does not apply to them. It now reports
+  `ring_buffer` and, when no trigger stops the recording, says to stop it soon after the fault
+  or add a Stop Record trigger.
+
+- **The Parquet memory defect was found on a real export too.** On a 600 s, 33-channel
+  recording (151 MB of samples), `manifest`, `stats` and `events` peaked at 518-534 MB from the
+  Parquet against 326-340 MB from the CSV. The field round's own per-column fix brought them to
+  304-334 MB with byte-identical output. The fix that shipped is the one below ("Parquet no longer
+  costs more memory"), which does the same without copying; the field round's check on Arrow's
+  pool peak is kept beside it, because it also runs on Windows.
+
+`references/export-tool.md` now describes the tool's `channel=`, `start=` and `end=`: the
+range is FILETIME ticks, and any other format is ignored without an error.
+
 ### `ingest` never answers from another recording's CSV
 
 The export tool's CSV went to the cache as `<stem>.csv`, so two recordings with Scope's

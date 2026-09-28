@@ -140,8 +140,10 @@ success — a display channel wired to nothing opens perfectly and plots an empt
 symbol on the wrong port never resolves, an IEC type is refused as `VOID`, and shared or
 placeholder names export as columns nobody can tell apart — and it warns on recording load
 and on a fixed window, which is a lottery ticket for an intermittent fault. `trigger_action`
-is `TriggerAction` exactly as the file writes it; `NONE` with no restart is a fixed window
-even when a trigger is configured.
+is `TriggerAction` exactly as the file writes it; `NONE` (Scope View's *Set Mark*) and the
+display, export and reporting actions leave a fixed window even when a trigger is configured.
+A ring buffer (`ring_buffer`: Scope View's *Ringbuffer*, saved as `StopMode` `ClientStop`) is
+never a fixed window: it keeps the last `RecordTime` until someone stops it.
 
 With the PLC project at hand, add `--tmc <PLC>.tmc` — every PLC symbol is then checked
 against the compiled program: typos, renamed variables, whole blocks, and types read at the
@@ -183,11 +185,15 @@ same 29999 and 15000 samples. The tool's `config=` option was run once per CSV s
 recording, and Scope View's own dialog for the header, interpolation (*Fill* and *Shift*),
 `;` with `,`, Timelines and trigger info: every layout read correctly or was refused by name.
 `ingest` converted a 600 s, 33-channel, 5-group recording (65.7 MB) in 16.7 s.
-`checkscope` has read real *Set Mark*, *Start Record*, *Stop Record* and *Reporting Trigger*
-triggers. Asked about a fault in a folder holding a `.svdx`, without being told the skill's
-name, a Claude desktop agent loaded this skill and followed the ladder.
+`checkscope` has read 25 real project files (22 projects, 3 `.svdx`), and eight of the eleven
+trigger actions as Scope View saved them — *Set Mark*, *Start*/*Stop Record*, *Start*/*Stop
+Subsave*, *Stop Display*, *Export*, *Reporting Trigger* — plus *Ringbuffer* on and off. The
+whole test suite passes on Windows as well as Linux. Asked about a fault in a folder holding a
+`.svdx`, without being told the skill's name, a Claude desktop agent loaded this skill and
+followed the ladder.
 
 Not verified: the analysis verbs against the variety of those 19 exports (two real recording
-shapes so far), Timelines *All* on a group of several channels, scaled channels, marker
-windows, and an axis parked at a limit (`references/export-tool.md` marks each one). Rule 3
-applies to this skill's own claims: report at exactly that precision.
+shapes so far), what a *Subsave* trigger or a ring buffer actually records, Timelines *All* on
+a group of several channels, scaled channels, marker windows, and an axis parked at a limit
+(`references/export-tool.md` marks each one). Rule 3 applies to this skill's own claims:
+report at exactly that precision.

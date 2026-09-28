@@ -131,6 +131,10 @@ order — this section is the summary of record; the full write-ups are in `eval
   user-exported `;` file; a 600 s, 33-channel recording ingested in 16.7 s; and an agent
   that picked the skill up unnamed. Headerless, *Timelines None*, Blank and Colon exports are
   now refused instead of misread.
+- **The fixes on Windows** (`evals/field-review-79660f4.md`): every one held on real files and
+  the whole suite passed on Windows; eight trigger actions saved from Scope View read as
+  expected. Two new defects were fixed: a ring-buffer recording was called a fixed window, and
+  a Parquet recording was loaded at twice its size.
 
 What stands behind the tool:
 

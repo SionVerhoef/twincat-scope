@@ -1657,6 +1657,54 @@ def two_rate_checks():
               str([g.get("n_samples") for g in back]))
 
 
+def parquet_pool_checks():
+    """load_parquet read the whole table into Arrow and then copied every
+    column out of it. On a real 600 s export (33 channels, 151 MB of samples)
+    Arrow's pool peaked at 200 MB and a Parquet verb sat ~190 MB above the
+    CSV path.
+
+    What counts is Arrow's pool and NumPy's own allocations together: read
+    without a copy, the arrays are views on Arrow's buffers, so the pool
+    holding the table is the data, not a duplicate. NumPy reports to
+    tracemalloc, so this runs everywhere, Windows included - unlike the RSS
+    comparison in parquet_memory_checks.
+    """
+    probe = (
+        "import sys, tracemalloc, importlib.util, pyarrow as pa\n"
+        "spec = importlib.util.spec_from_file_location('tcscope', sys.argv[1])\n"
+        "mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)\n"
+        "tracemalloc.start()\n"
+        "rec = mod.load_parquet(sys.argv[2])\n"
+        "numpy_peak = tracemalloc.get_traced_memory()[1]\n"
+        "from pyarrow import parquet as pq\n"
+        "size = pq.ParquetFile(sys.argv[2]).metadata\n"
+        "print(pa.default_memory_pool().max_memory() + numpy_peak,"
+        " size.num_rows * 8 * size.num_columns)\n")
+    with tempfile.TemporaryDirectory() as tmp:
+        csv = Path(tmp) / "wide.csv"
+        cache = Path(tmp) / "wide.parquet"
+        subprocess.run([sys.executable, str(ROOT / "tests" / "make_scale_fixture.py"),
+                        "--rows", "40000", "--channels", "20", "-o", str(csv)],
+                       check=True, capture_output=True)
+        run("ingest", csv, "-o", cache)
+        # Through uv with the analysis dependencies, like BASE_CMD: this file's
+        # own interpreter has no pyarrow (CI runs it bare).
+        python = ([_UV, "run", "--quiet", "--with", "numpy", "--with", "pyarrow", "python"]
+                  if _UV else [sys.executable])
+        out = subprocess.run([*python, "-c", probe, str(TCSCOPE), str(cache)],
+                             capture_output=True, text=True)
+    try:
+        peak, table_bytes = map(int, out.stdout.split())
+    except ValueError:
+        peak, table_bytes = None, None
+    check("load_parquet holds the samples once, not in Arrow and NumPy both",
+          # Old reader: 4.42x; the field round's copy-per-column fix: 1.87x;
+          # zero-copy: 1.71x. The ~0.6x above 1 is each group's time arrays.
+          peak is not None and peak < 2.5 * table_bytes,
+          f"arrow+numpy peak={peak} table={table_bytes} {out.stderr[-200:]}")
+
+
+
 def export_option_checks():
     """Scope View's CSV export options, applied to the real two-rate layout.
 
@@ -2143,6 +2191,29 @@ def main():
                   any("Set Mark" in w for w in chk_none.get("warnings", [])),
                   str(chk_none.get("warnings")))
 
+            # Scope View's project property Ringbuffer is written as StopMode:
+            # AutoStop off, ClientStop on (seen on a real save). A ring buffer
+            # records until someone stops it and keeps the last RecordTime, so
+            # it is not a fixed window - 4 of 25 real files use one, and each
+            # was told it recorded a fixed window with no trigger.
+            ring_text = text.replace("<StopMode>AutoStop</StopMode>",
+                                     "<StopMode>ClientStop</StopMode>")
+            ring = Path(tmp) / "ring.tcscopex"
+            ring.write_bytes(b"\xef\xbb\xbf" + ring_text.encode("utf-8"))
+            chk_ring = run("checkscope", ring)
+            check("a ring-buffer recording is not called a fixed window",
+                  "<StopMode>ClientStop</StopMode>" in ring_text
+                  and chk_ring.get("ring_buffer") is True
+                  and chk_ring.get("fixed_window") is False
+                  and not any("fixed" in w for w in chk_ring.get("warnings", [])),
+                  str(chk_ring.get("warnings")))
+            check("a ring buffer is explained: it keeps the last window until stopped",
+                  any("ring buffer" in w.lower() and "stop" in w.lower()
+                      for w in chk_ring.get("warnings", [])),
+                  str(chk_ring.get("warnings")))
+            check("AutoStop is not a ring buffer",
+                  chk_none.get("ring_buffer") is False, str(chk_none.get("ring_buffer")))
+
             # Only an action that starts, stops or sub-saves the recording
             # changes what is kept. A display, export or reporting trigger fires
             # and is logged, and the window stays fixed.
@@ -2213,6 +2284,7 @@ def main():
     long_correlate_checks()
     parquet_memory_checks()
     two_rate_checks()
+    parquet_pool_checks()
     export_option_checks()
     ingest_cache_checks()
     svdx_checkscope_checks()
