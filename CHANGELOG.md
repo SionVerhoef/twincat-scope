@@ -4,6 +4,29 @@
 
 First working version. Not yet published.
 
+### Field review of 79660f4: the G fixes on real files, and Parquet at half the memory
+
+Every fix from the 8bf9230 round held on real exports and real projects
+(`evals/field-review-79660f4.md`). Two defects were new:
+
+- **A ring-buffer recording is no longer called a fixed window.** Scope View's project
+  property *Ringbuffer* is saved as `StopMode`: `AutoStop` off, `ClientStop` on. A ring buffer
+  records until someone stops it and keeps the last `RecordTime`. `checkscope` never read
+  `StopMode`, so 4 of 25 real files were told they recorded "a fixed … window" with no trigger,
+  with advice about catching intermittent faults that does not apply to them. It now reports
+  `ring_buffer` and, when no trigger stops the recording, says to stop it soon after the fault
+  or add a Stop Record trigger.
+
+- **A Parquet recording is read one column at a time.** `load_parquet` read the whole table
+  into Arrow, then copied each column out of it. On a real 600 s export (33 channels, 151 MB
+  of samples) Arrow's pool peaked at 200 MB, and `manifest`, `stats` and `events` peaked
+  518-534 MB, about 190 MB above the same verbs on the CSV. Now the pool peaks at 9.6 MB and
+  the verbs at 304-334 MB, with byte-identical output. A check fails if Arrow's pool peak
+  reaches a third of the table.
+
+`references/export-tool.md` now describes the tool's `channel=`, `start=` and `end=`: the
+range is FILETIME ticks, and any other format is ignored without an error.
+
 ### Field review of 8bf9230: the export tool's options, run on a real recording
 
 A field test ran `TC3ScopeExportTool.exe` on real recordings, once per CSV option, then the

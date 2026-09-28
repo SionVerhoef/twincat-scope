@@ -16,7 +16,9 @@ Scope View on a generated file was detected by `checkscope` and recorded
 `IsFileBased`/`Suffix`, fills unit and style blocks, and keeps one time-axis `AxisStyle` per
 tab. None of it affects loading or recording, and a saved file is the one to diff against.
 Scope also fills an empty PLC acquisition's `<Comment>` with the variable's declaration
-comment, so that field is not free for PLC channels.
+comment, so that field is not free for PLC channels. A hand-written comment replaces it and
+survives a save, and the CSV export's `SymbolComment` row then carries the hand-written text
+instead of the declaration comment.
 
 ## Byte conventions
 
