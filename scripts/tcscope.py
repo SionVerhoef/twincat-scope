@@ -157,7 +157,7 @@ def need(module):
 #
 # Two dialects: TAB with European decimal commas and 17 metadata rows, and ','
 # with '.' decimals and a Name row only. ';' appeared in none of the 19 real
-# files but the synthetic EU fixture uses it, so it stays supported.
+# files, but Scope View writes it when asked and a real ';' export read cleanly.
 # --------------------------------------------------------------------------
 
 # A metadata row repeats its key at every group start, so these double as the

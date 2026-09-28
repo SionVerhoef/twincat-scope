@@ -65,27 +65,32 @@ send different files for the same recording. Ask which settings they used, or re
 off `manifest --dump-header`. This table lists what to choose and why.
 
 "Tool-verified" means the same real 60 s recording (2 ms + 4 ms groups) was exported through
-`TC3ScopeExportTool.exe config=` once per option, and each CSV read back. Where Scope View's
-own export may differ, that is said.
+`TC3ScopeExportTool.exe config=` once per option, and each CSV read back. "SV-verified" means
+the same recording was exported from Scope View's own dialog with that option and read back.
+The *Scope View default* column is what the dialog offered untouched on one workstation
+(Scope 3.4). **The dialog then remembers the last settings used**, so the next export from
+that PC is not the default: one came out TAB-separated while the default is Comma. Always
+check the file, not the user's memory of the dialog.
 
-| Option (`CSVProperties` element) | Choose | Why, and how well it is known |
-|---|---|---|
-| **Header configuration** (`HeaderKonfiguration`, a bit mask) | The fullest preset (`All`, 16777215) | **Tool-verified.** `All` and `StandardBIN` (16383) keep `Data-Type`, `SymbolName` and `Port`. `Short` (1833) keeps `SymbolName`, `NetID` and `Port` but drops `Data-Type`; `Name` (1) keeps only names. All four read to the right groups; `manifest` shows `data_type: null` where the row is missing. A `Name`-only header leaves copies collapsed only on Scope's own `<name> (n)` naming (`matched_on: "name"`). **`None` (0) writes no header at all, and the reader refuses it**: nothing says where one group ends and the next begins. |
-| **Timelines** (`TimelineMode`: `All`, `OnePerSampleTime`, `None`) | *For each sample time* | One time column per group, the layout the reader is built around. *All* (one per channel) matched *For each sample time* on the tool, but every group in that recording held one channel, so it proved nothing. **Never *None***: with interpolation off the tool wrote no file and still exited 0. From Scope View, *All* and *None* are **untested**. |
-| **Interpolation** (`Interpolation`: `None`, `Shift`, `Stair`) | *None* or *Fill with previous value* | **From Scope View, both verified on a real 60 s export**: *None* writes the slow group on the first rows and then shorter rows; *Fill* repeats each slow sample (time `0,0,4,4…`). Both read to 30001 and 15001 samples over 60 s. **The tool ignored interpolation**: `Stair` and `Shift`, with any `TimelineMode`, gave its usual unpadded layout. *Shift value* from Scope View is **untested**. |
-| **CSV separator / decimal mark** (`Seperator`: `Tab`, `Blank`, `Colon`, `Semicolon`, `Comma`; `DecimalMark`) | TAB or `;` with `,`, or `,` with `.` | **Tool-verified**: TAB/`,`, `;`/`,` and `,`/`.` read identically. **`,` for both** is refused: fields and decimals can't be told apart. **Blank and Colon** are refused by name, because the header's paths, dates and clock times contain the same character. |
-| **Full Timestamp** (`FullTimeStamp`) | Off | On writes absolute FILETIME (100 ns ticks since 1601) in every time column. **Tool-verified**: same counts and duration, `start_filetime` equal to the header's `Starttime of export` tick. **The ticks are UTC**: the header's readable date and time beside them is local time (2 h ahead, CEST). |
-| **Scale values before export** (`ScaleValues`) | Off | The reader treats values as raw, the same as the PLC variable. Scaled values are whatever the display was configured to show. On the tool, a recording without scaling came out unchanged. The effect on a scaled channel is **untested**. |
-| **Include trigger info** (`IncludeTriggerInfos`) | Either | **Tool-verified**: a small table after the preamble, `TriggerGroup, Count, ReleaseTime, Comment`, one row per trigger release. The reader skips it: same counts, no `malformed_rows`. |
-| **Marker windows** (`IncludeMarkerTables`: `None`, `All`, `Custom`) | None | `All` changed nothing on a recording with no markers. With markers, **untested**. |
-| **Include EOF tag** (`ContainEOF`) | Either | **Tool-verified**: a trailing `EOF` row is skipped. |
-| **Sort channels by sample time** (`SortChannels`) | Either | Changes only the column order. The reader keys on groups, not position. Its groups were already in sample-time order, so the tool's output did not change. |
-| `ExcludeDoubleTimestamp` | — | No effect on the tool's output for this recording. |
+| Option (`CSVProperties` element) | Scope View default | Choose | Why, and how well it is known |
+|---|---|---|---|
+| **Header configuration** (`HeaderKonfiguration`, a bit mask) | **Name only** | ***Full*** (`All`, 16777215) — **change it**, the default is too thin | **Tool- and SV-verified.** `All` and `StandardBIN` (16383) keep `Data-Type`, `SymbolName` and `Port`. `Short` (1833) keeps `SymbolName`, `NetID` and `Port` but drops `Data-Type`; `Name` (1) keeps only names. All four read to the right groups; `manifest` shows `data_type: null` where the row is missing. A `Name`-only header leaves copies collapsed only on Scope's own `<name> (n)` naming (`matched_on: "name"`). **`None` (0) writes no header at all, and the reader refuses it**, with or without a trigger-info table above the data: nothing says where one group ends and the next begins. |
+| **Timelines** (`TimelineMode`: `All`, `OnePerSampleTime`, `None`) | For each sample time | *For each sample time* | One time column per group, the layout the reader is built around. *All* (one per channel) matched *For each sample time* on the tool and in Scope View, but every group in that recording held one channel, so it proved nothing. **Never *None***: from Scope View it writes no time column at all, and the reader refuses a time column that runs backwards; the tool, with interpolation off, wrote no file and still exited 0. |
+| **Interpolation** (`Interpolation`: `None`, `Shift`, `Stair`) | None | *None* or *Fill with previous value* | **SV-verified, all three.** *None* writes the slow group on the first rows and then shorter rows. *Fill with previous value* (`Stair`) repeats each slow sample (time `0,0,4,4…`, `repeat_factor` 2). *Shift value* puts each slow value only on the row whose time matches and leaves single-space cells between (`2,50, , `); it read to 29 999 + 15 000, the same as the tool at that range. **The tool ignores interpolation**: `Stair` and `Shift`, with any `TimelineMode`, gave its usual unpadded layout. |
+| **CSV separator / decimal mark** (`Seperator`: `Tab`, `Blank`, `Colon`, `Semicolon`, `Comma`; `DecimalMark`) | Comma / Point | TAB or `;` with `,`, or `,` with `.` | **Tool-verified**: TAB/`,`, `;`/`,` and `,`/`.` read identically; **SV-verified** for `;`/`,` and the `,`/`.` default. **`,` for both** is refused: fields and decimals can't be told apart. **Blank and Colon** are refused by name, because the header's paths, dates and clock times contain the same character. |
+| **Full Timestamp** (`FullTimeStamp`) | Off | Off | On writes absolute FILETIME (100 ns ticks since 1601) in every time column. **Tool-verified**: same counts and duration, `start_filetime` equal to the header's `Starttime of export` tick. **The ticks are UTC**: the header's readable date and time beside them is local time (2 h ahead, CEST). |
+| **Scale values before export** (`ScaleValues`) | Off | Off | The reader treats values as raw, the same as the PLC variable. Scaled values are whatever the display was configured to show. On the tool, a recording without scaling came out unchanged. The effect on a scaled channel is **untested**. |
+| **Include trigger info** (`IncludeTriggerInfos`) | Off | Either | **Tool- and SV-verified**: a small table, `TriggerGroup, Count, ReleaseTime, Comment`, one row per trigger release. The reader skips it: same counts, no `malformed_rows`. |
+| **Marker windows** (`IncludeMarkerTables`: `None`, `All`, `Custom`) | None ("only included channels/marker" on) | None | `All` changed nothing on a recording with no markers. With markers, **untested**. |
+| **Include EOF tag** (`ContainEOF`) | Off | Either | **Tool-verified**: a trailing `EOF` row is skipped. |
+| **Sort channels by sample time** (`SortChannels`) | On | Either | Changes only the column order. The reader keys on groups, not position. Its groups were already in sample-time order, so the tool's output did not change. |
+| `ExcludeDoubleTimestamp` | — | — | No effect on the tool's output for this recording. |
 
-Scope View's defaults for these options are **not yet recorded**. Both real recordings seen
-carry TAB, decimal `,`, the `All` header, `EOF` on and every other option off in their
-`<ExportConfigurationString>`, but a saved value is not necessarily the default.
+So Scope View's defaults give the `,`/`.` dialect with a Name-only header, and the tool (on a
+Dutch-locale PC) gives TAB/`,` with the full header. Both read; only the second says which
+symbol, type and port each column is. The one change worth asking a user for is the header.
 Report any other layout with `manifest --dump-header`, redacted per `examples/README.md`.
+
 ### Formats and licensing
 
 | Format | Licence |
@@ -112,8 +117,8 @@ $env:TCSCOPE_EXPORT_TOOL = "C:\TwinCAT\Functions\TE1300-Scope-View\TC3ScopeExpor
 `tests/make_real_fixtures.py` reproduces the five layouts they use. The step *before* it has
 now been observed too: the real tool converted two `.svdx` recordings first time with the
 invocation above (`evals/field-review-3e4c44d.md`). What that leaves unproven is variety —
-one machine, one tool version. The `;` delimiter has now been read in a real file, but one
-the tool wrote through `config=`, not one a user sent (`evals/field-review-8bf9230.md`). The
+one machine, one tool version. The `;` delimiter has now been read in real files, written
+both by the tool through `config=` and by a user from Scope View (`evals/field-review-8bf9230.md`). The
 reader still sniffs each file and reports what it detected — if something looks wrong,
 `manifest --dump-header` shows the raw first lines, and those beat the sniffer.
 

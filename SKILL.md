@@ -96,7 +96,9 @@ Then descend the ladder — never skip to the bottom:
 
 **Report:** what the data shows · which channel and which timestamp · what you did **not**
 check · what the human should do next. If the evidence is consistent with two causes, say
-both — a confident wrong diagnosis costs a day on the shop floor.
+both — a confident wrong diagnosis costs a day on the shop floor. Quote an error code only
+if it is in the recording or in a source you name; never give "for example" NC or drive
+error IDs from memory — they look authoritative and get looked up as fact.
 
 ## Workflow — building a recording
 
@@ -178,9 +180,14 @@ measured against 19 genuine exports (both dialects, all three alignment states);
 and with repeat padding, reads to the same 30001 and 15001 samples over 60 s either way.
 With the default export range (4 ms shorter at the start) the tool and Scope View export the
 same 29999 and 15000 samples. The tool's `config=` option was run once per CSV setting on that
-recording: every layout read correctly or was refused by name.
+recording, and Scope View's own dialog for the header, interpolation (*Fill* and *Shift*),
+`;` with `,`, Timelines and trigger info: every layout read correctly or was refused by name.
+`ingest` converted a 600 s, 33-channel, 5-group recording (65.7 MB) in 16.7 s.
+`checkscope` has read real *Set Mark*, *Start Record*, *Stop Record* and *Reporting Trigger*
+triggers. Asked about a fault in a folder holding a `.svdx`, without being told the skill's
+name, a Claude desktop agent loaded this skill and followed the ladder.
 
-Not verified: the analysis verbs against the variety of those 19 exports (one real recording
-so far), a `;` file that a user exported, and Scope View's own handling of *Timelines* and
-*Shift* interpolation (`references/export-tool.md` marks each one). Rule 3 applies to this
-skill's own claims: report at exactly that precision.
+Not verified: the analysis verbs against the variety of those 19 exports (two real recording
+shapes so far), Timelines *All* on a group of several channels, scaled channels, marker
+windows, and an axis parked at a limit (`references/export-tool.md` marks each one). Rule 3
+applies to this skill's own claims: report at exactly that precision.
