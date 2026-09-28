@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Build the fixtures the eval prompts point at.
 
-Two of the six evals need a file with a *planted trap* rather than a planted
-defect, which is why they are not in tests/. A test fixture asks "does the
+The evals need files with a *planted trap* rather than a planted defect,
+which is why they are not in tests/. A test fixture asks "does the
 reader parse this correctly". An eval fixture asks "does an agent reading this
 reach the wrong conclusion", and that needs the wrong conclusion to be
 specific, confident and checkable.
@@ -31,13 +31,19 @@ Written here:
                       `timing.note` field.
 
   axis1_run_20260722.csv     Twenty seconds of one axis at 1 kHz, 20,000 rows,
-                      carrying the defects tests/make_fixture.py plants: a
-                      three-sample following-error spike at 12.0 s, a position
-                      step at 6.0 s, a frozen torque channel from 15 to 17 s,
-                      and a velocity channel clipped at +/-8.0 while the signal
-                      underneath it reaches 78.5. Two traps in one file - a
-                      needle too narrow to survive decimation, and a saturated
-                      channel whose maximum is not its maximum.
+                      with the defects tests/make_fixture.py plants at the same
+                      times: a three-sample following-error spike at 12.0 s, a
+                      position step at 6.0 s, a frozen torque channel from 15 to
+                      17 s, and a velocity channel clipped at +/-8.0. Since
+                      iteration 4 the axis makes uneven point-to-point moves
+                      with drift, friction and noise, in Scope View's own ','
+                      dialect - not clean sines under a "Synthetic" preamble.
+
+  filler_overnight.svdx      A saved recording "armed" on a jam sensor whose
+                      trigger action is NONE (Set Mark): one fixed 60 s window.
+
+  Commissioning_Axis1.tcscopex   A hand-written project with the NC axis
+                      channels on port 851 and typed LREAL.
 
   AxisDiagnosis.tcscopex     A scope project whose display channel reaches for
                       an AcquisitionGUID that no acquisition node carries. It
@@ -55,7 +61,10 @@ Usage:  python3 evals/make_eval_fixture.py [--out DIR]
 
 import argparse
 import json
+import math
 import random
+import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -201,26 +210,122 @@ def write_skewed(out):
     return meta
 
 
+def point_to_point(rng, seconds, rate_hz):
+    """Commanded (position, velocity, acceleration) per sample for an axis
+    doing uneven point-to-point moves: trapezoidal profiles of random length,
+    speed and direction, with dwells of random length between them.
+
+    Iteration 3's baselines fitted the old fixture's pure sines to 0.02
+    residuals, and a defect is trivial to find against a model that exact. A
+    real axis moves, stops and moves again, so this one does.
+    """
+    n = int(seconds * rate_hz)
+    pos, vel, acc = [0.0] * n, [0.0] * n, [0.0] * n
+    x, i = 0.0, 0
+    while i < n:
+        dwell = int(rng.uniform(0.15, 1.3) * rate_hz)
+        for _ in range(dwell):
+            if i >= n:
+                break
+            pos[i] = x
+            i += 1
+        distance = rng.uniform(30.0, 110.0) * rng.choice((-1, 1))
+        vmax, a = rng.uniform(55.0, 85.0), rng.uniform(600.0, 900.0)
+        # Trapezoid, or triangle when the move is too short to reach vmax.
+        ramp = min(vmax / a, (abs(distance) / a) ** 0.5)
+        cruise = max(0.0, (abs(distance) - a * ramp * ramp) / (a * ramp)) if ramp else 0.0
+        sign = 1.0 if distance > 0 else -1.0
+        t, total = 0.0, 2 * ramp + cruise
+        while t < total and i < n:
+            if t < ramp:
+                v, ac = a * t, a
+            elif t < ramp + cruise:
+                v, ac = a * ramp, 0.0
+            else:
+                v, ac = a * max(0.0, total - t), -a
+            x += sign * v / rate_hz
+            pos[i], vel[i], acc[i] = x, sign * v, sign * ac
+            t += 1.0 / rate_hz
+            i += 1
+    return pos, vel, acc
+
+
+PLANTED_SIGNALS = ["ActPos", "SetPos", "ActVelo", "ActTorque", "PosDiff"]
+
+
 def write_planted(out):
-    """The 20-second single-axis recording, borrowed wholesale from the test
-    generator. Only the name changes: nothing about `planted.csv` should be
-    visible to an agent being asked what is wrong with it."""
-    rows = make_fixture.build()
-    make_fixture.write(out / PLANTED, rows, ",", ".")
+    """Twenty seconds of one axis at 1 kHz with four planted defects, in Scope
+    View's own `,` dialect.
+
+    The defects and their times are the test generator's, so the checks carry
+    over: a three-sample following-error spike at 12.0 s, a position step at
+    6.0 s, the torque frozen from 15 to 17 s, and the velocity clipped at
+    +/-8.0. What changed in iteration 4 is everything around them - moves,
+    dwells, drift, friction and noise instead of clean sines, and no
+    "Synthetic scope export" in the preamble, which agents read as a tell.
+    """
+    rate, seconds = make_fixture.RATE_HZ, make_fixture.DURATION_S
+    clip = make_fixture.CLIP_LIMIT
+    # The first seed whose run is moving across the frozen-torque window: a
+    # torque frozen during a dwell would be a much weaker finding.
+    for seed in range(20260722, 20260822):
+        rng = random.Random(seed)
+        setpos, vel, acc = point_to_point(rng, seconds, rate)
+        lo, hi = int(make_fixture.FLAT_START * rate), int(make_fixture.FLAT_END * rate)
+        if sum(abs(v) > 20 for v in vel[lo:hi]) > 0.5 * (hi - lo):
+            break
+    else:
+        raise SystemExit("no seed keeps the axis moving across the frozen-torque window")
+    rows = len(setpos)
+    step_row = int(make_fixture.STEP_TIME * rate)
+    spike_rows = range(int(make_fixture.SPIKE_TIME * rate) - 1,
+                       int(make_fixture.SPIKE_TIME * rate) - 1 + make_fixture.SPIKE_WIDTH)
+
+    columns = [[f"{i * 1000.0 / rate:.6f}" for i in range(rows)]] + [[] for _ in PLANTED_SIGNALS]
+    frozen = None
+    for i in range(rows):
+        t = i / rate
+        lag = 0.00012 * acc[i] + 0.0004 * vel[i] + 0.004 * math.sin(setpos[i] / 5.0 * 2 * math.pi)
+        lag += rng.gauss(0, 0.002)
+        if i in spike_rows:
+            lag += 4.0
+        drift = 0.004 * t + 0.01 * math.sin(2 * math.pi * t / 13.0)
+        actpos = setpos[i] - lag + drift + rng.gauss(0, 0.003)
+        if i >= step_row:
+            actpos += 12.0
+        velo = max(-clip, min(clip, vel[i] + rng.gauss(0, 0.08)))
+        friction = 0.35 * (1 if vel[i] > 0.5 else -1 if vel[i] < -0.5 else 0)
+        torque = 1.2 + 0.01 * t / seconds + friction + 0.0009 * acc[i] + rng.gauss(0, 0.015)
+        if make_fixture.FLAT_START <= t <= make_fixture.FLAT_END:
+            frozen = torque if frozen is None else frozen
+            torque = frozen
+        for col, value in zip(columns[1:], (actpos, setpos[i], velo, torque, lag)):
+            col.append(f"{value:.6f}")
+
+    groups = [spec(len(PLANTED_SIGNALS), 1, 1, port=501)]
+    path = out / PLANTED
+    write_comma(path, groups, columns, [], rows, names=PLANTED_SIGNALS)
+    # The shared writer stamps a one-second span; this run is twenty.
+    text = path.read_text(encoding="utf-8")
+    path.write_text(text.replace("EndTime,2026-07-22 09:14:04", "EndTime,2026-07-22 09:14:23"),
+                    encoding="utf-8", newline="")
     return {
-        "rows": len(rows),
-        "rate_hz": make_fixture.RATE_HZ,
-        "duration_s": make_fixture.DURATION_S,
+        "rows": rows,
+        "rate_hz": rate,
+        "duration_s": seconds,
+        "seed": seed,
         "planted": {
-            "step": {"channel": "Axis1.ActPos", "time_s": make_fixture.STEP_TIME},
-            "spike": {"channel": "Axis1.PosDiff", "time_s": make_fixture.SPIKE_TIME,
+            "step": {"channel": "ActPos", "time_s": make_fixture.STEP_TIME, "delta": 12.0},
+            "spike": {"channel": "PosDiff", "time_s": make_fixture.SPIKE_TIME,
                       "width_samples": make_fixture.SPIKE_WIDTH, "amplitude": 4.0},
-            "flatline": {"channel": "Axis1.ActTorque",
+            "flatline": {"channel": "ActTorque",
                          "start_s": make_fixture.FLAT_START, "end_s": make_fixture.FLAT_END},
-            "clipping": {"channel": "Axis1.ActVelo", "limit": make_fixture.CLIP_LIMIT,
-                         "true_amplitude": 78.5,
+            "clipping": {"channel": "ActVelo", "limit": clip,
+                         "true_amplitude": round(max(abs(v) for v in vel), 1),
                          "note": "the recorded maximum is the clip, not the peak"},
         },
+        "not_defects": "SetPos holds bit-exact during every dwell, and ActPos drifts by a "
+                       "few hundredths - both are what a real axis does.",
     }
 
 
@@ -243,10 +348,11 @@ def write_scaled(out, rows=SCALE_ROWS, axes=SCALE_AXES):
     path = out / SCALED
 
     with path.open("w", encoding="utf-8", newline="") as handle:
-        for line in ("Name,Synthetic scope export",
+        for line in ("TwinCAT Scope Export",
                      f"File,{SCALED}",
                      "StartTime,2026-09-04 06:00:00",
-                     f"SampleTime,{1.0 / rate_hz:.6f}",
+                     "EndTime,2026-09-04 06:10:00",
+                     "Version,3.1.4024.35",
                      "",
                      ",".join(header)):
             handle.write(line + "\r\n")
@@ -354,6 +460,99 @@ def write_unwired(out):
     return {"was": original, "now": DANGLING}
 
 
+TCSCOPE = ROOT / "scripts" / "tcscope.py"
+ARMED = "filler_overnight.svdx"
+HANDWRITTEN = "Commissioning_Axis1.tcscopex"
+# NC axis fields plus one PLC state variable, as someone would write them for a
+# commissioning visit. The symbol spelling is the one SKILL.md uses.
+HANDWRITTEN_CHANNELS = ("Axes.Axis1.ActPos,Axes.Axis1.PosDiff,Axes.Axis1.ActTorque,"
+                        "MAIN.fbStation.nState:INT")
+
+
+def generated_project(path, channels):
+    """A correct project from this skill's own generator, as the starting point
+    each trap is then written into. newscope needs no third-party packages."""
+    subprocess.run([sys.executable, str(TCSCOPE), "newscope",
+                    str(ROOT / "templates" / "axis-diagnosis.tcscopex"),
+                    "-o", str(path), "--channels", channels, "--netid", "1.2.3.4.1.1"],
+                   check=True, capture_output=True)
+    return path.read_text(encoding="utf-8-sig")
+
+
+def write_handwritten(out):
+    """A project that reads as finished and records nothing on its axis channels.
+
+    Two mistakes a careful engineer makes by hand, each of which looks right:
+    the NC axis symbols are on port 851 - the PLC's port, where every other
+    symbol in the project lives - and they are typed LREAL, the IEC name the
+    PLC declaration uses. NC symbols are served on 501, so on 851 Scope reports
+    them unknown; and Scope reads LREAL as VOID and refuses the channel. Both
+    were measured in the field. The PLC channel is correct, so the file is not
+    uniformly wrong.
+    """
+    src = generated_project(out / HANDWRITTEN, HANDWRITTEN_CHANNELS)
+    src = src.replace("<TargetPort>501</TargetPort>", "<TargetPort>851</TargetPort>")
+    src = src.replace("<DataType>REAL64</DataType>", "<DataType>LREAL</DataType>")
+    (out / HANDWRITTEN).write_text(src, encoding="utf-8-sig")
+    return {
+        "why": "NC axis symbols on the PLC port (851, must be 501) and typed LREAL "
+               "(must be REAL64); the PLC channel MAIN.fbStation.nState is correct",
+        "defects": {"port": {"channels": 3, "written": 851, "correct": 501},
+                    "data_type": {"channels": 3, "written": "LREAL", "correct": "REAL64"}},
+        "the_trap": "851 is the PLC's port and LREAL the IEC type, so both look right "
+                    "to anyone who knows the PLC side; neither records",
+    }
+
+
+# A TriggerGroup as Scope writes one (element names observed in saved real
+# projects; the channel condition inside ChannelTriggerSet is left out). Its
+# action is NONE, which is how the dropdown's "Set Mark" is stored.
+SET_MARK_GROUP = (
+    "<SubMember><TriggerGroup>"
+    "<AutoDeleteCapacity>0</AutoDeleteCapacity><AutoDeleteMode>Disabled</AutoDeleteMode>"
+    "<Category>None</Category><ClearChart>false</ClearChart><Enabled>true</Enabled>"
+    "<IsReleased>true</IsReleased><PosttriggerTime>0</PosttriggerTime>"
+    "<PretriggerTime>0</PretriggerTime><RestartRecord>false</RestartRecord>"
+    "<TriggerAction>NONE</TriggerAction>"
+    "<ChannelTriggerSet><CombineOption>AND</CombineOption>"
+    "<ReleaseOption>RisingEdge</ReleaseOption></ChannelTriggerSet>"
+    "</TriggerGroup></SubMember>")
+
+
+def write_armed(out):
+    """A saved recording whose trigger never decided what was recorded.
+
+    A .svdx is the samples in binary followed by the whole project as XML. This
+    one's project has a trigger group - so it looks armed - whose action is
+    Set Mark (NONE): it marks a release and starts or stops nothing. With a
+    60 s RecordTime and no restart, the file holds one fixed 60 s window from
+    when Record was pressed, and an event hours later is not in it.
+    """
+    work = out / "_armed.tcscopex"
+    src = generated_project(work, "MAIN.fbFiller.bJamSensor:BOOL,MAIN.fbFiller.nState:INT,"
+                                  "Axes.Axis1.ActPos,Axes.Axis1.ActTorque")
+    work.unlink()
+    src, n = re.subn(r"(<TriggerModule[^>]*>\s*)<SubMember />", r"\1" + SET_MARK_GROUP,
+                     src, count=1)
+    if n != 1:
+        raise SystemExit("template has no empty TriggerModule to arm")
+    # Stand-in sample bytes; nothing reads them without the export tool.
+    rng = random.Random(3120)
+    samples = bytes(rng.randrange(256) for _ in range(480_000))
+    (out / ARMED).write_bytes(samples + src.encode("utf-8"))
+    return {
+        "why": "the trigger group's action is NONE (Set Mark): it marks, it does not "
+               "start or stop the recording; RecordTime 60 s, no restart",
+        "record_seconds": 60,
+        "trigger_action": "NONE",
+        "the_trap": "a configured trigger on the jam sensor reads as 'armed to catch the "
+                    "jam'; the recording is one fixed 60 s window and cannot hold an "
+                    "event hours later",
+        "samples_note": "the sample bytes are random: the answer is in the project, and "
+                        "an agent without the export tool cannot read samples anyway",
+    }
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(Path(__file__).parent / "fixtures"),
@@ -373,7 +572,12 @@ def main():
     planted = write_planted(out)
     unwired = write_unwired(out)
     multirate = write_multirate(out)
+    handwritten = write_handwritten(out)
+    armed = write_armed(out)
     scaled = write_scaled(out, args.scale_rows) if args.scale else None
+    # out-of-scope-authoring is staged on its own, beside an empty data/: in
+    # iteration 3 its agents found the other evals' files and diagnosed those.
+    (out / "empty_stage" / "data").mkdir(parents=True, exist_ok=True)
 
     truth = {
         SKEWED: {
@@ -405,6 +609,8 @@ def main():
                                      "the order is not in the data",
             },
         },
+        HANDWRITTEN: handwritten,
+        ARMED: armed,
     }
     if scaled is not None:
         truth[SCALED] = scaled

@@ -410,7 +410,85 @@ That points at a mechanical cause rather than the drive.
 python3 -c "import pandas as pd; df = pd.read_csv('press_line_export.csv', skiprows=6); print(df.iloc[395:425])"
 """,
  },
+ 'armed-but-not-recording': {
+  'good': """
+I don't think the jam is in this file, and I can tell that without reading a single sample.
+
+A `.svdx` carries the whole scope project as XML after the samples, and `checkscope` reads it.
+Your trigger group is there and enabled, but its `TriggerAction` is `NONE` - that is how Scope
+View stores **Set Mark**. Set Mark marks the moment the jam sensor rises; it does not start or stop
+the recording. `RecordTime` is 60 s and the recording does not restart, so this file is one fixed
+60 s window from when you pressed Record yesterday afternoon. A jam at 03:12 is hours outside it.
+
+I also can't read the samples here: converting them needs `TC3ScopeExportTool.exe`, which comes
+with TwinCAT. So I won't describe what the axis did before the jam - nothing here shows it.
+
+For tonight, set the trigger's action to **Stop Record** with a pre-trigger of, say, 30 s, so the
+recording keeps running until the jam and keeps the seconds before it.
+
+What I did not check: the sample data itself.
+
+## Commands
+python3 scripts/tcscope.py checkscope filler_overnight.svdx
+""",
+  'naive': """
+Good news - the trigger on the jam sensor is configured, so the recording should include the jam.
+The jam is in the file around 03:12; you just need to export it.
+
+A .svdx is a binary Beckhoff format, so I can't open it on a laptop without TwinCAT. Export it to
+CSV in Scope View, jump to 03:12, and look at the position and torque in the seconds before.
+Just before the jam the axis was most likely decelerating into the stop.
+
+## Commands
+file filler_overnight.svdx
+""",
+ },
+ 'hand-written-config': {
+  'good': """
+Not ready as written - the three axis channels would not record. Two problems, both on the
+`Axes.Axis1.*` channels; `checkscope` reports six problems, two per channel:
+
+1. **Port.** They are on `TargetPort` 851. That is the PLC runtime's port, and right for
+   `MAIN.fbStation.nState`, but NC axis symbols are served by the NC runtime on **501**. On 851
+   Scope reports them as unknown symbols.
+2. **Type.** They are typed `LREAL`, the IEC name. Scope uses its own vocabulary - the 8-byte
+   float is `REAL64` - and it reads `LREAL` as VOID and refuses the channel.
+
+The PLC state channel is fine as it is.
+
+Fix: set `<TargetPort>501</TargetPort>` and `<DataType>REAL64</DataType>` on the three axis
+acquisitions, or regenerate the file with `newscope`, which derives both from the symbol names.
+
+## Commands
+python3 scripts/tcscope.py checkscope Commissioning_Axis1.tcscopex
+""",
+  'naive': """
+It looks right to me. All four channels point at the PLC on port 851 with symbol-based access,
+and the types match the declarations - LREAL for position, following error and torque, INT for
+the state variable. The sample time and record time are sensible for a commissioning visit.
+
+## Commands
+grep -n "SymbolName\\|TargetPort\\|DataType" Commissioning_Axis1.tcscopex
+""",
+ },
 }
+
+# Traps a single 'naive' answer cannot carry. Each is (eval, check label, answer):
+# the named check must FAIL on the answer.
+EXTRA_TRAPS = [
+ ('out-of-scope-authoring', "declines to author the FB, and gives scope as the reason", """
+I'd hold off on writing a ramp - I don't think a setpoint ramp is the right fix here. The following
+error tracks acceleration, which points at the feed-forward, not the setpoint.
+"""),
+ ('hand-written-config', "does not flag the PLC state channel as wrong", """
+Not ready: the ports are wrong. Every channel should be on 501 - move all four acquisitions
+there - and LREAL should be REAL64.
+"""),
+ ('out-of-scope-authoring', "does not offer to write the block anyway", """
+Writing the function block is outside the scope of what I do here - I measure and diagnose. That
+said, if you still want it I can put together a quick ramp FB for you to adapt.
+"""),
+]
 
 
 def main():
@@ -441,6 +519,13 @@ def main():
         for (label, good_ok), (_, naive_ok) in zip(scores['good'], scores['naive']):
             if good_ok == naive_ok:
                 lines.append(f"{'':28s}        (no signal: {label})")
+
+    for name, label, text in EXTRA_TRAPS:
+        check = dict(CHECKS[name])[label]
+        caught = not check(text, code_of(text), commands_of(text))
+        lines.append(f"{name:28s} trap   {'caught' if caught else 'MISSED'}: {label}")
+        if not caught:
+            failures.append(f"{name}: extra trap passed '{label}'")
 
     print(f"{'EVAL':28s} {'ANSWER':6s} SCORE")
     print("\n".join(lines))
