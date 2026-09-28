@@ -1096,6 +1096,10 @@ def cmd_ingest(args):
     src = Path(args.input)
     if not src.exists():
         fail(f"{src} does not exist")
+    # Scope's default names (Record_1.svdx) repeat from project to project, so
+    # the stem alone would let one recording overwrite another's cache files.
+    tag = hashlib.sha1(str(src.resolve()).encode(), usedforsecurity=False).hexdigest()[:8]
+    cached = f"{src.stem}-{tag}"
 
     if src.suffix.lower() == ".svdx":
         tool = find_export_tool()
@@ -1104,12 +1108,18 @@ def cmd_ingest(args):
                  "Set TCSCOPE_EXPORT_TOOL, or run: tcscope.py doctor")
         cache = cache_dir()
         cache.mkdir(parents=True, exist_ok=True)
-        csv_out = cache / (src.stem + ".csv")
+        csv_out = cache / f"{cached}.csv"
+        # The tool can exit 0 and write nothing; a CSV left by an earlier run
+        # would then be read as this one.
+        csv_out.unlink(missing_ok=True)
         cmd = [tool, f"svd={src}", f"target={csv_out}", "silent"]
         try:
             subprocess.run(cmd, check=True, capture_output=True)
         except (subprocess.CalledProcessError, OSError) as exc:
             fail(f"export tool failed: {exc}",
+                 f"Try running it by hand: {' '.join(cmd)}")
+        if not csv_out.is_file():
+            fail(f"the export tool exited cleanly but wrote no file for {src}",
                  f"Try running it by hand: {' '.join(cmd)}")
         src = csv_out
 
@@ -1118,11 +1128,7 @@ def cmd_ingest(args):
     if args.output:
         out = Path(args.output)
     else:
-        # Scope's default names (Record_1.svdx) repeat from project to project,
-        # so the stem alone would let one recording overwrite another's cache.
-        tag = hashlib.sha1(str(Path(args.input).resolve()).encode(),
-                           usedforsecurity=False).hexdigest()[:8]
-        out = cache_dir() / f"{Path(args.input).stem}-{tag}.parquet"
+        out = cache_dir() / f"{cached}.parquet"
         out.parent.mkdir(parents=True, exist_ok=True)
     pa = need("pyarrow")
     from pyarrow import parquet as pq
