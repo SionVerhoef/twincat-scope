@@ -160,7 +160,8 @@ Detectors, and what each one actually means on a machine:
 | `ramp` | A commanded move: the signal travelled, but it took many samples to get there |
 | `spike` | Something transient — a torque impulse, EMI on an analogue input, a single bad ADC read |
 | `transition` | A digital channel changed state |
-| `flatline` | The signal stopped updating for a sustained run |
+| `flatline` | A signal that is noisy whenever it moves stopped updating for a sustained run: a frozen sensor, a stalled update |
+| `hold` | A command channel stood exactly still — a setpoint at rest between moves, a velocity setpoint at cruise. Normal, not a fault |
 | `clipping` | The signal hit a rail; the true value is unknown beyond it |
 | `crossing` | A user-supplied threshold was crossed |
 
@@ -173,6 +174,23 @@ value that leaves and returns within that many samples is a spike; one that leav
 is a step. Getting this wrong in either direction is common: too narrow and every spike is
 reported twice as a pair of steps, too wide and genuine steps get swallowed. `--ramp-samples`
 draws the other boundary: an excursion wider than that is a move rather than a discontinuity.
+
+**Command channels.** A setpoint written by the NC's trajectory generator moves without noise,
+so its first difference is constant through a move and never stands out against its own noise:
+on a real axis with 656 moves, the setpoint produced 0 ramps and 655 `flatline`s whose
+severity grew with the length of each rest, above the real faults
+(`evals/field-review-79660f4.md`). A channel whose third difference is under 1% of its first
+while it moves is now treated as a **command**, and `command_channels` names each one. On it,
+each run of change covering at least `--min-step` of its travel is one `ramp`, and each exact
+standstill is a `hold`. A noisy signal that freezes is still a `flatline`. Two cautions: a
+feedback channel with a fine encoder and little noise can pass as a command too, so a `hold`
+on a feedback channel while its command moves is a frozen sensor, and worth comparing; and a
+clean command dwelling at the ends of its travel still reports `clipping`.
+
+**Ranking.** When there are more events than `--max-events`, the defect kinds (`spike`, `step`,
+`flatline`, `clipping`) take the slots first and the descriptive ones (`ramp`, `transition`,
+`hold`, `crossing`) fill what is left, each tier spread across the recording worst-first. The
+summary still counts everything.
 Both names matter — filtering for `step` is how you find the jumps worth explaining, and a
 commanded move is not one of them.
 

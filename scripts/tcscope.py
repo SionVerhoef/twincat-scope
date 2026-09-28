@@ -1454,12 +1454,41 @@ def _is_still(np, finite, finite_d):
     return span / quantum < STILL_LEVELS
 
 
+# A command channel - a setpoint from the NC's trajectory generator, or any
+# computed signal - moves without noise, so its third difference is all but
+# zero next to its first: ~0 on a trapezoid, ~4e-4 on a jerk-limited profile.
+# A measured signal is noisy whenever it moves: 0.2 and up.
+COMMAND_ROUGHNESS = 0.01
+COMMAND_MIN_MOVING = 20
+
+# What a detector reports about a signal behaving normally, rather than a
+# defect. They are returned only once the defects have their slots.
+DESCRIPTIVE_KINDS = frozenset({"ramp", "transition", "hold", "crossing"})
+
+
+def _is_command(np, finite_d):
+    """Does this channel move without noise, the way a setpoint does?
+
+    Measured in the field (round 79660f4): on a clean setpoint every move has a
+    constant first difference, so the noise-relative threshold never saw one -
+    656 moves gave 0 ramps - and every standstill came back as a `flatline`,
+    "stopped updating", with a severity growing with the length of the rest.
+    """
+    d3 = finite_d[:-2], finite_d[1:-1], finite_d[2:]
+    moving = (d3[0] != 0) & (d3[1] != 0) & (d3[2] != 0)
+    if int(moving.sum()) < COMMAND_MIN_MOVING:
+        return False
+    jerk = np.abs(d3[2] - 2 * d3[1] + d3[0])[moving]
+    speed = np.abs(d3[1])[moving]
+    return float(np.median(jerk)) < COMMAND_ROUGHNESS * float(np.median(speed))
+
+
 def cmd_events(args):
     np = need("numpy")
     rec = load(args.input)
     total = len(rec.groups)
 
-    found, still_channels = [], []
+    found, still_channels, command_channels = [], [], []
     for channel in select(rec, args.channels):
         name = channel["name"]
 
@@ -1502,6 +1531,10 @@ def cmd_events(args):
         still = not (digital or integer) and _is_still(np, finite, finite_d)
         if still:
             still_channels.append(name)
+        command = not (digital or integer or still) and _is_command(np, finite_d)
+        if command:
+            command_channels.append(name)
+        reported = []  # (start, end) of this channel's excursion events
 
         if thresh > 0 and not still:
             # A sustained change is ONE event. Reporting each over-threshold
@@ -1541,6 +1574,7 @@ def cmd_events(args):
                     kind = "ramp"
                 else:
                     kind = "step"
+                reported.append((s, s + int(width)))
                 found.append(event(
                     kind,
                     1.0 if kind in ("ramp", "transition") else abs(net) / thresh,
@@ -1549,6 +1583,20 @@ def cmd_events(args):
                     delta=net,
                     width_samples=int(width),
                 ))
+
+        # A command's moves are too smooth for the noise-relative threshold,
+        # so each run of change is one ramp - unless a step or spike above
+        # already covers it.
+        if command:
+            for s, e in zip(*(r.tolist() for r in _runs(np, np.isfinite(d) & (d != 0)))):
+                # A move covers real distance: creep of 1e-9 a sample at rest
+                # changes every sample too, and was 57 "ramps" on one move.
+                if (e - s <= args.ramp_samples or abs(col[e] - col[s]) < args.min_step * span
+                        or any(s < re and rs < e for rs, re in reported)):
+                    continue
+                found.append(event("ramp", 1.0, time=float(t[min(s + 1, t.size - 1)]),
+                                   index=int(s + 1), delta=float(col[e] - col[s]),
+                                   width_samples=int(e - s)))
 
         # A BOOL sits at both its rails 100% of the time and holds each state for
         # as long as the machine needs it. Clipping and flatline describe neither
@@ -1562,11 +1610,15 @@ def cmd_events(args):
 
             # NaN == 0 is False, so a gap in the data breaks a flat run instead
             # of extending it.
+            # On a command, standing exactly still is what a setpoint does
+            # between moves: a `hold`, not a signal that stopped updating.
             flat_starts, flat_ends = _runs(np, np.abs(d) == 0)
             for s, e in zip(flat_starts.tolist(), flat_ends.tolist()):
                 run = e - s
                 if run >= args.flat_samples:
-                    found.append(event("flatline", run / args.flat_samples,
+                    found.append(event("hold", 1.0, time=float(t[s]), samples=run)
+                                 if command else
+                                 event("flatline", run / args.flat_samples,
                                        time=float(t[s]), samples=run))
 
         if args.threshold is not None:
@@ -1587,10 +1639,18 @@ def cmd_events(args):
                          "no clipping or step is reported for them. A signal "
                          "that genuinely moves that little is among them too."
                          if still_channels else None),
+          "command_channels": command_channels,
+          "command_note": (f"These move without noise, as a setpoint does, so a "
+                           "move is a `ramp` and standing exactly still is a "
+                           "`hold`, not a `flatline`. A hold on a feedback "
+                           "channel while its command moves is a frozen sensor: "
+                           "compare the two."
+                           if command_channels else None),
           "severity": "multiple of each detector's own threshold; ramp, "
-                      "transition and crossing are descriptive, always 1.0",
-          "ranking": "worst first within each tenth of the recording, so a "
-                     "truncated answer still spans the whole of it"})
+                      "transition, hold and crossing are descriptive, always 1.0",
+          "ranking": "defects (spike, step, flatline, clipping) before the "
+                     "descriptive kinds; worst first within each tenth of the "
+                     "recording, so a truncated answer still spans the whole of it"})
     return 0
 
 
@@ -1634,6 +1694,18 @@ def _rank(found, t0, t1, cap):
     the number of tenths still spends itself on the worst of them rather than
     the earliest.
     """
+    if len(found) <= cap:
+        return list(found)
+    # Defects first: routine motion - one ramp and one hold per move on a
+    # busy axis - otherwise spends the cap before a frozen sensor is reached.
+    defects = [e for e in found if e["kind"] not in DESCRIPTIVE_KINDS]
+    kept = _spread(defects, t0, t1, cap)
+    routine = [e for e in found if e["kind"] in DESCRIPTIVE_KINDS]
+    return kept + _spread(routine, t0, t1, cap - len(kept))
+
+
+def _spread(found, t0, t1, cap):
+    """Up to `cap` of `found`, worst first within each tenth of the recording."""
     if len(found) <= cap:
         return list(found)
     bins = [[] for _ in range(BINS + 1)]
