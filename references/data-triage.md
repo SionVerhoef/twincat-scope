@@ -51,18 +51,17 @@ repeat-padded, on one core of a small Linux container:
 (20 M samples is 176 MB of array). The 100 MB is the interpreter and numpy, paid by any file.
 The file is read a chunk at a time, so its text is never held whole; the factor of two is
 the parsed blocks and the array they are joined into. So the opening claim — ten minutes of
-twenty channels at 1 kHz — costs about 45–55 s per verb and around half a gigabyte. That is usable on an engineering laptop and slow enough to be worth saying
-out loud before running four verbs in a row on the same file.
+twenty channels at 1 kHz — costs about 45–55 s per verb and around half a gigabyte. That is usable on an engineering
+laptop and slow enough to be worth saying out loud before running four verbs in a row on the same file.
 
 Two things follow for how you work:
 
 - **`ingest` to Parquet first if you will ask more than two questions.** Every verb re-parses
   the CSV from scratch. On the 10 M-sample file: one 13.6 s ingest turns 143.6 MB into an
   11 MB Parquet, after which the same verbs take 1.8–3.3 s instead of 15–16 s. Two questions
-  pay it back. It no longer costs memory either: the Parquet is read one column at a time,
-  without a copy. On a real 600 s, 33-channel recording the Parquet verbs had peaked at
-  ~500 MB against ~330–360 MB from the CSV (`evals/field-review-8bf9230.md`); on a generated
-  export of the same width they now peak at 200–230 MB, at or below the CSV's ~230 MB.
+  pay it back. It costs no extra memory either: the Parquet is read one column at a time,
+  without a copy, and on a 35-channel export the verbs peak at 200–230 MB, at or below the
+  CSV's ~230 MB.
 - **The output stays tiny at every size.** Across the whole table `manifest` returns ~5.9 KB
   and `events` ~28 KB. That is the point of the ladder — the file grew 50×, the answer did
   not grow at all.
@@ -165,9 +164,8 @@ Detectors, and what each one actually means on a machine:
 | `clipping` | The signal hit a rail; the true value is unknown beyond it |
 | `crossing` | A user-supplied threshold was crossed |
 
-An excursion is **one event however long it lasts**. Reporting each over-threshold sample
-separately is what made this verb unusable on real machine data: a single 2.4 s move arrived
-as 1199 "steps" and buried every real fault underneath them.
+An excursion is **one event however long it lasts**. Reported per sample, a single 2.4 s move
+on real machine data would arrive as 1199 "steps" and bury every real fault underneath them.
 
 The step/spike distinction is a judgement about *width*, controlled by `--spike-width`. A
 value that leaves and returns within that many samples is a spike; one that leaves and stays
@@ -176,11 +174,10 @@ reported twice as a pair of steps, too wide and genuine steps get swallowed. `--
 draws the other boundary: an excursion wider than that is a move rather than a discontinuity.
 
 **Command channels.** A setpoint written by the NC's trajectory generator moves without noise,
-so its first difference is constant through a move and never stands out against its own noise:
-on a real axis with 656 moves, the setpoint produced 0 ramps and 655 `flatline`s whose
-severity grew with the length of each rest, above the real faults
-(`evals/field-review-79660f4.md`). A channel whose third difference is under 1% of its first
-while it moves is now treated as a **command**, and `command_channels` names each one. On it,
+so its first difference is constant through a move and never stands out against its own noise.
+Treated like any other signal, a real axis with 656 moves gave 0 ramps and 655 `flatline`s
+ranked above the real faults. So a channel whose third difference is under 1% of its first
+while it moves is treated as a **command**, and `command_channels` names each one. On it,
 each run of change covering at least `--min-step` of its travel is one `ramp`, and each exact
 standstill is a `hold`. A noisy signal that freezes is still a `flatline`. Two cautions: a
 feedback channel with a fine encoder and little noise can pass as a command too, so a `hold`
@@ -224,22 +221,20 @@ anomalous and are always 1.0.
 
 #### Rails that are not rails
 
-Measured on a real recording (`evals/field-review-44d4951.md`):
+Measured on a real recording:
 
 - **An axis standing still is not clipping.** At rest an actual position dithers over a few
   dozen quantisation steps — 49 to 80 levels of 2.47e-5 mm there — and whichever extreme the
-  dither touches most looked like a rail: clipping at 1–11 %, and a micrometre "step" on every
-  still axis at the instant of one real correction. A real-valued channel that spans fewer
+  dither touches most looks like a rail. A real-valued channel that spans fewer
   than 100 of its own quantisation steps is treated as **still**: no clipping or step is
   reported for it, and `still_channels` names every one, so nothing is dropped silently. A
   signal that genuinely moves that little is named there too.
-- **Holding a step is not a rail.** A step enum held at one value clipped at severities of 24
-  to 73 — the highest in that recording, ranked above everything real. Integer channels
-  (declared `INT…`/`UINT…`, or untyped and all whole numbers) are exempt from clipping and
-  flatline, as bits already were. Their changes are still reported.
+- **Holding a step is not a rail.** A step enum held at one value would otherwise rank as
+  the worst clipping in a recording. Integer channels (declared `INT…`/`UINT…`, or untyped and
+  all whole numbers) are exempt from clipping and flatline, as bits are. Their changes are
+  still reported.
 - **An axis moved and then parked did not clip.** It settled a few micrometres off its
-  extreme and the dither never landed on it again; the case the old warning here described
-  did not happen on that machine.
+  extreme and the dither never landed on it again.
 
 **Still unverified:** an axis parked exactly at a hard or software limit, and a genuine
 current-limit saturation — neither was available. Check `stats` → `pct_at_max` and the `plot`
@@ -278,7 +273,7 @@ correlates with almost everything at the cycle period. Treat a high correlation 
 signals that share a driving frequency as uninformative unless the lag says something.
 
 Two more limits worth knowing. Correlation is computed on mean-centred, unit-normalised
-signals, so a high-amplitude channel no longer outranks the low-amplitude one that caused
+signals, so a high-amplitude channel does not outrank the low-amplitude one that caused
 it. And channels from different acquisition groups are refused unless you pass
 `--allow-cross-group`: they are sampled on different clocks, so a lag between them is only
 meaningful beyond the slower group's sample time and the file's `max_skew_ms`. On an export where

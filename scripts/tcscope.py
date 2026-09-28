@@ -20,7 +20,8 @@ Subcommands, analysis side (needs numpy; run under `uv run`):
   ingest      Convert an export (.svdx / CSV) to Parquet, once
   manifest    Channels, units, sample rate, duration, gaps
   stats       Per-channel distribution and health numbers
-  events      Steps, spikes, flatlines, clipping, threshold crossings
+  events      Steps, ramps, spikes, transitions, flatlines, holds, clipping,
+              threshold crossings
   plot        PNG using a min/max envelope, so transients survive
   window      Real rows, for a narrow time range only
   correlate   Cross-channel correlation and lag
@@ -31,15 +32,6 @@ field, and exit non-zero.
 Times: a Scope export states time in milliseconds. This tool converts on read
 and reports seconds everywhere - `manifest` says so via "time_unit": "ms" and
 "times_reported_in": "s".
-
-Status: the CSV reader was measured against 19 genuine TC3ScopeExportTool.exe
-exports from a Beckhoff CX/AX8000 machine (TwinCAT 3.1, EU locale) covering
-both the TAB and ',' dialects, and is tested against structural copies of all
-five layouts those files use. The .tcscopex writer is modelled on real Beckhoff
-sample files. Its first file to reach a machine recorded nothing; with the type,
-name and port fixes, its own unedited output has recorded NC axis and PLC
-channels, with a trigger, and the real export tool has converted the result.
-Both say so rather than implying otherwise.
 """
 
 import argparse
@@ -104,8 +96,20 @@ TRIGGER_ACTIONS_RECORDING = frozenset({
 # output helpers
 # --------------------------------------------------------------------------
 
+def _finite(obj):
+    """NaN and infinity as null: JSON has no spelling for either, and the bare
+    NaN / Infinity Python would print is rejected by strict parsers."""
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _finite(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_finite(v) for v in obj]
+    return obj
+
+
 def emit(obj):
-    json.dump(obj, sys.stdout, indent=2, default=str)
+    json.dump(_finite(obj), sys.stdout, indent=2, default=str, allow_nan=False)
     sys.stdout.write("\n")
 
 
@@ -115,6 +119,16 @@ def fail(message, fix=None):
         out["fix"] = fix
     emit(out)
     raise SystemExit(1)
+
+
+def output_path(value):
+    """Where -o writes, refused up front if its folder does not exist - before
+    the work, and as JSON rather than a traceback from the final write."""
+    path = Path(value)
+    if not path.parent.is_dir():
+        fail(f"cannot write {path}: the folder {path.parent} does not exist",
+             "Create the folder first, or write to one that exists.")
+    return path
 
 
 def need(module):
@@ -450,7 +464,7 @@ def sniff_csv(path, sample_bytes=200_000):
             "the decimal mark - see references/export-tool.md, 'Export settings'",
         )
 
-    meta =_metadata_rows(lines, nonblank, delim, ncols, data_start)
+    meta = _metadata_rows(lines, nonblank, delim, ncols, data_start)
     groups = _parse_groups(meta, ncols, decimal)
     # Include trigger info writes a table of trigger releases above the data,
     # headed TriggerGroup. It says nothing about the columns, so it and what
@@ -814,21 +828,20 @@ def collapse_copies(np, rec):
 
     Scope exports a column per display channel, not per acquisition, so a step
     newscope draws in three tabs comes out three times - "<name>", "<name> (1)",
-    "<name> (2)", each in a group of its own (field round 5: 40 acquisitions,
-    42 columns). Counted three times it triples every event and correlates
-    perfectly with itself. Only exact copies go: same symbol and port, the same
-    time column and the same values. The same symbol recorded twice at another
-    rate is two recordings, and both stay.
+    "<name> (2)", each in a group of its own. Counted three times it triples
+    every event and correlates perfectly with itself. Only exact copies go:
+    same symbol and port, the same time column and the same values. The same
+    symbol recorded twice at another rate is two recordings, and both stay.
 
-    Scope View's own CSV export has no symbol or port to match on (field round
-    6). There the only sign of a copy is Scope's naming: "<name> (n)" beside a
-    "<name>", with identical time and values. That is weaker evidence, so the
-    output says which one was used.
+    Scope View's own CSV export has no symbol or port to match on. There the
+    only sign of a copy is Scope's naming: "<name> (n)" beside a "<name>", with
+    identical time and values. That is weaker evidence, so the output says
+    which one was used.
     """
     kept, collapsed = {}, {}
     # Unsuffixed names are the originals, wherever they sit: Scope View's own
-    # export can put "<name> (1)" before "<name>" (field round 7), and matching
-    # in file order kept the copy as an original. Register them all first.
+    # export can put "<name> (1)" before "<name>", and matching in file order
+    # would keep the copy as an original. Register them all first.
     for group in rec.groups:
         for channel in group["channels"]:
             if (not channel.get("symbol_known", True)
@@ -927,7 +940,7 @@ def load_parquet(path):
 
     The layout travels in the schema metadata because it cannot be recovered
     from column names: without it every group's time axis collapses back into
-    one, which is exactly the defect ingest used to reintroduce silently.
+    one, silently.
     """
     pa = need("pyarrow")
     np = need("numpy")
@@ -941,7 +954,8 @@ def load_parquet(path):
     blob = (source.schema_arrow.metadata or {}).get(PARQUET_META_KEY)
     if not blob:
         fail(
-            f"{path} carries no group layout - it was written by an older ingest",
+            f"{path} carries no group layout - it was not written by this "
+            "tool's ingest, so each group's time axis cannot be recovered",
             "Re-run: tcscope.py ingest <original.csv> -o " + str(path),
         )
     layout = json.loads(blob.decode())
@@ -1055,7 +1069,9 @@ def cmd_doctor(args):
 
     uv = shutil.which("uv")
     add("uv", uv is not None, uv or "not found",
-        "winget install --id=astral-sh.uv -e   (no admin rights needed)")
+        "winget install --id=astral-sh.uv -e   (no admin rights needed)"
+        if os.name == "nt" else
+        "curl -LsSf https://astral.sh/uv/install.sh | sh   (no root needed)")
 
     for mod in ("numpy", "pyarrow", "matplotlib"):
         try:
@@ -1070,15 +1086,16 @@ def cmd_doctor(args):
         "Set TCSCOPE_EXPORT_TOOL to its full path. It ships with TE130x Scope "
         "View and TF3300 Scope Server.")
 
-    cfg = config_dir()
+    cfg, cache = config_dir(), cache_dir()
     try:
-        cfg.mkdir(parents=True, exist_ok=True)
-        probe = cfg / ".write-probe"
+        cache.mkdir(parents=True, exist_ok=True)
+        probe = cache / ".write-probe"
         probe.write_text("ok")
         probe.unlink()
-        add("cache directory", True, str(cfg))
+        add("cache directory", True, str(cache))
     except OSError as exc:
-        add("cache directory", False, f"{cfg}: {exc}", "Set XDG_CONFIG_HOME or LOCALAPPDATA.")
+        add("cache directory", False, f"{cache}: {exc}",
+            "Set LOCALAPPDATA." if os.name == "nt" else "Set XDG_CACHE_HOME.")
 
     if tool:
         try:
@@ -1102,6 +1119,8 @@ def cmd_ingest(args):
     src = Path(args.input)
     if not src.exists():
         fail(f"{src} does not exist")
+    if args.output:
+        output_path(args.output)
     # Scope's default names (Record_1.svdx) repeat from project to project, so
     # the stem alone would let one recording overwrite another's cache files.
     tag = hashlib.sha1(str(src.resolve()).encode(), usedforsecurity=False).hexdigest()[:8]
@@ -1198,6 +1217,8 @@ def _collapse_identical_groups(groups):
 
 def cmd_manifest(args):
     if args.dump_header:
+        if not Path(args.input).is_file():
+            fail(f"{args.input} does not exist")
         with open(args.input, "rb") as fh:
             head = fh.read(4000).decode("utf-8-sig", errors="replace")
         emit({"ok": True, "raw_head": head.splitlines()[:40]})
@@ -1422,7 +1443,7 @@ def _detection_threshold(np, finite_d, span, args):
 
 
 # A real-valued channel whose whole recording spans fewer quantisation levels
-# than this is standing still. Measured in the field (round 7): axes at rest
+# than this is standing still. Measured on a real machine: axes at rest
 # dithered over 49-80 levels of 2.47e-5 mm, and clipped at 1-11 % on whichever
 # extreme the dither touched most, while the one that moved spanned ~16 million.
 # The known cost: a coarse, slow sensor that moves fewer than 100 of its own
@@ -1469,9 +1490,9 @@ DESCRIPTIVE_KINDS = frozenset({"ramp", "transition", "hold", "crossing"})
 def _is_command(np, finite_d):
     """Does this channel move without noise, the way a setpoint does?
 
-    Measured in the field (round 79660f4): on a clean setpoint every move has a
-    constant first difference, so the noise-relative threshold never saw one -
-    656 moves gave 0 ramps - and every standstill came back as a `flatline`,
+    On a clean setpoint every move has a constant first difference, so the
+    noise-relative threshold never sees one - on a real recording, 656 moves
+    gave 0 ramps - and every standstill would come back as a `flatline`,
     "stopped updating", with a severity growing with the length of the rest.
     """
     d3 = finite_d[:-2], finite_d[1:-1], finite_d[2:]
@@ -1485,6 +1506,8 @@ def _is_command(np, finite_d):
 
 def cmd_events(args):
     np = need("numpy")
+    if args.max_events < 1:
+        fail(f"--max-events must be 1 or more, not {args.max_events}")
     rec = load(args.input)
     total = len(rec.groups)
 
@@ -1622,7 +1645,10 @@ def cmd_events(args):
                                        time=float(t[s]), samples=run))
 
         if args.threshold is not None:
-            crossings = np.flatnonzero(np.diff((col > args.threshold).astype(int)) != 0)
+            # NaN compares False, so a gap would read as "below" and cross
+            # twice at every blank. Only a pair of real readings can cross.
+            above = col > args.threshold
+            crossings = np.flatnonzero((above[1:] != above[:-1]) & ok[1:] & ok[:-1])
             for j in crossings[:args.max_events]:
                 found.append(event("crossing", 1.0, time=float(t[j + 1]),
                                    threshold=args.threshold))
@@ -1788,6 +1814,8 @@ def _lag_of(np, x, y, max_lag):
 
 def cmd_correlate(args):
     np = need("numpy")
+    if args.max_lag_samples < 0:
+        fail(f"--max-lag-samples must be 0 or more, not {args.max_lag_samples}")
     rec = load(args.input)
     total = len(rec.groups)
     chosen = select(rec, args.channels)
@@ -1834,7 +1862,7 @@ def cmd_correlate(args):
 
             dt = float(np.median(np.diff(axis))) if axis.size > 1 else 1.0
             xn, yn = _unit_vector(np, x), _unit_vector(np, y)
-            lag, peak = _lag_of(np, xn, yn, max(1, args.max_lag_samples))
+            lag, peak = _lag_of(np, xn, yn, args.max_lag_samples)
             row = {
                 "a": ca["name"], "b": cb["name"],
                 "a_symbol": ca["symbol_name"], "b_symbol": cb["symbol_name"],
@@ -1906,13 +1934,21 @@ def cmd_window(args):
 
     groups = []
     for gid, group, channels, idx in blocks:
+        # A row is keyed by column name, so two channels sharing a short name
+        # would overwrite each other. Those fall back to their qualified path,
+        # and to a #n suffix where even that is shared.
+        short = [ch["name"] for ch in channels]
+        used = {}
+        keys = [_unique(ch["name"] if short.count(ch["name"]) == 1
+                        else ch["symbol_name"], used)
+                for ch in channels]
         groups.append({
             "group": gid,
             "sample_time_ms": group["sample_time_ms_measured"],
-            "channels": [ch["name"] for ch in channels],
+            "channels": keys,
             "rows": [
                 {"time": float(group["time"][i]),
-                 **{ch["name"]: float(ch["values"][i]) for ch in channels}}
+                 **{key: float(ch["values"][i]) for key, ch in zip(keys, channels)}}
                 for i in idx
             ],
         })
@@ -1937,6 +1973,7 @@ def cmd_plot(args):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    output_path(args.output)
     rec = load(args.input)
     chosen = select(rec, args.channels)
     total = len(rec.groups)
@@ -2000,6 +2037,8 @@ def read_tcscopex(path):
 
     An .svdx is the samples in binary followed by the whole project as plain
     UTF-8 XML, so the project is the last <?xml ...> in the file."""
+    if not Path(path).is_file():
+        fail(f"{path} does not exist")
     raw = Path(path).read_bytes()
     if raw.startswith(BOM):
         raw = raw[len(BOM):]
@@ -2057,9 +2096,8 @@ def refresh_guids(root):
 # What a channel is: a symbol, the port that serves it, and its type
 # --------------------------------------------------------------------------
 #
-# Both of these were learned the same way - a generated file that opened
-# cleanly in Scope View and recorded nothing, while every symbol name in it was
-# correct (evals/field-review-1fa0e9b.md).
+# Get either wrong and the file opens cleanly in Scope View and records
+# nothing, while every symbol name in it is correct.
 #
 # TwinCAT serves NC axis symbols and PLC symbols from different ADS ports, so
 # one port written across every channel resolves half of them and fails the
@@ -2370,8 +2408,8 @@ WRAPPER_SEGMENTS = {"nctoplc", "plctonc", "nctoplcaxis", "plctoncaxis",
 # name - and draws them as written: a dark-styled file stayed dark with the IDE
 # in dark theme and in light, and read well in both. Whether Scope themes a
 # colour the file leaves out has not been tested, so every colour here is
-# written and the file is styled for one background. The light greys this tool
-# used to write were glaring in a dark IDE, which is why dark is the default.
+# written and the file is styled for one background. Light greys glare in a
+# dark IDE, which is why dark is the default.
 #
 # Dark's background and axis text are the values a real dark-styled project
 # uses. The traces are one categorical palette stepped per background and
@@ -2412,8 +2450,7 @@ def _axis_style(axis):
 
     Every axis in a real project carries one inside its <SubMember>, and it is
     where the axis text and grid colours live. The fields and values are those
-    of a real one, recorded in evals/field-review-1fa0e9b-rounds.md; newscope
-    only changes the colours.
+    of a real one; newscope only changes the colours.
     """
     # Whitespace means nothing to Scope, but these files get read by people
     # comparing them against a working one, so new nodes are indented to match.
@@ -2612,6 +2649,7 @@ def cmd_newscope(args):
     if not template.exists():
         fail(f"template {template} not found",
              "Templates ship in templates/ next to this script.")
+    output_path(args.output)
     root = read_tcscopex(template)
 
     acquisitions = root.findall(".//AdsAcquisition")
@@ -2647,8 +2685,8 @@ def cmd_newscope(args):
 
     # A fixed window that cannot contain the event is a wasted trip: the
     # template ships 60 s, and a homing sweep or a slow startup sequence runs
-    # past that. checkscope has always warned about the window; this is how you
-    # act on the warning.
+    # past that. checkscope warns about the window; this is how you act on the
+    # warning.
     if args.record_time is not None:
         if not math.isfinite(args.record_time) or args.record_time <= 0:
             fail(f"--record-time must be a positive number of seconds, not "
@@ -2662,12 +2700,20 @@ def cmd_newscope(args):
             fail(f"{template} has no RecordTime element to set")
         record_node.text = str(ticks)
 
+    if args.sample_time_ms is not None and not (
+            math.isfinite(args.sample_time_ms)
+            and int(args.sample_time_ms * TICKS_PER_MS) >= 1):
+        fail(f"--sample-time-ms must be a positive number of milliseconds, not "
+             f"{args.sample_time_ms}",
+             "The shortest sample time that can be written is 0.0001 ms (one "
+             "100 ns tick).")
+
     # Left out, --netid and --port mean "keep the template's own" when there are
     # no --channels, and these defaults only for the channels written new.
     netid = args.netid if args.netid is not None else "0.0.0.0.0.0"
     plc_port = (valid_port(args.port, "--port") if args.port is not None
                 else PLC_FIRST_PORT)
-    requested =([c.strip() for c in args.channels.split(",")]
+    requested = ([c.strip() for c in args.channels.split(",")]
                  if args.channels is not None else [])
     if args.channels is not None and not any(requested):
         # Otherwise this falls through to "unchanged from template" and ok:true,
@@ -3073,11 +3119,14 @@ def cmd_checkscope(args):
         name = (node.findtext("Name") or "").strip()
         acq_names.setdefault(name, []).append(symbol or "(no symbol)")
         acq_guids.add(guid)
-        ticks = node.findtext("BaseSampleTime")
+        ticks = (node.findtext("BaseSampleTime") or "").strip()
         rate = None
-        if ticks and ticks.isdigit() and int(ticks) > 0:
+        if ticks.isdigit() and int(ticks) > 0:
             rate = 1000.0 / (int(ticks) / TICKS_PER_MS)
             total_rate += rate
+        elif ticks and (node.findtext("UseTaskSampleTime") or "").strip().lower() != "true":
+            problems.append(f"{symbol}: BaseSampleTime '{ticks}' is not a "
+                            "positive number of 100 ns ticks")
         else:
             # An acquisition on the task's own sample time declares no
             # BaseSampleTime, so it contributes nothing to the total below. Say
@@ -3167,9 +3216,9 @@ def cmd_checkscope(args):
         if resolved and expected and resolved[0] != expected:
             warnings.append(
                 f"{symbol}: DataType {resolved[0]}, but this NC field is "
-                f"{expected} in the real project files seen. An older newscope wrote "
-                f"NC status fields as {DEFAULT_SCOPE_TYPE}; regenerate unless "
-                "you know otherwise."
+                f"{expected} in the real project files seen. The type decides how the "
+                "bytes are read, so a mismatch records the wrong value; "
+                "regenerate unless you know otherwise."
             )
 
         channels.append({"symbol": symbol, "ams_net_id": netid, "rate_hz": rate,
@@ -3513,6 +3562,11 @@ def build_parser():
 
     sub.add_parser("doctor", help="check the environment").set_defaults(func=cmd_doctor)
 
+    # Analysis verbs select existing columns; newscope's --channels says what
+    # to record, and has its own help below.
+    select_help = ("comma-separated channels, by short name or qualified "
+                   "symbol path (default: all)")
+
     q = sub.add_parser("ingest", help="convert .svdx/CSV to Parquet")
     q.add_argument("input")
     q.add_argument("-o", "--output",
@@ -3527,87 +3581,98 @@ def build_parser():
 
     q = sub.add_parser("stats", help="per-channel distribution and health")
     q.add_argument("input")
-    q.add_argument("--channels")
+    q.add_argument("--channels", help=select_help)
     q.set_defaults(func=cmd_stats)
 
-    q = sub.add_parser("events", help="steps, ramps, spikes, flatlines, clipping")
+    q = sub.add_parser("events", help="steps, ramps, spikes, transitions, flatlines, "
+                                      "holds, clipping, crossings")
     q.add_argument("input")
-    q.add_argument("--channels")
-    q.add_argument("--sigma", type=float, default=6.0)
+    q.add_argument("--channels", help=select_help)
+    q.add_argument("--sigma", type=float, default=6.0,
+                   help="step/spike threshold, in multiples of the channel's "
+                        "robust noise estimate")
     q.add_argument("--min-step", type=float, default=0.01,
                    help="floor under --sigma, as a fraction of the channel's own "
-                        "travel. Without it, a signal that rests has a noise "
-                        "estimate of ~0 and every sample of a move is an event.")
+                        "travel; without it a channel at rest reports every "
+                        "sample of a move")
     q.add_argument("--ramp-samples", type=int, default=3,
-                   help="an excursion wider than this many samples is a ramp - a "
-                        "commanded move - rather than a step discontinuity")
+                   help="an excursion wider than this many samples is a ramp (a "
+                        "commanded move), not a step")
     q.add_argument("--spike-width", type=int, default=16,
-                   help="how many samples a value may stay out before it counts "
-                        "as a step rather than a spike")
-    q.add_argument("--flat-samples", type=int, default=50)
-    q.add_argument("--clip-fraction", type=float, default=0.01)
-    q.add_argument("--threshold", type=float)
-    q.add_argument("--max-events", type=int, default=100)
+                   help="samples a value may stay out and still count as a "
+                        "spike rather than a step")
+    q.add_argument("--flat-samples", type=int, default=50,
+                   help="identical consecutive samples before a flatline or hold "
+                        "is reported")
+    q.add_argument("--clip-fraction", type=float, default=0.01,
+                   help="fraction of samples at the min or max before clipping "
+                        "is reported")
+    q.add_argument("--threshold", type=float,
+                   help="report every crossing of this level")
+    q.add_argument("--max-events", type=int, default=100,
+                   help="most events returned, worst first across the recording")
     q.set_defaults(func=cmd_events)
 
     q = sub.add_parser("plot", help="PNG with a min/max envelope")
     q.add_argument("input")
-    q.add_argument("-o", "--output", required=True)
-    q.add_argument("--channels")
-    q.add_argument("--width", type=int, default=1200)
+    q.add_argument("-o", "--output", required=True, help="PNG to write")
+    q.add_argument("--channels", help=select_help)
+    q.add_argument("--width", type=int, default=1200,
+                   help="image width in pixels, one envelope bucket per pixel")
     q.set_defaults(func=cmd_plot)
 
     q = sub.add_parser("window", help="real rows for a narrow time range")
     q.add_argument("input")
-    q.add_argument("--start", type=float, required=True)
-    q.add_argument("--end", type=float, required=True)
-    q.add_argument("--channels")
-    q.add_argument("--max-rows", type=int, default=500)
+    q.add_argument("--start", type=float, required=True,
+                   help="window start, in seconds")
+    q.add_argument("--end", type=float, required=True,
+                   help="window end, in seconds")
+    q.add_argument("--channels", help=select_help)
+    q.add_argument("--max-rows", type=int, default=500,
+                   help="refuse a window holding more rows than this")
     q.set_defaults(func=cmd_window)
 
     q = sub.add_parser("correlate", help="cross-channel correlation and lag")
     q.add_argument("input")
-    q.add_argument("--channels")
+    q.add_argument("--channels", help=select_help + "; at least two")
     q.add_argument("--max-lag-samples", type=int, default=20000,
-                   help="widest lag searched, in samples. It bounds the search, "
-                        "not the data: every sample is still correlated.")
+                   help="widest lag searched, in samples; bounds the search, "
+                        "not the data")
     q.add_argument("--allow-cross-group", action="store_true",
                    help="compare channels from different acquisition groups by "
-                        "resampling onto a common axis. They do not share a clock.")
+                        "resampling onto a common axis; they do not share a clock")
     q.set_defaults(func=cmd_correlate)
 
     q = sub.add_parser("newscope", help="write a .tcscopex from a template")
     q.add_argument("template")
-    q.add_argument("-o", "--output", required=True)
-    q.add_argument("--channels",
-                   help="comma-separated symbols, each optionally with its type: "
-                        "'MAIN.fb.sbFlag:BOOL,MAIN.fb.seStep:INT,Axes.A1.ActPos'. "
-                        "Known NC axis fields under 'Axes.' get their NC type; "
-                        "any other undeclared channel is written as "
-                        f"{DEFAULT_SCOPE_TYPE}, which is wrong for a BOOL or an "
-                        "enum and is reported as a default rather than a fact.")
+    q.add_argument("-o", "--output", required=True, help=".tcscopex to write")
+    q.add_argument("--channels", metavar="SYMBOL[:TYPE[:PORT]],...",
+                   help="symbols to record, each optionally with its type (IEC "
+                        "or Scope's own) and ADS port, e.g. "
+                        "'MAIN.fb.sbFlag:BOOL,MAIN.fb.seStep:INT:852,Axes.A1.ActPos'. "
+                        "An undeclared type is the NC field's own under 'Axes.', "
+                        f"else {DEFAULT_SCOPE_TYPE} - wrong for a BOOL or an "
+                        "enum, and reported as a default")
     q.add_argument("--netid",
-                   help="target AmsNetId (0.0.0.0.0.0 for new channels). Left "
-                        "out with no --channels, the template's own is kept.")
+                   help="target AmsNetId (default 0.0.0.0.0.0 for new channels; "
+                        "without --channels, the template's own is kept)")
     q.add_argument("--port", type=int,
-                   help=f"ADS port for PLC symbols ({PLC_FIRST_PORT} for new "
-                        f"channels). Symbols under 'Axes.' are served by the NC "
-                        f"runtime and always go to {NC_PORT}. Left out with no "
-                        f"--channels, the template's own ports are kept.")
-    q.add_argument("--sample-time-ms", type=float)
+                   help=f"ADS port for PLC symbols (default {PLC_FIRST_PORT}); "
+                        f"symbols under 'Axes.' always go to {NC_PORT}. Without "
+                        "--channels, the template's own ports are kept")
+    q.add_argument("--sample-time-ms", type=float,
+                   help="sample time of each new channel, in milliseconds "
+                        "(default: the template's)")
     q.add_argument("--record-time", type=float,
-                   help="length of the recording window in seconds. The window "
-                        "has to be long enough to contain the event you are "
-                        "after, or the trip is wasted.")
+                   help="length of the recording window, in seconds; it must "
+                        "contain the event you are after")
     q.add_argument("--layout", choices=("auto", "flat"), default="auto",
                    help="auto: one chart tab per device, stacked bands per "
-                        "quantity. flat: every channel on one axis, which is "
-                        "only readable when they share a scale.")
+                        "quantity. flat: every channel on one axis, readable "
+                        "only when they share a scale")
     q.add_argument("--theme", choices=tuple(THEMES), default=DEFAULT_THEME,
-                   help="chart background the colours are chosen for. Scope "
-                        "stores fixed colours and no value that follows the IDE "
-                        "theme is known. Dark by default: a light chart in a dark "
-                        "IDE was reported as glaring.")
+                   help="chart background the colours are chosen for; Scope "
+                        "stores fixed colours that do not follow the IDE theme")
     q.set_defaults(func=cmd_newscope)
 
     q = sub.add_parser("checkscope", help="validate a .tcscopex")

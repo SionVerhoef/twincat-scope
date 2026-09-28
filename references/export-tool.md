@@ -22,17 +22,17 @@ The binary also carries `svdx=`, and its window has matching Channels / Starttim
 fields. `svdx=` has not been tried.
 
 `tcscope.py ingest` calls this for you when handed a `.svdx`, writing the CSV to its cache
-dir rather than beside the recording, then converts to Parquet. That
-exact command line converted two real recordings first time (`evals/field-review-3e4c44d.md`),
-with the tool found under the TwinCAT root in `Functions\TF3300-Scope-Server\`.
+dir rather than beside the recording, then converts to Parquet. That exact command line has
+converted real recordings, with the tool found under the TwinCAT root in
+`Functions\TF3300-Scope-Server\`.
 
 ### The tool ignores the settings saved in the recording
 
 A `.svdx` carries two export configurations: `<AutoSaveExportConfigurationString>` (its
 `CSVProperties` empty in both real files seen) and `<ExportConfigurationString>` (full
 `CSVProperties`). Editing either one — the separator, the decimal mark, `ContainEOF` — left
-the tool's CSV unchanged, byte for byte apart from the file path it writes into line 2
-(`evals/field-review-8bf9230.md`). Only `config=` changes the output. On one Dutch-locale
+the tool's CSV unchanged, byte for byte apart from the file path it writes into line 2. Only
+`config=` changes the output. On one Dutch-locale
 workstation, with no `config=`, the tool wrote TAB, decimal `,`, the full header and a
 trailing `EOF`.
 
@@ -115,14 +115,11 @@ $env:TCSCOPE_EXPORT_TOOL = "C:\TwinCAT\Functions\TE1300-Scope-View\TC3ScopeExpor
 
 ## The CSV traps
 
-**The reader was measured against 19 genuine export-tool CSVs**, covering both dialects, and
-`tests/make_real_fixtures.py` reproduces the five layouts they use. The step *before* it has
-now been observed too: the real tool converted two `.svdx` recordings first time with the
-invocation above (`evals/field-review-3e4c44d.md`). What that leaves unproven is variety —
-one machine, one tool version. The `;` delimiter has now been read in real files, written
-both by the tool through `config=` and by a user from Scope View (`evals/field-review-8bf9230.md`). The
-reader still sniffs each file and reports what it detected — if something looks wrong,
-`manifest --dump-header` shows the raw first lines, and those beat the sniffer.
+**The reader was measured against 19 genuine export-tool CSVs** and Scope View's own exports,
+covering the TAB, `;` and `,` dialects; `tests/make_real_fixtures.py` reproduces their
+layouts. What is unproven is variety — one machine, one tool version. The reader sniffs each
+file and reports what it detected; if something looks wrong, `manifest --dump-header` shows
+the raw first lines, and those beat the sniffer.
 
 ### Trap 1: the European locale
 
@@ -149,10 +146,13 @@ Row indices into a blank-filtered list do not match indices into the raw file, a
 this wrong silently parses the header row as data — producing one row of `NaN` and a
 duration of `NaN`. The reader tracks raw indices for this reason.
 
-### Trap 3: the time column
+### Trap 3: the time columns
 
-Assumed to be the column whose name contains "time", else column 0. If a recording names it
-something else, `manifest` will show an implausible sample rate — that is the symptom.
+There is one time column per acquisition group, not one per file, and each channel is
+timestamped from its own group's column. The reader finds them from the header's group layout.
+An export with no time column (Timelines *None*) is refused, because a value column read as
+time runs backwards; an implausible `sample_time_ms` in `manifest` is the symptom of anything
+else going wrong here.
 
 ### Trap 4: size
 

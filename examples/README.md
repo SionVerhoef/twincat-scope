@@ -48,7 +48,7 @@ Leave a note beside it:
 examples/
 ├── axis3-following-error.csv
 ├── axis3-following-error.md   <- "Filling machine, servo on a cam profile.
-│                                  Drive tripped F220 at ~12 s. Root cause was a
+│                                  Drive tripped at ~12 s. Root cause was a
 │                                  loose coupling, found after the recording."
 └── axis3-scope.tcscopex
 ```

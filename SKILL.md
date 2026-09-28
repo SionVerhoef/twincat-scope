@@ -63,15 +63,15 @@ Windows; on Linux or macOS (and in this repo's CI) the same commands are `python
    instant; `cross_group_timing_valid: false` means the export is broken and no cross-group
    timing claim from it means anything — say so and re-export. `references/data-triage.md`.
 3. **Times are reported in seconds** everywhere, converted from the export's milliseconds.
-4. **Convert the `.svdx` with `ingest`, once** — everything downstream runs in seconds
-   against Parquet instead of minutes against CSV. The export tool's intermediate CSV goes to
-   the cache dir (`%LOCALAPPDATA%\tcscope\cache`, `$XDG_CACHE_HOME/tcscope` elsewhere),
-   never beside the `.svdx`; `intermediate_csv` names it. Without `-o` the Parquet goes there
-   too, and `output` names it — pass that path to every later verb. A CSV exported from Scope View by
-   hand depends on the user's export settings. Ask for them, or advise the ones in
-   `references/export-tool.md` (*Exporting from Scope View by hand*). Exact copies
-   of a channel drawn in several tabs are collapsed and reported (`copies_collapsed`), and a
-   `display_offset` is where a trace was drawn — never add it to the values.
+4. **Convert with `ingest`, once.** Every later verb then runs in seconds against Parquet
+   instead of minutes against CSV. Without `-o` the Parquet goes to the cache dir
+   (`%LOCALAPPDATA%\tcscope\cache`, `$XDG_CACHE_HOME/tcscope` elsewhere); `output` names it —
+   pass that path to every later verb.
+5. **A CSV exported from Scope View by hand depends on the user's export settings.** Ask for
+   them, or advise the ones in `references/export-tool.md` (*Exporting from Scope View by
+   hand*). A channel drawn in several tabs exports several times; exact copies are collapsed
+   and listed under `copies_collapsed`. A `display_offset` is where a trace was drawn — never
+   add it to the values.
 
 Then descend the ladder — never skip to the bottom:
 
@@ -106,7 +106,7 @@ error IDs from memory — they look authoritative and get looked up as fact.
 py -3 scripts/tcscope.py newscope templates/axis-diagnosis.tcscopex \
     -o MyScope.tcscopex \
     --channels "MAIN.fbAxis.NcToPlc.ActPos,MAIN.fbStation.sbBlocked:BOOL,Axes.Axis1.ActPos" \
-    --netid 192.168.1.10.1.1 --sample-time-ms 1 --record-time 120
+    --netid 1.2.3.4.1.1 --sample-time-ms 1 --record-time 120
 
 py -3 scripts/tcscope.py checkscope MyScope.tcscopex
 ```
@@ -169,31 +169,16 @@ a project; a hand-copied file cannot.
 
 ## Status
 
-**Target:** TwinCAT 3 Scope — TE1300 Scope View and TF3300 Scope Server. There is no
-Beckhoff toolchain where this skill is developed; everything verified came from field
-sessions, written up in `evals/field-review-*.md` and summarised in the README's *Status*.
+**Target:** TwinCAT 3 Scope — TE1300 Scope View and TF3300 Scope Server. Everything verified
+came from field sessions on real machines (`evals/field-review-*.md`).
 
-Verified: unedited generated files **recorded** on a real machine — NC axis channels on 501
-and PLC `BIT`/`INT16`/`REAL64` on 851, with the dark theme, and once end to end through a
-Scope View trigger, the real export tool and `ingest`/`manifest`. The CSV reader was
-measured against 19 genuine exports (both dialects, all three alignment states);
-`checkscope` has read 7 real Beckhoff-authored projects, and reads the project a saved
-`.svdx` carries. One real 60 s recording, exported from Scope View with interpolation *None*
-and with repeat padding, reads to the same 30001 and 15001 samples over 60 s either way.
-With the default export range (4 ms shorter at the start) the tool and Scope View export the
-same 29999 and 15000 samples. The tool's `config=` option was run once per CSV setting on that
-recording, and Scope View's own dialog for the header, interpolation (*Fill* and *Shift*),
-`;` with `,`, Timelines and trigger info: every layout read correctly or was refused by name.
-`ingest` converted a 600 s, 33-channel, 5-group recording (65.7 MB) in 16.7 s.
-`checkscope` has read 25 real project files (22 projects, 3 `.svdx`), and eight of the eleven
-trigger actions as Scope View saved them — *Set Mark*, *Start*/*Stop Record*, *Start*/*Stop
-Subsave*, *Stop Display*, *Export*, *Reporting Trigger* — plus *Ringbuffer* on and off. The
-whole test suite passes on Windows as well as Linux. Asked about a fault in a folder holding a
-`.svdx`, without being told the skill's name, a Claude desktop agent loaded this skill and
-followed the ladder.
+**Verified:** generated files, unedited, **record** — NC axis channels on 501 and PLC
+`BIT`/`INT16`/`REAL64` on 851 — and the whole path ran once end to end: trigger, real export
+tool, `ingest`, `manifest`. The CSV reader handled 19 genuine exports and every CSV option in
+Scope View's dialog, reading each layout or refusing it by name. `checkscope` has read 25 real
+project files, including eight trigger actions and ring-buffer mode.
 
-Not verified: the analysis verbs against the variety of those 19 exports (two real recording
-shapes so far), what a *Subsave* trigger or a ring buffer actually records, Timelines *All* on
-a group of several channels, scaled channels, marker windows, and an axis parked at a limit
-(`references/export-tool.md` marks each one). Rule 3 applies to this skill's own claims:
-report at exactly that precision.
+**Not verified:** the analysis verbs across many real recordings (two shapes so far), the
+`--tmc` reader against a real `.tmc`, what a *Subsave* trigger or a ring buffer actually
+records, scaled channels, marker windows, and an axis parked at a limit. Rule 3 applies to
+this skill's own claims: report at exactly that precision.

@@ -46,11 +46,21 @@ def check(name, condition, detail=""):
     print(f"{'PASS' if condition else 'FAIL'}  {name}" + (f"  — {detail}" if detail else ""))
 
 
+def _no_constant(name):
+    raise ValueError(f"{name} is not JSON")
+
+
+def loads(text):
+    """json.loads, minus Python's leniency: a bare NaN or Infinity is invalid
+    JSON, and a strict consumer of this tool's output would choke on it."""
+    return json.loads(text, parse_constant=_no_constant)
+
+
 def run(*args, expect_ok=True):
     """Invoke the CLI the way a caller would, and parse its JSON."""
     proc = subprocess.run([*BASE_CMD, *map(str, args)], capture_output=True, text=True)
     try:
-        payload = json.loads(proc.stdout)
+        payload = loads(proc.stdout)
     except ValueError:
         return {"ok": False, "error": f"non-JSON output: {proc.stdout[:200]}{proc.stderr[:200]}"}
     if expect_ok and not payload.get("ok"):
@@ -425,9 +435,9 @@ def at_rest_checks():
 
 
 # AMS net IDs that may appear in a public repo: the unfilled template value, the
-# documentation example, and the two the tests pass in. Anything else is a real
+# stand-in the docs and tests use, and a loopback one. Anything else is a real
 # machine address, and this skill is meant to be shareable.
-ALLOWED_NET_IDS = {"0.0.0.0.0.0", "192.168.1.10.1.1", "1.2.3.4.1.1", "127.0.0.1.1.1"}
+ALLOWED_NET_IDS = {"0.0.0.0.0.0", "1.2.3.4.1.1", "127.0.0.1.1.1"}
 NET_ID = re.compile(r"\b(?:\d{1,3}\.){5}\d{1,3}\b")
 
 
@@ -2040,7 +2050,7 @@ def ingest_cache_checks():
         proc = subprocess.run([*BASE_CMD, "ingest", str(svdx), "-o", str(tmp / "rec.parquet")],
                               capture_output=True, text=True, env=env)
         try:
-            out = json.loads(proc.stdout)
+            out = loads(proc.stdout)
         except ValueError:
             out = {"error": proc.stdout[:200] + proc.stderr[:200]}
         csv = Path(out.get("intermediate_csv") or "")
@@ -2061,7 +2071,7 @@ def ingest_cache_checks():
             proc = subprocess.run([*BASE_CMD, "ingest", str(rec)],
                                   capture_output=True, text=True, env=env)
             try:
-                outs.append(json.loads(proc.stdout))
+                outs.append(loads(proc.stdout))
             except ValueError:
                 outs.append({"error": proc.stdout[:200] + proc.stderr[:200]})
         paths = [Path(o.get("output") or "") for o in outs]
@@ -2085,12 +2095,172 @@ def ingest_cache_checks():
                               capture_output=True, text=True,
                               env={**env, "TCSCOPE_EXPORT_TOOL": str(silent)})
         try:
-            stale = json.loads(proc.stdout)
+            stale = loads(proc.stdout)
         except ValueError:
             stale = {"error": "non-JSON: " + proc.stdout[:200] + proc.stderr[:200]}
         check("an export tool that writes nothing is refused, not answered from a stale CSV",
               stale.get("ok") is False and "wrote no file" in (stale.get("error") or ""),
               str(stale.get("error"))[:160])
+
+
+def write_shared_name_export(path, rows=50):
+    """One TAB-dialect group holding two channels with the same short name."""
+    from make_real_fixtures import TAB_KEYS, decimal_comma
+
+    meta = {"Name": ("ActPos", "ActPos"),
+            "SymbolName": ("Line1.Axis1.ActPos", "Line1.Axis2.ActPos")}
+    fixed = {"NetId": "1.2.3.4.1.1", "Port": "501", "SampleTime[ms]": "1,000000",
+             "Data-Type": "REAL64", "SymbolBased": "True", "VariableSize": "8",
+             "Offset": "0", "ScaleFactor": "1,000000", "BitMask": "0",
+             "Unit": "(None)", "IndexGroup": "0", "IndexOffset": "0",
+             "SymbolComment": "", "StartTime": "0", "EndTime": "0"}
+    lines = ["TwinCAT Scope Export", f"File\t{path.name}", ""]
+    for key in TAB_KEYS:
+        lines.append("\t".join([key, *(meta.get(key) or (fixed[key],) * 2)]))
+    for i in range(rows):
+        lines.append("\t".join(decimal_comma(f"{v:.6f}")
+                               for v in (float(i), 1.0 * i, 2.0 * i)))
+    path.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8", newline="")
+
+
+def write_simple_csv(path, header, rows):
+    """A ',' export: one Name row over one time column (ms) and the values."""
+    lines = ["Name,Synthetic scope export", "", ",".join(header)]
+    lines += [",".join(row) for row in rows]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
+
+
+def robustness_checks():
+    """Every failure is a JSON answer, every answer is valid JSON, and a bad
+    option value is refused rather than quietly bent into a good one."""
+    tpl = ROOT / "templates" / "minimal-single-channel.tcscopex"
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+
+        # JSON has no NaN. A group whose time column is blank throughout has
+        # no duration, and says so with null rather than a bare NaN token -
+        # which run() now refuses to parse.
+        blank_time = tmp / "blank_time.csv"
+        write_simple_csv(blank_time, ["Time", "Axis1.A"],
+                         [["", str(i * 0.5)] for i in range(50)])
+        got = run("manifest", blank_time)
+        check("an undefined number is emitted as null, never as NaN",
+              got.get("ok") is True and "duration" in got and got["duration"] is None,
+              str(got.get("error", got.get("duration")))[:80])
+
+        # A missing input, or an output folder that does not exist, is the
+        # tool's own JSON error - not a Python traceback.
+        missing = tmp / "missing"
+        nowhere = tmp / "no-such-folder"
+        for label, args in (
+                ("checkscope on a missing file", ("checkscope", missing)),
+                ("manifest --dump-header on a missing file",
+                 ("manifest", "--dump-header", missing)),
+                ("newscope -o into a missing folder",
+                 ("newscope", tpl, "-o", nowhere / "x.tcscopex")),
+                ("plot -o into a missing folder",
+                 ("plot", FIXTURES / "planted.csv", "-o", nowhere / "x.png")),
+                ("ingest -o into a missing folder",
+                 ("ingest", FIXTURES / "planted.csv", "-o", nowhere / "x.parquet"))):
+            got = run(*args, expect_ok=False)
+            check(f"{label} answers with a JSON error",
+                  got.get("ok") is False and "does not exist" in got.get("error", ""),
+                  str(got.get("error"))[:100])
+        check("a refused -o writes nothing", not nowhere.exists())
+
+        # Option values that cannot mean anything are refused, not coerced.
+        for label, args in (
+                ("--sample-time-ms 0", ("newscope", tpl, "-o", tmp / "a.tcscopex",
+                                        "--channels", "MAIN.x", "--sample-time-ms", 0)),
+                ("--sample-time-ms -1", ("newscope", tpl, "-o", tmp / "a.tcscopex",
+                                         "--channels", "MAIN.x", "--sample-time-ms", -1)),
+                ("--max-lag-samples -1", ("correlate", FIXTURES / "planted.csv",
+                                          "--max-lag-samples", -1)),
+                ("--max-events 0", ("events", FIXTURES / "planted.csv",
+                                    "--max-events", 0))):
+            got = run(*args, expect_ok=False)
+            check(f"{label} is refused", got.get("ok") is False
+                  and args[-2] in got.get("error", ""), str(got.get("error"))[:100])
+
+        # checkscope: a BaseSampleTime that is present but not positive is a
+        # broken value, not a channel "on the task's own sample time".
+        good = tmp / "good.tcscopex"
+        run("newscope", tpl, "-o", good, "--channels", "MAIN.x", "--netid", "1.2.3.4.1.1")
+        for bad in ("0", "-10000"):
+            path = tmp / f"bst{bad}.tcscopex"
+            path.write_bytes(re.sub(rb"<BaseSampleTime>\d+</BaseSampleTime>",
+                                    f"<BaseSampleTime>{bad}</BaseSampleTime>".encode(),
+                                    good.read_bytes()))
+            got = run("checkscope", path, expect_ok=False)
+            check(f"checkscope flags BaseSampleTime {bad} as a problem",
+                  got.get("ok") is False
+                  and any("BaseSampleTime" in p for p in got.get("problems", []))
+                  and not got.get("acquisitions_without_declared_rate"),
+                  str(got.get("problems"))[:120])
+
+        # A threshold crossing needs a real reading on both sides. NaN
+        # compares as "below", so a blank reported two crossings per gap.
+        gappy = tmp / "gappy.csv"
+        values = ["5" if i < 60 else "-5" for i in range(100)]
+        values[20] = values[40] = values[80] = ""
+        write_simple_csv(gappy, ["Time", "Level"],
+                         [[str(i), v] for i, v in enumerate(values)])
+        got = run("events", gappy, "--threshold", 0)
+        crossings = [e for e in got.get("events", []) if e["kind"] == "crossing"]
+        check("a data gap is not reported as a threshold crossing",
+              [round(e["time"], 3) for e in crossings] == [0.06],
+              str([e["time"] for e in crossings]))
+
+        # window: two selected channels sharing a short name are two columns.
+        shared = tmp / "shared.csv"
+        write_shared_name_export(shared)
+        got = run("window", shared, "--start", 0.01, "--end", 0.012)
+        rows = got.get("rows") or [{}]
+        check("window keeps two channels that share a short name apart",
+              set(got.get("channels") or []) == {"Line1.Axis1.ActPos", "Line1.Axis2.ActPos"}
+              and rows[0].get("Line1.Axis2.ActPos") == 2 * rows[0].get("Line1.Axis1.ActPos", -1),
+              f"{got.get('channels')} {rows[0]}")
+        twins = tmp / "twins.csv"
+        write_simple_csv(twins, ["Time", "Twin", "Twin"],
+                         [[str(i), str(i), str(-i)] for i in range(50)])
+        got = run("window", twins, "--start", 0.01, "--end", 0.01)
+        check("window keeps two same-named columns apart even with no symbol path",
+              (got.get("rows") or [{}])[0] == {"time": 0.01, "Twin": 10.0, "Twin#2": -10.0},
+              str(got.get("rows")))
+
+        # doctor: the directory it probes is the cache ingest writes to, and
+        # the uv hint is one that works on this platform.
+        env = {**os.environ, "PATH": str(tmp / "empty"),
+               "XDG_CACHE_HOME": str(tmp / "cache"), "XDG_CONFIG_HOME": str(tmp / "cfg"),
+               "LOCALAPPDATA": str(tmp / "local")}
+        proc = subprocess.run([sys.executable, str(TCSCOPE), "doctor"],
+                              capture_output=True, text=True, env=env)
+        rows = {c["check"]: c for c in loads(proc.stdout).get("checks", [])}
+        want = (tmp / "local" / "tcscope" / "cache" if os.name == "nt"
+                else tmp / "cache" / "tcscope")
+        check("doctor probes the cache directory ingest writes to",
+              rows.get("cache directory", {}).get("detail") == str(want) and want.is_dir(),
+              str(rows.get("cache directory")))
+        hint = rows.get("uv", {}).get("fix", "")
+        check("doctor's uv install hint fits the platform",
+              ("winget" in hint) if os.name == "nt" else ("curl" in hint and "winget" not in hint),
+              hint)
+
+    # Every option says what it does, and events names every kind it reports.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("tcscope", TCSCOPE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    parser = mod.build_parser()
+    verbs = next(a for a in parser._actions if a.choices and hasattr(a, "_name_parser_map"))
+    bare = [f"{verb} {action.option_strings[-1]}"
+            for verb, sub in verbs.choices.items() for action in sub._actions
+            if action.option_strings and not action.help]
+    check("every option carries help text", not bare, ", ".join(bare))
+    events_help = next(a.help for a in verbs._choices_actions if a.dest == "events")
+    kinds = ("step", "ramp", "spike", "transition", "flatline", "hold", "clipping", "crossing")
+    check("events help lists every kind it reports",
+          all(kind in events_help for kind in kinds), events_help)
 
 
 def main():
@@ -2379,6 +2549,7 @@ def main():
     shareability_checks()
     retarget_checks()
     tmc_checks()
+    robustness_checks()
 
     print()
     failed = [name for name, ok, _ in results if not ok]
