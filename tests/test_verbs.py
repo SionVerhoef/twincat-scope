@@ -1768,6 +1768,47 @@ def export_option_checks():
               str(man.get("error") or [(g.get("t_first"), g.get("t_last"))
                                        for g in expand_groups(man)]))
 
+        # A space beside the delimiter is padding, not a Blank separator.
+        spaced = Path(tmp) / "comma_space.csv"
+        spaced.write_text("Name, A, B\n" + "".join(
+            f"{i:.1f}, {i % 7 * 0.125:.3f}, {i % 3 * 0.25:.2f}\n" for i in range(50)),
+            encoding="utf-8", newline="")
+        man = run("manifest", spaced)
+        check("a ',' file with a space after each comma still reads",
+              man.get("ok") is True and man.get("rows") == 50, str(man.get("error")))
+        padded = Path(tmp) / "tab_padded.csv"
+        padded.write_text("\r\n".join(head + ["\t".join(f + " " for f in r.split("\t"))
+                                              for r in rows]) + "\r\n",
+                          encoding="utf-8", newline="")
+        man = run("manifest", padded)
+        check("a TAB file whose cells carry a trailing space still reads",
+              same_recording(man), str(man.get("error")))
+
+        # One reset in a real time column is counted, not grounds for refusal.
+        reset = list(rows)
+        fields = reset[5000].split("\t")
+        fields[0] = "0,000000"
+        reset[5000] = "\t".join(fields)
+        once = Path(tmp) / "one_reset.csv"
+        once.write_text("\r\n".join(head + reset) + "\r\n", encoding="utf-8", newline="")
+        man = run("manifest", once)
+        check("a time column that steps back once is read, and the step counted",
+              man.get("ok") is True
+              and [g.get("time_backsteps") for g in expand_groups(man)][0] == 1,
+              str(man.get("error") or [g.get("time_backsteps") for g in expand_groups(man)]))
+
+        # A header subset without Name or SymbolName says no more about where a
+        # group starts than no header at all.
+        subset = Path(tmp) / "no_name_rows.csv"
+        subset.write_text("\r\n".join([ln for ln in head if ln.split("\t")[0]
+                                       not in ("Name", "SymbolName")] + rows) + "\r\n",
+                          encoding="utf-8", newline="")
+        man = run("manifest", subset, expect_ok=False)
+        check("a header with no Name or SymbolName row is refused like no header",
+              man.get("ok") is False and "header" in (man.get("error") or ""),
+              str(man.get("error") or [(g.get("n_samples"), g.get("t_last"))
+                                       for g in expand_groups(man)]))
+
 
 def svdx_checkscope_checks():
     """A saved recording (.svdx) is the samples in binary, then the whole scope
@@ -1789,6 +1830,12 @@ def svdx_checkscope_checks():
               from_svdx.get("ok") is True
               and all(from_svdx.get(k) == from_tpl.get(k) for k in keys),
               str({k: from_svdx.get(k) for k in keys + ("error",)}))
+
+        # Sample bytes may begin with 0x3C ('<'); that is not a project.
+        angled = Path(tmp) / "angled.svdx"
+        angled.write_bytes(b"<" + samples + b"\0" * 20 + project)
+        check("a .svdx whose samples start with '<' is still read from its tail",
+              run("checkscope", angled).get("ok") is True)
 
         junk = Path(tmp) / "junk.svdx"
         junk.write_bytes(samples)
@@ -2013,7 +2060,8 @@ def main():
             # the window is still fixed. The value is reported exactly as written.
             text = a.read_bytes().decode("utf-8-sig")
             armed = re.sub(r"(<TriggerModule[^>]*>\s*)<SubMember />",
-                           r"\1<SubMember><TriggerAction>@ACTION@</TriggerAction></SubMember>",
+                           r"\1<SubMember><TriggerGroup><TriggerAction>@ACTION@</TriggerAction>"
+                           r"</TriggerGroup></SubMember>",
                            text, count=1)
             none = Path(tmp) / "none.tcscopex"
             none.write_bytes(b"\xef\xbb\xbf" + armed.replace("@ACTION@", "NONE").encode("utf-8"))
@@ -2073,10 +2121,30 @@ def main():
             check("a pre-trigger longer than the record window is warned about",
                   any("pre-trigger" in w and "longer" in w for w in got.get("warnings", [])),
                   str(got.get("warnings")))
-            got = action("NONE", "<PretriggerTime>50000000</PretriggerTime>")
-            check("a hidden pre-trigger is still reported, whatever the action",
-                  (got.get("trigger_groups") or [{}])[0].get("pretrigger_seconds") == 5.0,
+            got = action("NONE", "<PretriggerTime>3000000000</PretriggerTime>")
+            check("a hidden pre-trigger is reported, but not warned about where it is unused",
+                  (got.get("trigger_groups") or [{}])[0].get("pretrigger_seconds") == 300.0
+                  and not any("pre-trigger (" in w for w in got.get("warnings", [])),
+                  str(got.get("trigger_groups")) + str(got.get("warnings")))
+
+            # A disabled group fires nothing: a lone disabled Start Record is a
+            # fixed window. Several groups: one that records is enough.
+            got = action("START_RECORD", "<Enabled>false</Enabled>")
+            check("a disabled Start Record group leaves a fixed window",
+                  got.get("fixed_window") is True
+                  and (got.get("trigger_groups") or [{}])[0].get("enabled") is False
+                  and any("disabled" in w for w in got.get("warnings", [])),
+                  str(got.get("warnings")))
+            got = action("NONE", "</TriggerGroup><TriggerGroup>"
+                                 "<TriggerAction>STOP_RECORD</TriggerAction>")
+            check("Set Mark plus Stop Record: two groups reported, not a fixed window",
+                  [g.get("action") for g in got.get("trigger_groups") or []]
+                  == ["NONE", "STOP_RECORD"] and got.get("fixed_window") is False,
                   str(got.get("trigger_groups")))
+            got = action("SomeAction")
+            check("an unknown TriggerAction is named in a warning, not judged",
+                  any("SomeAction" in w and "not one this skill knows" in w
+                      for w in got.get("warnings", [])), str(got.get("warnings")))
 
     stream_split_checks()
     real_fixture_checks()

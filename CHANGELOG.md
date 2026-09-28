@@ -30,12 +30,14 @@ an agent hit in the CLI. Each is now held by a check that fails on the previous 
   group of three channels again, `ok: true`.
 - **An export with no time column is refused.** Scope View's Timelines *None* writes values
   only, and the first was read as the clock (`t_last` before `t_first`, `ok: true`). A group
-  whose time column runs backwards is now refused, with Timelines named in the fix.
+  whose time column runs backwards in over 1% of its steps is now refused, with Timelines
+  named in the fix; a single reset is counted as `time_backsteps` instead.
 - **`checkscope` judges a trigger by what it does.** Only *Start/Stop Record* and
   *Start/Stop Subsave* change what is recorded; display, export and reporting actions left
   a fixed window without the warning. `NONE` is named as Scope View's *Set Mark*. Each
   trigger group's pre- and post-trigger are reported in seconds (`trigger_groups`), since
-  Scope keeps a hidden pre-trigger, and one longer than the record window is warned about.
+  Scope keeps a hidden pre-trigger. A Stop Record pre-trigger longer than the record window
+  is warned about, and a disabled trigger group counts for nothing.
 - **`ingest -o` is optional.** Without it the Parquet goes to the cache dir, named by the
   recording's stem and a hash of its path, and `output` says where.
 - **Argument errors are JSON.** A missing argument, unknown verb or unknown flag was the one

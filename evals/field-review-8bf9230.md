@@ -248,7 +248,9 @@ Regression check: `export_option_checks`, built on the real two-rate fixture.
 Both are real options. Header lines contain spaces and `:` (the path, `10:59:53.809`), so
 neither can be read safely. **Done:** `_unsupported_separator` spots data rows split cleanly
 by either, before the delimiter vote, and the refusal names it and lists what works. Two
-regression checks.
+regression checks. (A development-side review then found the first version also refused
+`a, b` files and TAB files with padded cells; each piece must now be a bare number, with two
+more checks.)
 
 ### F4 — `checkscope` on a `.svdx` died in a traceback
 
@@ -271,16 +273,20 @@ generators and tests, and a check that no generated fixture contains `\r\r\n`.
 F2's refusal keyed on "no line above the data". A headerless Scope View export with *Include
 trigger info* has the release table there, so it was read as one 30 s group of 3 channels,
 `ok: true`. **Done:** the table (from its `TriggerGroup` row on) no longer counts as a header,
-nor as a source of channel names. Regression checks: the headerless file with the table is
-refused, and a full-header file with the table still reads as two groups.
+nor as a source of channel names, and "headerless" now means no row that names the columns:
+a header subset without `Name` or `SymbolName` is refused as well. Regression checks: the
+headerless file with the table and the subset are refused, and a full-header file with the
+table still reads as two groups.
 
 ### G2 — Timelines *None* has no time column, and a value was read as one
 
 Scope View's *Timelines None* writes the values only. The reader took the first value column
 as time and reported `ok: true` with `t_last` before `t_first`. **Done:** a group whose time
-column ever runs backwards is refused, and the fix names Timelines. A time column never runs
-backwards; a signal nearly always does. Regression check on the two-rate fixture with its
-time columns removed.
+column runs backwards in more than 1% of its steps, or ends before it starts, is refused, and
+the fix names Timelines. A signal steps back about as often as it steps forward; a clock does
+so rarely if ever, and a single reset or damaged row is only counted (`time_backsteps` in
+`manifest`). Regression checks: the two-rate fixture with its time columns removed is refused,
+and with one time reset it still reads.
 
 ### G3 — `ingest` had no default output
 
@@ -309,7 +315,9 @@ was dropped for all of them. **Done:** the fixed-window warning now stands unles
 observed). The warning names the action as Scope View does (`NONE (Set Mark)`). Every trigger
 group is reported in `trigger_groups` with its pre- and post-trigger in seconds, whatever the
 action, because a hidden pre-trigger persists. A pre-trigger longer than the record window is
-warned about. An action outside the enum is reported and not judged.
+warned about where it applies (*Stop Record*); elsewhere it is only reported. A disabled
+group (`Enabled false`) counts for nothing, and an action outside the enum is reported and not
+judged.
 
 ### Minor — fixed
 
