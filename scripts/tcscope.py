@@ -84,6 +84,20 @@ PLACEHOLDER_NAMES = {"signal", "channel", "untitled", "none"}
 BANDS_PER_CHART_WARN = 6
 CHANNELS_PER_BAND_WARN = 8
 
+# A trigger group's TriggerAction as the file writes it -> the name in Scope
+# View's dropdown, in the enum's order (TwinCAT.Scope2 TriggerEventAction).
+TRIGGER_ACTION_UI = {
+    "NONE": "Set Mark", "START_RECORD": "Start Record", "STOP_RECORD": "Stop Record",
+    "STOP_DISPLAY": "Stop Display", "RESTART_DISPLAY": "Restart Display",
+    "START_SUBSAVE": "Start Subsave", "STOP_SUBSAVE": "Stop Subsave", "EXPORT": "Export",
+    "REPORT_TRIGGER": "Reporting Trigger", "REPORT_DATA": "Reporting Collector",
+    "REPORT_DATA_TRIGGER": "Reporting Collector + Trigger",
+}
+# The actions that decide what is recorded. The Subsave pair is inferred from
+# its name; only Start and Stop Record were observed in a real project.
+TRIGGER_ACTIONS_RECORDING = frozenset({
+    "START_RECORD", "STOP_RECORD", "START_SUBSAVE", "STOP_SUBSAVE"})
+
 
 # --------------------------------------------------------------------------
 # output helpers
@@ -431,6 +445,13 @@ def sniff_csv(path, sample_bytes=200_000):
 
     meta =_metadata_rows(lines, nonblank, delim, ncols, data_start)
     groups = _parse_groups(meta, ncols, decimal)
+    # Include trigger info writes a table of trigger releases above the data,
+    # headed TriggerGroup. It says nothing about the columns, so it and what
+    # follows it are no header - on a headerless export it was taken for one.
+    table = next((i for i in header
+                  if lines[i].split(delim)[0].strip().strip('"') == "TriggerGroup"),
+                 data_start)
+    header = [i for i in header if i < table]
     # Header preset None writes the data and nothing above it. With more than
     # one value column nothing says where one group ends and the next starts,
     # so the flat reading below would turn a slower group's clock into a channel.
@@ -442,7 +463,7 @@ def sniff_csv(path, sample_bytes=200_000):
             "or leave TC3ScopeExportTool.exe on its default",
         )
     if groups is None:
-        groups = _flat_group(lines, data_start, delim, decimal, ncols)
+        groups = _flat_group(lines, table, delim, decimal, ncols)
 
     return {
         "delimiter": delim,
@@ -746,7 +767,21 @@ def load_csv(path):
     for group in info["groups"]:
         for channel in group["channels"]:
             channel["values"] = data[:, channel["column"]]
-        groups.append(_finalise_group(np, group, data[:, group["time_column"]]))
+        group = _finalise_group(np, group, data[:, group["time_column"]])
+        # Timelines None writes no time column at all, and the first value
+        # column is read as one. A clock never runs backwards; a value does.
+        stamps = group["raw_ms"][np.isfinite(group["raw_ms"])]
+        back = np.flatnonzero(np.diff(stamps) < 0)
+        if back.size:
+            fail(
+                f"{path}: group {group['id']}'s time column (column "
+                f"{group['time_column']}) runs backwards, {stamps[back[0]]:g} to "
+                f"{stamps[back[0] + 1]:g} ms, so it is not a time column",
+                "The export has no time column - was it made with Timelines 'None'? "
+                "Re-export with Timelines 'For each sample time' - see "
+                "references/export-tool.md",
+            )
+        groups.append(group)
     info["rows"] = int(data.shape[0])
     return collapse_copies(np, Recording(groups, info))
 
@@ -3225,26 +3260,62 @@ def cmd_checkscope(args):
         restart_text = root.findtext(".//RestartRecord")
     auto_restart = (restart_text or "").strip().lower() == "true"
 
-    # Reported exactly as written. A configured TriggerModule can still carry
-    # TriggerAction NONE, and then it starts nothing: the window is as fixed as
-    # with no trigger at all.
-    trigger_action = root.findtext(".//TriggerAction")
-    if trigger_action is not None:
-        trigger_action = trigger_action.strip()
-    action_none = (trigger_action or "").upper() == "NONE"
+    # Reported exactly as written. Only an action that starts, stops or
+    # sub-saves the recording decides what gets recorded. The rest - Set Mark
+    # (written NONE), the display, export and reporting actions - fire and are
+    # logged, but the window stays as fixed as with no trigger at all.
+    trigger_groups = []
+    if trigger_sub is not None:
+        for node in trigger_sub.iter():
+            action = node.findtext("TriggerAction")
+            if action is None:
+                continue
+            group = {"action": action.strip()}
+            for tag, key in (("PretriggerTime", "pretrigger_seconds"),
+                             ("PosttriggerTime", "posttrigger_seconds")):
+                ticks = (node.findtext(tag) or "").strip()
+                group[key] = int(ticks) / TICKS_PER_MS / 1000.0 if ticks.isdigit() else None
+            trigger_groups.append(group)
+    trigger_action = trigger_groups[0]["action"] if trigger_groups else None
+    actions = [g["action"].upper() for g in trigger_groups]
+    records_on_trigger = any(a in TRIGGER_ACTIONS_RECORDING for a in actions)
+    unknown = sorted({g["action"] for g in trigger_groups
+                      if g["action"].upper() not in TRIGGER_ACTION_UI})
+    if unknown:
+        warnings.append(
+            f"TriggerAction {', '.join(unknown)} is not one this skill knows, so "
+            "whether the trigger decides what is recorded is not judged here."
+        )
+    only_marks = bool(actions) and not records_on_trigger and not unknown
 
-    fixed_window = not auto_restart and (action_none or (record_seconds and not has_trigger))
+    fixed_window = not auto_restart and (only_marks or (record_seconds and not has_trigger))
     if fixed_window:
         window = f"a fixed {record_seconds:g} s window" if record_seconds else "a fixed window"
-        why = ("TriggerAction is NONE, so the trigger starts nothing"
-               if action_none else "no trigger configured")
+        if only_marks:
+            named = ", ".join(sorted({f"{g['action']} ({TRIGGER_ACTION_UI[g['action'].upper()]})"
+                                      for g in trigger_groups}))
+            why = (f"TriggerAction is {named}, which marks or reports the event "
+                   "but does not start or stop the recording")
+        else:
+            why = "no trigger configured"
         warnings.append(
             f"records {window} ({why}, and the recording does not restart). "
             "For a fault you can reproduce on demand that is fine. For an intermittent "
             "one the chance of catching it is roughly the window divided by the mean "
             "time between occurrences - a 60 s window on an hourly fault is under 2%. "
-            "A trigger with a pre-trigger keeps the seconds before the event instead."
+            "A Stop Record trigger with a pre-trigger keeps the seconds before the "
+            "event instead."
         )
+    # Scope keeps a pre-trigger it no longer shows: switched away from Stop
+    # Record, the value stays in the file. Scope itself accepts one longer than
+    # the window without complaint.
+    for g in trigger_groups:
+        pre = g["pretrigger_seconds"]
+        if pre and record_seconds and pre > record_seconds:
+            warnings.append(
+                f"The pre-trigger ({pre:g} s, TriggerAction {g['action']}) is longer "
+                f"than the {record_seconds:g} s record window, so it cannot all be kept."
+            )
 
     # The one check that needs the program, not just the file: does each symbol
     # exist, and at the width written? Done by hand, it would have caught every
@@ -3272,6 +3343,7 @@ def cmd_checkscope(args):
           "record_seconds": record_seconds,
           "trigger_configured": has_trigger,
           "trigger_action": trigger_action,
+          "trigger_groups": trigger_groups,
           "fixed_window": bool(fixed_window),
           "auto_restart_record": auto_restart,
           "problems": problems, "warnings": warnings})

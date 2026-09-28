@@ -1651,12 +1651,18 @@ def export_option_checks():
                 return text.splitlines()
         raise AssertionError("no padding puts the sample boundary mid-row")
 
+    # Include trigger info: a table of trigger releases after the preamble.
+    releases = ["TriggerGroup\tCount\tReleaseTime\tComment",
+                "Trigger Group\t1\t18648\t", "Trigger Group\t2\t54276\t",
+                "Trigger Group\t3\t58204\t", ""]
+
     variants = {
         # Bigger than sniff_csv's 200 kB sample, cut mid-row: see cut_mid_row.
         "tab_integers": cut_mid_row("\t"),
         "semicolon": cut_mid_row(";"),
         "full_timestamp": head + [filetime(r) for r in rows],
         "eof_tag": lines + ["EOF"],
+        "trigger_info": head[:6] + releases + head[6:] + rows,
     }
     with tempfile.TemporaryDirectory() as tmp:
         for option, text in variants.items():
@@ -1716,6 +1722,33 @@ def export_option_checks():
         check("a Blank-separated export is refused as such",
               man.get("ok") is False and "blank" in (man.get("error") or ""),
               str(man.get("error")) + " | " + str(man.get("fix")))
+
+        # Header None with Include trigger info: the release table is the only
+        # thing above the data. It is not a header - it says nothing about
+        # where a group starts - but it did make the file look like it had one.
+        tabled = Path(tmp) / "no_header_trigger_info.csv"
+        tabled.write_text("\r\n".join(releases + rows + ["EOF"]) + "\r\n",
+                          encoding="utf-8", newline="")
+        man = run("manifest", tabled, expect_ok=False)
+        check("an export with only a trigger-info table above the data is refused as headerless",
+              man.get("ok") is False and "header" in (man.get("error") or ""),
+              str(man.get("error") or [(g.get("n_samples"), g.get("t_last"))
+                                       for g in expand_groups(man)]))
+
+        # Timelines None: every time column left out, the Name row kept. The
+        # first value column was read as the clock, and ran backwards.
+        def untimed(row):
+            fields = row.split("\t")
+            return "\t".join(f for i, f in enumerate(fields) if i not in (0, 2))
+        timeless = Path(tmp) / "timelines_none.csv"
+        timeless.write_text("\r\n".join(["Name\tActPos\tbFlag"]
+                                        + [untimed(r) for r in rows]) + "\r\n",
+                            encoding="utf-8", newline="")
+        man = run("manifest", timeless, expect_ok=False)
+        check("an export with no time column (Timelines None) is refused, not read off a value",
+              man.get("ok") is False and "Timelines" in (man.get("fix") or ""),
+              str(man.get("error") or [(g.get("t_first"), g.get("t_last"))
+                                       for g in expand_groups(man)]))
 
 
 def svdx_checkscope_checks():
@@ -1963,6 +1996,47 @@ def main():
                 "<AutoRestartRecord>false", "<AutoRestartRecord>true").encode("utf-8"))
             check("TriggerAction NONE on a re-arming recording is not a fixed window",
                   run("checkscope", rearm).get("fixed_window") is False)
+            check("TriggerAction NONE is named as Scope View's Set Mark",
+                  any("Set Mark" in w for w in chk_none.get("warnings", [])),
+                  str(chk_none.get("warnings")))
+
+            # Only an action that starts, stops or sub-saves the recording
+            # changes what is kept. A display, export or reporting trigger fires
+            # and is logged, and the window stays fixed.
+            def action(value, extra=""):
+                path = Path(tmp) / f"action_{value}.tcscopex"
+                path.write_bytes(b"\xef\xbb\xbf" + armed.replace(
+                    "@ACTION@</TriggerAction>", f"{value}</TriggerAction>{extra}").encode("utf-8"))
+                return run("checkscope", path)
+            for value in ("STOP_DISPLAY", "EXPORT", "REPORT_TRIGGER"):
+                got = action(value)
+                check(f"TriggerAction {value} still records a fixed window",
+                      got.get("fixed_window") is True
+                      and any(value in w and "fixed" in w for w in got.get("warnings", [])),
+                      str(got.get("warnings")))
+            for value in ("START_RECORD", "STOP_RECORD"):
+                got = action(value)
+                check(f"TriggerAction {value} is not a fixed window",
+                      got.get("fixed_window") is False
+                      and not any("fixed" in w for w in got.get("warnings", [])),
+                      str(got.get("warnings")))
+
+            # Pre-/post-trigger are 100 ns ticks. Scope keeps a pre-trigger it
+            # hides (switched from Stop Record to Set Mark), and accepts one
+            # longer than the window without complaint.
+            got = action("STOP_RECORD", "<PretriggerTime>3000000000</PretriggerTime>"
+                                        "<PosttriggerTime>50000000</PosttriggerTime>")
+            group = (got.get("trigger_groups") or [{}])[0]
+            check("pre- and post-trigger are reported in seconds",
+                  group.get("pretrigger_seconds") == 300.0
+                  and group.get("posttrigger_seconds") == 5.0, str(group))
+            check("a pre-trigger longer than the record window is warned about",
+                  any("pre-trigger" in w and "longer" in w for w in got.get("warnings", [])),
+                  str(got.get("warnings")))
+            got = action("NONE", "<PretriggerTime>50000000</PretriggerTime>")
+            check("a hidden pre-trigger is still reported, whatever the action",
+                  (got.get("trigger_groups") or [{}])[0].get("pretrigger_seconds") == 5.0,
+                  str(got.get("trigger_groups")))
 
     stream_split_checks()
     real_fixture_checks()
