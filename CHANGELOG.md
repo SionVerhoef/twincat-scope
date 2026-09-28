@@ -4,6 +4,17 @@
 
 First working version. Not yet published.
 
+### `events` tells a setpoint at rest from a frozen sensor
+
+On a noise-free command channel (SetPos, SetVelo) a move has a constant first difference, so
+`events` reported no ramp for it, and every standstill as a `flatline` - "stopped updating" -
+with a severity that grew with the rest: on a real axis, 656 moves gave 0 ramps and 655
+flatlines, and long rests outranked real faults (`evals/field-review-79660f4.md`, H2). A channel
+that moves without noise is now a command: each move is one `ramp`, each exact standstill a new
+descriptive kind, `hold`, and `command_channels` names them. A noisy signal that freezes is
+still a `flatline`. When the output is capped, defects (`spike`, `step`, `flatline`,
+`clipping`) take the slots before descriptive kinds (`ramp`, `transition`, `hold`, `crossing`).
+
 ### Field review of 79660f4: the G fixes on real files, and Parquet at half the memory
 
 Every fix from the 8bf9230 round held on real exports and real projects

@@ -891,6 +891,86 @@ def long_correlate_checks(rows=300_000, delay=25):
           took < 30, f"{took:.1f} s")
 
 
+def write_command_export(path, moves=6, dwell=400, ramp=60, cruise=150, seed=5):
+    """A clean setpoint beside the noisy signals that follow it.
+
+    SetPos and SetVelo are what the NC's trajectory generator writes: noise-free
+    trapezoid moves with exact standstills between them. ActPos follows with
+    encoder noise; ActTorque is noisy throughout except for one second where it
+    freezes bit-exact, the defect.
+    """
+    import random
+    rng = random.Random(seed)
+    velo, v_max = [], 0.5          # units per sample at cruise
+    for m in range(moves):
+        sign = 1 if m % 2 == 0 else -1
+        velo += [0.0] * dwell
+        velo += [sign * v_max * (i + 1) / ramp for i in range(ramp)]
+        velo += [sign * v_max] * cruise
+        velo += [sign * v_max * (ramp - 1 - i) / ramp for i in range(ramp)]
+    velo += [0.0] * dwell
+    rows, pos = [], 0.0
+    frozen_from, frozen_to = len(velo) // 2, len(velo) // 2 + 1000
+    torque_held = None
+    for i, v in enumerate(velo):
+        pos += v
+        torque = 1.0 + 0.2 * v + rng.gauss(0, 0.02)
+        if frozen_from <= i < frozen_to:
+            torque_held = torque if torque_held is None else torque_held
+            torque = torque_held
+        rows.append(f"{i:.1f},{pos:.6f},{v * 1000:.6f},{pos + rng.gauss(0, 0.01):.6f},"
+                    f"{torque:.6f}")
+    path.write_text("\n".join(["TwinCAT Scope Export", "",
+                               "Name,SetPos,SetVelo,ActPos,ActTorque"] + rows) + "\n",
+                    encoding="utf-8", newline="")
+    return {"moves": moves, "holds": moves + 1, "frozen_s": (frozen_from / 1000.0, 1.0)}
+
+
+def command_channel_checks():
+    """Field round 79660f4, H2: on a clean setpoint every move has a constant
+    first difference, so the noise-relative threshold never fired - 656 moves
+    gave 0 ramps - and every standstill came back as a `flatline`, with a
+    severity that grew with the length of the rest and outranked real faults.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        csv = Path(tmp) / "command.csv"
+        # Rests of 1.5 s: as flatlines they scored 30, above the frozen
+        # torque's 20, and a capped answer returned rests instead of the fault.
+        truth = write_command_export(csv, dwell=1500)
+        ev = run("events", csv, "--max-events", 1000)
+        events = ev.get("events", [])
+
+        def of(name, kind):
+            return [e for e in events if e["channel"] == name and e["kind"] == kind]
+
+        check("setpoints are recognised as commands, measured signals are not",
+              set(ev.get("command_channels") or []) == {"SetPos", "SetVelo"},
+              str(ev.get("command_channels")))
+        check("a setpoint standing still is a hold, not a flatline",
+              len(of("SetPos", "hold")) == truth["holds"] and not of("SetPos", "flatline"),
+              f"holds={len(of('SetPos', 'hold'))} flatlines={len(of('SetPos', 'flatline'))}")
+        check("each setpoint move is one ramp",
+              len(of("SetPos", "ramp")) == truth["moves"],
+              str([(e["time"], e["width_samples"]) for e in of("SetPos", "ramp")]))
+        check("a velocity setpoint ramps up and down, and holds at cruise",
+              len(of("SetVelo", "ramp")) == 2 * truth["moves"]
+              and len(of("SetVelo", "hold")) >= truth["moves"],
+              f"ramps={len(of('SetVelo', 'ramp'))} holds={len(of('SetVelo', 'hold'))}")
+        frozen = of("ActTorque", "flatline")
+        check("a noisy signal that freezes is still a flatline",
+              len(frozen) == 1 and near(frozen[0].get("time"), truth["frozen_s"][0], 0.01),
+              str([(e.get("time"), e.get("samples")) for e in frozen]))
+
+        # With a cap smaller than the defects, routine motion gets no slot.
+        cut = run("events", csv, "--max-events", 2)
+        check("a capped answer spends its slots on defects before routine motion",
+              cut.get("truncated") is True and cut.get("events")
+              and not [e for e in cut["events"] if e["kind"] in ("ramp", "hold")]
+              and any(e["kind"] == "flatline" and e["channel"] == "ActTorque"
+                      for e in cut["events"]),
+              str([(e["channel"], e["kind"]) for e in cut.get("events", [])]))
+
+
 def still_channel_checks():
     """Field round 7, bead htl: rails that are not rails.
 
@@ -2288,6 +2368,7 @@ def main():
     prefix_house_checks()
     export_copy_checks()
     still_channel_checks()
+    command_channel_checks()
     long_correlate_checks()
     parquet_memory_checks()
     two_rate_checks()
