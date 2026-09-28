@@ -1908,9 +1908,11 @@ def ingest_cache_checks():
             out = json.loads(proc.stdout)
         except ValueError:
             out = {"error": proc.stdout[:200] + proc.stderr[:200]}
+        csv = Path(out.get("intermediate_csv") or "")
         check("ingest writes its intermediate CSV to the cache dir",
               out.get("ok") is True
-              and out.get("intermediate_csv") == str(tmp / "cache" / "tcscope" / "rec.csv")
+              and csv.parent == tmp / "cache" / "tcscope"
+              and re.fullmatch(r"rec-[0-9a-f]{8}\.csv", csv.name)
               and sorted(p.name for p in project.iterdir()) == ["rec.svdx"],
               str(out.get("intermediate_csv") or out.get("error")))
 
@@ -1928,6 +1930,9 @@ def ingest_cache_checks():
             except ValueError:
                 outs.append({"error": proc.stdout[:200] + proc.stderr[:200]})
         paths = [Path(o.get("output") or "") for o in outs]
+        csvs = [o.get("intermediate_csv") for o in outs]
+        check("two recordings with the same file name get their own intermediate CSV",
+              all(csvs) and csvs[0] != csvs[1], str(csvs))
         check("ingest without -o writes to the cache dir, one file per recording",
               all(o.get("ok") is True for o in outs)
               and all(p.parent == tmp / "cache" / "tcscope" and p.suffix == ".parquet"
@@ -1935,6 +1940,22 @@ def ingest_cache_checks():
               and paths[0] != paths[1]
               and sorted(p.name for p in project.iterdir()) == ["rec.svdx"],
               str([o.get("output") or o.get("error") for o in outs]))
+
+        # The real tool exits 0 and writes nothing for some settings. The CSV
+        # an earlier run left under the same name must not be read instead.
+        silent = tmp / "silent_export_tool"
+        silent.write_text("#!/bin/sh\nexit 0\n")
+        silent.chmod(0o755)
+        proc = subprocess.run([*BASE_CMD, "ingest", str(svdx), "-o", str(tmp / "stale.parquet")],
+                              capture_output=True, text=True,
+                              env={**env, "TCSCOPE_EXPORT_TOOL": str(silent)})
+        try:
+            stale = json.loads(proc.stdout)
+        except ValueError:
+            stale = {"error": "non-JSON: " + proc.stdout[:200] + proc.stderr[:200]}
+        check("an export tool that writes nothing is refused, not answered from a stale CSV",
+              stale.get("ok") is False and "wrote no file" in (stale.get("error") or ""),
+              str(stale.get("error"))[:160])
 
 
 def main():

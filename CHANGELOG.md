@@ -4,6 +4,14 @@
 
 First working version. Not yet published.
 
+### `ingest` never answers from another recording's CSV
+
+The export tool's CSV went to the cache as `<stem>.csv`, so two recordings with Scope's
+default name shared it, and a tool run that exited 0 without writing anything left the last
+recording's CSV to be read as this one's. The CSV is now `<stem>-<path hash>.csv`, like the
+default Parquet; it is removed before the tool runs, and a run that writes nothing is
+refused.
+
 ### Parquet no longer costs more memory than the CSV it came from
 
 The verbs read a Parquet whole and then copied every column to NumPy, holding the samples
