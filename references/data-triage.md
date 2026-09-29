@@ -201,6 +201,14 @@ its channel reports 20 or more of its kind and it is no larger than 1.5× their 
 following error peaks alike on every stroke, and on one real axis those 1 027 spikes took 13 of
 20 slots. The flag says the channel always does this, not that it is harmless — a fault that
 repeats identically on every cycle is recurring too, so read what the summary counts.
+
+**Integer states.** An integer channel that stands still most of the time is a state: a step
+number, a mode, an error code. It has no noise to set a threshold against, so every change is
+an event, and each carries `from` and `to`. It is `recurring` when the same pair of states
+occurs 20 or more times: a sequence goes 10 → 20 → 35 every cycle by different amounts, and on
+one real recording its steps took 9 of 20 capped slots. An error code going 0 → 17 once stays a
+one-off. An integer that moves all the time, such as raw ADC counts, is treated like any other
+signal.
 Both names matter — filtering for `step` is how you find the jumps worth explaining, and a
 commanded move is not one of them.
 

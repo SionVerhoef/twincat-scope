@@ -1608,6 +1608,16 @@ def cmd_events(args):
         # An axis standing still dithers over a few dozen quantisation steps,
         # and its extremes and micrometre corrections are not events either.
         integer = not digital and _is_integer(np, channel, finite)
+        # An integer that stands still most of the time is a state: a step
+        # number, a mode, an error code. It has no noise to measure a threshold
+        # against, and the fallback (6 standard deviations of its changes) hid
+        # every step of 10 in a sequence that also stepped by 35. Every change
+        # of state is an event. An integer that moves all the time - raw ADC
+        # counts - keeps the noise-relative threshold.
+        moving_d = np.abs(finite_d[finite_d != 0])
+        state = integer and moving_d.size and moving_d.size < finite_d.size / 2
+        if state:
+            thresh = 0.5 * float(moving_d.min())
         still = not (digital or integer) and _is_still(np, finite, finite_d)
         if still:
             still_channels.append(name)
@@ -1672,6 +1682,9 @@ def cmd_events(args):
                     index=int(s + 1),
                     delta=net,
                     width_samples=int(width),
+                    # Which state it left and which it reached: a sequence
+                    # repeats the same pairs every cycle, whatever their size.
+                    **({"from": int(col[s]), "to": int(col[e])} if state else {}),
                 ))
 
         # A command's moves are too smooth for the noise-relative threshold,
@@ -1805,16 +1818,31 @@ RECURRING_SPREAD = 1.5
 
 
 def _mark_recurring(found):
-    """Flag defects that look like dozens of others of their kind on their channel."""
-    sizes = {}
+    """Flag defects that look like dozens of others of their kind on their channel.
+
+    An integer state recurs by the pair of states it moves between: a step
+    sequence goes 10 -> 20 and 20 -> 35 every cycle, by different amounts, and
+    an error code going 0 -> 17 once is the one worth a slot.
+    """
+    sizes, pairs = {}, {}
     for e in found:
-        if e["kind"] not in DESCRIPTIVE_KINDS and "delta" in e:
-            sizes.setdefault((e["symbol_name"], e.get("group"), e["kind"]), []).append(
-                abs(e["delta"]))
+        if e["kind"] in DESCRIPTIVE_KINDS or "delta" not in e:
+            continue
+        key = (e["symbol_name"], e.get("group"), e["kind"])
+        if "from" in e:
+            pair = key + (e["from"], e["to"])
+            pairs[pair] = pairs.get(pair, 0) + 1
+        else:
+            sizes.setdefault(key, []).append(abs(e["delta"]))
     typical = {key: sorted(v)[len(v) // 2] for key, v in sizes.items()
                if len(v) >= RECURRING_MIN}
     for e in found:
-        median = typical.get((e["symbol_name"], e.get("group"), e["kind"]))
+        key = (e["symbol_name"], e.get("group"), e["kind"])
+        if "from" in e:
+            if pairs.get(key + (e["from"], e["to"]), 0) >= RECURRING_MIN:
+                e["recurring"] = True
+            continue
+        median = typical.get(key)
         if median is not None and abs(e["delta"]) <= RECURRING_SPREAD * median:
             e["recurring"] = True
 
