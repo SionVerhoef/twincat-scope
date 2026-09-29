@@ -1480,6 +1480,54 @@ def prefix_house_checks():
               warned[:120])
 
 
+def nc_struct_checks():
+    """Field round 49a8e9b, K1 and K2: Scope refused Axes.<axis>.ErrorCode.
+
+    On that NC, ErrorCode is a member of the axis's ToPlc struct
+    (NCTOPLC_AXIS_REF), not a field of the axis, and Scope View's browser
+    listed eleven direct fields the table did not know. A ToPlc path, four
+    segments deep, was defaulted to 8 bytes over a 4-byte value.
+    """
+    tpl = ROOT / "templates" / "axis-diagnosis.tcscopex"
+    if not tpl.exists():
+        check("NC struct checks", True, "skipped: no template")
+        return
+    a = "Axes.Axis1"
+    want = {f"{a}.ToPlc.ErrorCode": "UINT32", f"{a}.ToPlc.AxisState": "UINT32",
+            f"{a}.ToPlc.CmdNo": "UINT16", f"{a}.ToPlc.ModuloActTurns": "INT32",
+            f"{a}.ToPlc.ModuloActPos": "REAL64", f"{a}.FromPlc.Override": "UINT32",
+            f"{a}.FromPlc.MapState": "BIT", f"{a}.CmdNo": "UINT32",
+            f"{a}.HomingState": "UINT32", f"{a}.SetJerk": "REAL64"}
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "nc.tcscopex"
+        made = run("newscope", tpl, "-o", out, "--netid", "1.2.3.4.1.1",
+                   "--channels", ",".join(list(want) + [f"{a}.ToPlc.StateDWord",
+                                                         f"{a}.ErrorCode", f"{a}.Position"]))
+        got = {c["symbol"]: (c["data_type"], c["type_source"]) for c in made.get("channels", [])}
+        check("ToPlc, FromPlc and the axis's own fields are typed from the NC tables",
+              all(got.get(s) == (t, "nc-field") for s, t in want.items()),
+              str({s: got.get(s) for s, t in want.items() if got.get(s) != (t, "nc-field")}))
+        # A struct-typed member is not a number Scope can record as one.
+        check("a struct-typed ToPlc member is not typed from the table",
+              got.get(f"{a}.ToPlc.StateDWord", ("", ""))[1] == "default",
+              str(got.get(f"{a}.ToPlc.StateDWord")))
+        check("ErrorCode and Position are no longer typed as fields of the axis",
+              got.get(f"{a}.ErrorCode", ("", ""))[1] == "default"
+              and got.get(f"{a}.Position", ("", ""))[1] == "default",
+              str([got.get(f"{a}.ErrorCode"), got.get(f"{a}.Position")]))
+        check("newscope names the ToPlc path for a ToPlc member written on the axis",
+              made.get("nc_paths_suspect") == {f"{a}.ErrorCode": f"{a}.ToPlc.ErrorCode"}
+              and "ToPlc" in (made.get("nc_paths_note") or ""),
+              str(made.get("nc_paths_suspect")))
+        checked = run("checkscope", out, expect_ok=False)
+        check("checkscope warns on the same path",
+              any(w.startswith(f"{a}.ErrorCode:") and f"{a}.ToPlc.ErrorCode" in w
+                  for w in checked.get("warnings", []))
+              and not any(w.startswith(f"{a}.ToPlc.ErrorCode:")
+                          for w in checked.get("warnings", [])),
+              str([w[:70] for w in checked.get("warnings", []) if "ToPlc" in w]))
+
+
 def second_field_session_checks():
     """What the second field session (evals/field-review-1fa0e9b-rounds.md) added.
 
@@ -1498,17 +1546,19 @@ def second_field_session_checks():
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "nc.tcscopex"
         made = run("newscope", tpl, "-o", out, "--netid", "1.2.3.4.1.1",
-                   "--channels", f"{axis}.ActPos,{axis}.PosDiff,{axis}.ErrorCode,"
+                   "--channels", f"{axis}.ActPos,{axis}.PosDiff,{axis}.ToPlc.ErrorCode,"
                                  f"{axis}.SomethingNew,MAIN.fbStation.fLevel")
         reported = {c["symbol"]: c for c in made.get("channels", [])}
         written = {(a.findtext("SymbolName") or "").strip():
                    (a.findtext("DataType"), a.findtext("VariableSize"))
                    for a in ET.fromstring(out.read_text(encoding="utf-8-sig")
                                           ).findall(".//AdsAcquisition")}
+        # ErrorCode is a member of the axis's ToPlc struct, not of the axis:
+        # Scope refused Axes.<axis>.ErrorCode in field round 49a8e9b.
         check("an NC status field is written as the 4-byte type it is",
-              written.get(f"{axis}.ErrorCode") == ("UINT32", "4")
-              and reported[f"{axis}.ErrorCode"]["type_source"] == "nc-field",
-              str(written.get(f"{axis}.ErrorCode")))
+              written.get(f"{axis}.ToPlc.ErrorCode") == ("UINT32", "4")
+              and reported[f"{axis}.ToPlc.ErrorCode"]["type_source"] == "nc-field",
+              str(written.get(f"{axis}.ToPlc.ErrorCode")))
         # The table is what has been seen, not a licence to guess the rest.
         check("an NC field outside the table, and any PLC symbol, is still a default",
               made.get("types_defaulted") == [f"{axis}.SomethingNew",
@@ -1534,20 +1584,20 @@ def second_field_session_checks():
         lookalike = Path(tmp) / "lookalike.tcscopex"
         looks = run("newscope", tpl, "-o", lookalike, "--netid", "1.2.3.4.1.1",
                     "--channels", "MAIN.fbAxis.NcToPlc.ErrorCode,"
-                                  "Axes.Axis2.ErrorCode:LREAL,"
-                                  "Axes.Axis3.ErrorCode:852,"
+                                  "Axes.Axis2.ToPlc.ErrorCode:LREAL,"
+                                  "Axes.Axis3.ToPlc.ErrorCode:852,"
                                   "Axes.Axis4.Enc.ErrorCode")
         sources = {c["symbol"]: c["type_source"] for c in looks.get("channels", [])}
         check("the NC table stays out of symbols it does not describe",
               sources == {"MAIN.fbAxis.NcToPlc.ErrorCode": "default",
-                          "Axes.Axis2.ErrorCode": "declared",
-                          "Axes.Axis3.ErrorCode": "default",
+                          "Axes.Axis2.ToPlc.ErrorCode": "declared",
+                          "Axes.Axis3.ToPlc.ErrorCode": "default",
                           "Axes.Axis4.Enc.ErrorCode": "default"}, str(sources))
         # checkscope has to know the table too, or a file from an older
         # newscope with ErrorCode 8 bytes wide passes in silence.
         looked = run("checkscope", lookalike, expect_ok=False)
         check("checkscope warns about an NC field declared as the wrong type",
-              any(w.startswith("Axes.Axis2.ErrorCode: DataType REAL64")
+              any(w.startswith("Axes.Axis2.ToPlc.ErrorCode: DataType REAL64")
                   and "UINT32" in w for w in looked.get("warnings", []))
               and not any(w.startswith("MAIN.fbAxis.NcToPlc.ErrorCode: DataType")
                           for w in looked.get("warnings", [])),
@@ -2789,6 +2839,7 @@ def main():
     layout_checks()
     recordability_checks()
     second_field_session_checks()
+    nc_struct_checks()
     prefix_house_checks()
     export_copy_checks()
     still_channel_checks()

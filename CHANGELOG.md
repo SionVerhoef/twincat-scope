@@ -8,8 +8,9 @@ First public release. The development history before it is in git and in `evals/
 
 - `newscope` writes a `.tcscopex` from a template: fresh GUIDs with every display channel
   rewired to its own acquisition, one acquisition and display channel per requested symbol,
-  per-channel `SYMBOL:TYPE:PORT`, Scope's own data types (known NC axis fields typed
-  automatically, anything undeclared reported as defaulted), NC `Axes.…` symbols routed to
+  per-channel `SYMBOL:TYPE:PORT`, Scope's own data types (NC axis fields and the
+  axis's `ToPlc`/`FromPlc` members typed automatically, a struct member written on the axis
+  itself named with its `ToPlc` path, anything undeclared reported as defaulted), NC `Axes.…` symbols routed to
   port 501, sample time and record window.
 - Layout: one chart tab per device, one stacked band per quantity, at most eight traces per
   band, flags on 0/1, a lone parent block drawn beside what it drives. `--layout flat` for

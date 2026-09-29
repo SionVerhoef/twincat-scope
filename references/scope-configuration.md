@@ -197,13 +197,28 @@ instead of part of a symbol name. No TwinCAT symbol path seen here contains a co
 nothing in the format promises that, and a symbol that does contain one cannot be written in
 this grammar.
 
-For `Axes.<axis>.<field>`, the NC runtime's own field names say their type, because Beckhoff
-fixes them: `ActPos`, `SetPos`, `PosDiff`, `ActVelo`, `SetVelo`, `ActAcc`, `SetAcc`,
-`ActTorque`, the `…Modulo` positions and `Position` are `REAL64`; `ErrState`, `ErrorCode`,
-`ErrorID`, `AxisState` and `CoupleState` are `UINT32`. Every such acquisition in the nine files
-of one real project agrees, and `newscope` writes them that way with `type_source: nc-field`
-— unless the entry declares a type, names a port other than 501, or has a deeper path, and
-`checkscope` warns when a file disagrees with the table. No `UINT32` channel has recorded yet.
+The NC runtime's own field names say their type, because Beckhoff fixes them. Two shapes are
+typed, and `newscope` writes them with `type_source: nc-field`:
+
+- **`Axes.<axis>.<field>`**, the fields Scope View's symbol browser lists on an axis: the
+  positions, velocities, accelerations, torques, `PosDiff`, `SetJerk`, `CtrlOutput`,
+  `DriveOutput` and `TorqueOffset` are `REAL64`; `AxisState`, `CoupleState`, `ErrState`,
+  `CmdNo`, `ControlDWord`, `HomingState`, `OverrideV` and `StateDWord` are `UINT32`.
+- **`Axes.<axis>.ToPlc.<field>`** and **`Axes.<axis>.FromPlc.<field>`**, the axis's copies of
+  the [`NCTOPLC_AXIS_REF`](https://infosys.beckhoff.com/content/1033/tcplclib_tc2_mc2/70133899.html)
+  and [`PLCTONC_AXIS_REF`](https://infosys.beckhoff.com/content/1033/tcplclib_tc2_mc2/70138507.html)
+  structs of Tc2_MC2, typed member by member (`ErrorCode`
+  and `AxisState` `UINT32`, `CmdNo` `UINT16`, `ModuloActTurns` `INT32`…). Members that are
+  structs or arrays are not typed.
+
+**`ErrorCode` is not a field of the axis.** Scope refused `Axes.<axis>.ErrorCode` as an unknown
+symbol on a real NC; recorded as `Axes.<axis>.ToPlc.ErrorCode` it read back as `UINT32`
+integers. `newscope` names the `ToPlc` path under `nc_paths_suspect`, and `checkscope` warns,
+for any such struct member written directly on the axis. The axis field list is one NC on
+TwinCAT 3.1 4024.55; another build may expose more.
+
+An entry that declares a type, names a port other than 501, or has any other path keeps its own
+type, and `checkscope` warns when a file disagrees with the tables.
 
 Any other channel given no type is written as `REAL64` and **listed in the output as
 defaulted**, because a default is a guess and guessing wrong on a `BOOL` records nothing
