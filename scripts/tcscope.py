@@ -1702,10 +1702,13 @@ def cmd_events(args):
         if not (digital or integer):
             # A command's extreme is where it rests, not a rail: SetPos sat at
             # its minimum 63% of one real recording, beside 655 holds. A clean
-            # signal that saturates hits its limit at speed instead.
+            # signal that saturates hits its limit at speed instead. A modulo
+            # position has no rail at all: its ends are where it wraps, and an
+            # indexing axis wraps onto its minimum at full speed and rests there
+            # - 56% of one real recording, reported as clipping.
             for edge, value in (("max", hi), ("min", lo)):
                 frac = float(np.mean(col[ok] == value))
-                if (frac > args.clip_fraction and not still
+                if (frac > args.clip_fraction and not still and not modulo
                         and not (command and not _hits_at_speed(np, col, d, value))):
                     found.append(event("clipping", frac / args.clip_fraction,
                                        edge=edge, value=value, fraction=frac))

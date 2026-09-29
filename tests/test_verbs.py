@@ -1025,7 +1025,7 @@ def command_channel_checks():
 
 
 def write_clean_feedback_export(path, moves=6, dwell=1500, ramp=60, cruise=150,
-                                period=45.0, frozen_move=3, lag=0):
+                                period=45.0, frozen_move=3, lag=0, one_way=False):
     """A simulated axis: its feedback is its setpoint, sample for sample.
 
     ActPos equals SetPos exactly, so it moves without noise and is a command by
@@ -1033,11 +1033,13 @@ def write_clean_feedback_export(path, moves=6, dwell=1500, ramp=60, cruise=150,
     move. During move `frozen_move` both freeze while SetPos moves on - the
     defect - and catch up in one jump when the move ends. `lag` delays the
     feedback behind its setpoint by that many samples, as a real axis does.
+    `one_way` moves always forward, as an indexing axis does: with a move of
+    exactly one period, every move ends by wrapping onto the modulo minimum.
     """
     velo, v_max = [], 0.5
     starts = []
     for m in range(moves):
-        sign = 1 if m % 2 == 0 else -1
+        sign = 1 if one_way or m % 2 == 0 else -1
         velo += [0.0] * dwell
         starts.append(len(velo))
         velo += [sign * v_max * (i + 1) / ramp for i in range(ramp)]
@@ -1119,6 +1121,22 @@ def clean_feedback_checks():
         # proves nothing.
         check("the clean fixture's setpoint rests at its minimum over 1% of the time",
               truth["at_min"] > 0.01, f"{truth['at_min']:.3f}")
+
+        # Field round 49a8e9b: a real indexing axis moves one turn forward at a
+        # time, so its ActPosModulo reaches its minimum by wrapping onto it and
+        # rests there 56% of the time. The wrap is a jump at full speed, so
+        # "hits its limit at speed" read the rest as a saturation: clipping.
+        turns = Path(tmp) / "turns.csv"
+        # 0.5 units a sample over 60 + 30 samples of ramp and cruise: one period.
+        truth = write_clean_feedback_export(turns, cruise=30, period=45.0,
+                                            frozen_move=None, one_way=True)
+        got = run("events", turns, "--max-events", 1000).get("events", [])
+        mod = [e for e in got if e["channel"] == "ActPosModulo"]
+        check("an indexing axis resting where it wraps is not clipping",
+              [e["kind"] for e in mod].count("wrap") >= truth["moves"]
+              and not [e for e in mod if e["kind"] == "clipping"],
+              str([(e["kind"], e.get("edge"), e.get("fraction")) for e in mod
+                   if e["kind"] in ("clipping", "wrap")][:8]))
 
 
 def write_recurring_spike_export(path, strokes=60, period=200, height=3.3, seed=11):
