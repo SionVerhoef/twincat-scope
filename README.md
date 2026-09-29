@@ -93,8 +93,15 @@ real compiled program (see *Status*).
 # Claude Code
 git submodule add https://github.com/SionVerhoef/twincat-scope .claude/skills/twincat-scope
 
-# GitHub Copilot in VS Code
+# GitHub Copilot in VS Code (untested)
 git submodule add https://github.com/SionVerhoef/twincat-scope .github/skills/twincat-scope
+```
+
+Pin a release rather than following `main`, and commit the pin:
+
+```bash
+git -C .claude/skills/twincat-scope checkout v1.0.0
+git add .claude/skills/twincat-scope
 ```
 
 A plain `git clone` of your repository leaves a submodule folder **empty**. Everyone who clones
@@ -102,7 +109,7 @@ afterwards needs `git clone --recurse-submodules <your-repo>`, or `git submodule
 in an existing clone.
 
 If your team would rather not use submodules, `tools/update-skill.ps1` downloads a release zip
-into the same location instead.
+into the same location instead (`-Version v1.0.0`, or the latest release by default).
 
 ### Requirements
 
@@ -127,6 +134,16 @@ Without `UV_NATIVE_TLS`, an intercepting proxy breaks TLS with an opaque error.
 ```bash
 py -3 scripts/tcscope.py doctor        # python3 on Linux or macOS
 ```
+
+`doctor`, `newscope` and `checkscope` need no packages, but they do need **Python 3** itself.
+A fresh Windows PC may have none: `python.exe` there can be a 0-byte Microsoft Store stub, and
+`py` missing. Install it for your user only, no administrator rights needed:
+
+```powershell
+winget install --id=Python.Python.3.12 -e --scope user
+```
+
+or run the python.org installer with *Install for all users* unticked.
 
 ## Layout
 
