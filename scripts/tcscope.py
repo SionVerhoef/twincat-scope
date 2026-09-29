@@ -2294,16 +2294,50 @@ IEC_TO_SCOPE = {
 DEFAULT_SCOPE_TYPE = "REAL64"
 
 # The NC runtime's symbols are the exception. Their names are Beckhoff's rather
-# than a house convention, so the name does say the type - and every Axes.*
-# acquisition in the nine files of one real project agrees with this table.
-# Without it an axis's ErrorCode would be written 8 bytes wide over a 4-byte
-# value. Keyed on the lowercased field; anything missing still defaults.
-NC_FIELD_TYPES = {
-    **dict.fromkeys(("actpos", "setpos", "actposmodulo", "setposmodulo",
-                     "posdiff", "actvelo", "setvelo", "actacc", "setacc",
-                     "acttorque", "position"), "REAL64"),
-    **dict.fromkeys(("errstate", "errorcode", "errorid", "axisstate",
-                     "couplestate"), "UINT32"),
+# than a house convention, so the name does say the type. Without it an axis's
+# ErrorCode would be written 8 bytes wide over a 4-byte value. Keyed on the
+# lowercased field, in IEC types; anything missing still defaults.
+#
+# Axes.<axis>.<field>: the fields Scope View's symbol browser lists on an axis
+# (TC3.1 4024.55). ErrorCode is not among them - Scope refused it there.
+NC_AXIS_FIELDS = {
+    **dict.fromkeys(("actacc", "actpos", "actposmodulo", "acttorque", "actvelo",
+                     "ctrloutput", "driveoutput", "posdiff", "posdiffcouple",
+                     "setacc", "setjerk", "setpos", "setposmodulo", "settorque",
+                     "setvelo", "torqueoffset"), "LREAL"),
+    **dict.fromkeys(("axisstate", "cmdno", "controldword", "couplestate",
+                     "errstate", "homingstate", "overridev", "statedword"), "UDINT"),
+}
+
+# Axes.<axis>.ToPlc.<field> and .FromPlc.<field>: the Tc2_MC2 structs
+# NCTOPLC_AXIS_REF and PLCTONC_AXIS_REF. Members that are themselves structs or
+# arrays (StateDWord, ControlDWord, CamCouplingState…) are left out.
+NC_STRUCT_FIELDS = {
+    "toplc": {
+        **dict.fromkeys(("errorcode", "axisstate", "axismodeconfirmation",
+                         "homingstate", "couplestate", "svbentries", "safentries",
+                         "axisid", "statedword3", "touchprobestate",
+                         "touchprobecounter"), "DWORD"),
+        **dict.fromkeys(("actpos", "moduloactpos", "actvelo", "posdiff", "setpos",
+                         "setvelo", "setacc", "targetpos", "modulosetpos", "setjerk",
+                         "settorque", "acttorque", "acttorquederivative",
+                         "settorquederivative", "absphasingpos", "torqueoffset",
+                         "actposwithoutposcorrection", "actacc", "userdata"), "LREAL"),
+        **dict.fromkeys(("activecontrolloopindex", "controlloopindex", "cmdno",
+                         "cmdstate"), "WORD"),
+        **dict.fromkeys(("moduloactturns", "modulosetturns"), "DINT"),
+        "dctimestamp": "UDINT",
+    },
+    "fromplc": {
+        **dict.fromkeys(("override", "axismoderequest", "axismodedword"), "UDINT"),
+        **dict.fromkeys(("axismodelreal", "positioncorrection", "extsetpos",
+                         "extsetvelo", "extsetacc", "extcontrolleroutput",
+                         "gearratio1", "gearratio2", "gearratio3", "gearratio4",
+                         "exttorque"), "LREAL"),
+        "extsetdirection": "DINT",
+        "mapstate": "BOOL",
+        **dict.fromkeys(("plccyclecontrol", "plccyclecount"), "BYTE"),
+    },
 }
 
 # A bit is a state. An integer that no keyword recognised is a step number, a
@@ -2380,18 +2414,38 @@ def parse_channel_spec(spec, plc_port):
 
 
 def nc_field_type(symbol, port=None):
-    """The NC table's type for `Axes.<axis>.<field>`, or None.
+    """The Scope type of `Axes.<axis>.<field>` or `Axes.<axis>.ToPlc|FromPlc.<field>`.
 
-    Only that exact shape, and only on the NC port. A PLC list that happens to
-    be called Axes, a deeper path, or a symbol sent elsewhere with an explicit
+    Only those shapes, and only on the NC port. A PLC list that happens to be
+    called Axes, any other path, or a symbol sent elsewhere with an explicit
     port owns its own types, and guessing them from a leaf would hide a
     default behind a confident-looking source.
     """
     parts = _segments(symbol)
-    if (len(parts) != 3 or not is_nc_symbol(symbol)
-            or (port is not None and port != NC_PORT)):
+    if not is_nc_symbol(symbol) or (port is not None and port != NC_PORT):
         return None
-    return NC_FIELD_TYPES.get(parts[2].lower())
+    if len(parts) == 3:
+        iec = NC_AXIS_FIELDS.get(parts[2].lower())
+    elif len(parts) == 4:
+        iec = NC_STRUCT_FIELDS.get(parts[2].lower(), {}).get(parts[3].lower())
+    else:
+        iec = None
+    return IEC_TO_SCOPE[iec] if iec else None
+
+
+def nc_struct_path(symbol):
+    """`Axes.<axis>.ToPlc.<field>` for an `Axes.<axis>.<field>` that is not a
+    field of the axis but is a member of its ToPlc struct, else None.
+
+    Scope refused Axes.<axis>.ErrorCode on a real NC; the axis's own fields do
+    not include it, and its ToPlc struct does.
+    """
+    parts = _segments(symbol)
+    if (len(parts) != 3 or not is_nc_symbol(symbol)
+            or parts[2].lower() in NC_AXIS_FIELDS
+            or parts[2].lower() not in NC_STRUCT_FIELDS["toplc"]):
+        return None
+    return f"{parts[0]}.{parts[1]}.ToPlc.{parts[2]}"
 
 
 def _safe_segment(text):
@@ -3025,6 +3079,13 @@ def cmd_newscope(args):
             f"{PLC_FIRST_PORT}, where no TwinCAT 3 PLC runtime answers. A typo "
             f"for {PLC_FIRST_PORT} writes a file that opens and records nothing."
         )
+    struct_paths = {s: nc_struct_path(s) for s in specs if nc_struct_path(s)}
+    if struct_paths:
+        out["nc_paths_suspect"] = struct_paths
+        out["nc_paths_note"] = (
+            "These are members of the axis's ToPlc struct, not fields of the "
+            "axis: Scope refused Axes.<axis>.ErrorCode as an unknown symbol on "
+            "a real NC. Use the ToPlc path given, which is also typed.")
     if defaulted:
         # Silence here is what produced 53 channels of LREAL on a machine whose
         # symbols were half bits and enums.
@@ -3329,12 +3390,20 @@ def cmd_checkscope(args):
                 "width from the target, so the recording would be of the wrong "
                 "bytes rather than of this variable."
             )
-        # A warning: the table is one project's files, not a Beckhoff spec.
+        struct_path = nc_struct_path(symbol)
+        if struct_path:
+            warnings.append(
+                f"{symbol}: not a field of the axis, so Scope may report it as an "
+                f"unknown symbol - it is a member of the axis's ToPlc struct, "
+                f"{struct_path}."
+            )
+        # A warning: the tables are one NC's browser and the library's
+        # structs, not a promise for every build.
         expected = nc_field_type(symbol, int(port) if port.isdigit() else None)
         if resolved and expected and resolved[0] != expected:
             warnings.append(
                 f"{symbol}: DataType {resolved[0]}, but this NC field is "
-                f"{expected} in the real project files seen. The type decides how the "
+                f"{expected} in the NC field tables. The type decides how the "
                 "bytes are read, so a mismatch records the wrong value; "
                 "regenerate unless you know otherwise."
             )
