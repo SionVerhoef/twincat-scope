@@ -178,11 +178,12 @@ tool, `ingest`, `manifest`. The CSV reader handled 19 genuine exports and every 
 Scope View's dialog, reading each layout or refusing it by name. `checkscope` has read 25 real
 project files, including eight trigger actions and ring-buffer mode; a ring buffer keeps
 exactly its record time, ending at the stop. Both templates open as shipped. `--tmc` caught
-every planted error against a real `.tmc`. An NC `UINT32` channel
-(`Axes.<axis>.ToPlc.ErrorCode`) records as integers.
+every planted error against a real `.tmc`. NC channels by every path `newscope` types (direct
+axis fields, `ToPlc`/`FromPlc` members) record on a moving axis and keep their types.
+Timelines *All* on a multi-channel group reads correctly.
 
 **Not verified:** the analysis verbs across many real recordings (most real data is from one
-machine), what a *Subsave* trigger records (it needs a Professional licence), the `ToPlc`/
-`FromPlc` members beyond `ErrorCode` and `AxisState`, scaled channels, marker windows,
-Timelines *All*, and an axis parked at a limit. Rule 3 applies to this skill's own claims:
-report at exactly that precision.
+machine), what a *Subsave* trigger records (it needs a Professional licence), marker tables in
+an export, and an axis parked at a limit. A CSV exported from Scope View with *Scale values* on
+cannot be told from a raw one — `manifest` warns when scaling is set; prefer `ingest` on the
+`.svdx`. Rule 3 applies to this skill's own claims: report at exactly that precision.
