@@ -15,11 +15,11 @@ TC3ScopeExportTool.exe "svd=C:\path\rec.svdx" target=C:\path\out.csv silent
 | `target=` | Output file; the extension selects the format. |
 | `silent` | No UI. Required for scripting. **Without it — or with no arguments at all — the tool opens a window and waits**, which hangs a script. |
 | `config=` | An `.xml` export configuration, root `<ExportConfiguration>`, CSV options under `Format_Properties/CSVProperties`. **Verified:** it changes the output. The options, and their element names, are in the settings table below. |
-| `channel=`, `channellist=` | Export only the named channel (its display name, e.g. `channel=ActPos`). **Verified** with one name each; several names in `channellist=` untried. |
+| `channel=`, `channellist=` | Export only the named channels, by display name (`channel=ActPos`). **Verified.** `channellist=` separates names with **`;`** (`channellist=ActPos;SetPos;PosDiff`). **A wrong separator fails silently, exit 0:** `,` or `\|` is ignored and every channel is exported, and names separated by spaces write **no file at all**. `channel=` given twice keeps only the last. So check which columns came out, and that a file did. |
 | `start=`, `end=` | The export range, **as absolute FILETIME ticks** (UTC, 100 ns since 1601), the same numbers the CSV header prints as `Starttime of export`. **Verified:** a 10 s range gave 5 001 + 2 501 samples (2 ms + 4 ms groups), so both ends are included. **Milliseconds, a date or a clock time are ignored without a word** — exit 0, full range — so check the header of what came out. |
 
 The binary also carries `svdx=`, and its window has matching Channels / Starttime / Endtime
-fields. `svdx=` has not been tried.
+fields. **Verified:** `svdx=` is an alias of `svd=`.
 
 `tcscope.py ingest` calls this for you when handed a `.svdx`, writing the CSV to its cache
 dir rather than beside the recording, then converts to Parquet. That exact command line has
