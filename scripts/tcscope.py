@@ -1730,6 +1730,7 @@ def cmd_events(args):
                                    threshold=args.threshold))
 
     t0, t1 = _recording_span(rec)
+    _mark_recurring(found)
     emit({"ok": True, "count": len(found),
           "summary": _event_summary(found, t0, t1, args.max_events),
           "events": sorted(_rank(found, t0, t1, args.max_events),
@@ -1752,8 +1753,10 @@ def cmd_events(args):
           "severity": "multiple of each detector's own threshold; ramp, "
                       "transition, hold, wrap and crossing are descriptive, always 1.0",
           "ranking": "defects (spike, step, flatline, clipping) before the "
-                     "descriptive kinds; worst first within each tenth of the "
-                     "recording, so a truncated answer still spans the whole of it"})
+                     "descriptive kinds, and among defects a one-off before a "
+                     f"`recurring` one (one of {RECURRING_MIN}+ alike on its "
+                     "channel); worst first within each tenth of the recording, "
+                     "so a truncated answer still spans the whole of it"})
     return 0
 
 
@@ -1782,6 +1785,29 @@ def _bin_of(event, t0, t1):
     return min(BINS - 1, int((event["time"] - t0) / (t1 - t0) * BINS))
 
 
+# A defect is recurring when its channel reports at least this many of its
+# kind and it is no larger than RECURRING_SPREAD times their median size: the
+# following error's peak on every stroke, 1 027 spikes alike to a few percent
+# on one real axis, is what that channel does rather than a fault.
+RECURRING_MIN = 20
+RECURRING_SPREAD = 1.5
+
+
+def _mark_recurring(found):
+    """Flag defects that look like dozens of others of their kind on their channel."""
+    sizes = {}
+    for e in found:
+        if e["kind"] not in DESCRIPTIVE_KINDS and "delta" in e:
+            sizes.setdefault((e["symbol_name"], e.get("group"), e["kind"]), []).append(
+                abs(e["delta"]))
+    typical = {key: sorted(v)[len(v) // 2] for key, v in sizes.items()
+               if len(v) >= RECURRING_MIN}
+    for e in found:
+        median = typical.get((e["symbol_name"], e.get("group"), e["kind"]))
+        if median is not None and abs(e["delta"]) <= RECURRING_SPREAD * median:
+            e["recurring"] = True
+
+
 def _rank(found, t0, t1, cap):
     """The worst events, spread across the recording.
 
@@ -1801,10 +1827,14 @@ def _rank(found, t0, t1, cap):
         return list(found)
     # Defects first: routine motion - one ramp and one hold per move on a
     # busy axis - otherwise spends the cap before a frozen sensor is reached.
-    defects = [e for e in found if e["kind"] not in DESCRIPTIVE_KINDS]
-    kept = _spread(defects, t0, t1, cap)
-    routine = [e for e in found if e["kind"] in DESCRIPTIVE_KINDS]
-    return kept + _spread(routine, t0, t1, cap - len(kept))
+    # Then a defect unlike the rest of its channel before one it repeats on
+    # every stroke: 13 of 20 slots once went to a following error's routine peak.
+    kept = []
+    for tier in (lambda e: e["kind"] not in DESCRIPTIVE_KINDS and not e.get("recurring"),
+                 lambda e: e.get("recurring"),
+                 lambda e: e["kind"] in DESCRIPTIVE_KINDS):
+        kept += _spread([e for e in found if tier(e)], t0, t1, cap - len(kept))
+    return kept
 
 
 def _spread(found, t0, t1, cap):

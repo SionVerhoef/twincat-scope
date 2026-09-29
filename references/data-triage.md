@@ -195,6 +195,12 @@ clean signal that arrives at its extreme still moving has hit a limit, and still
 `flatline`, `clipping`) take the slots first and the descriptive ones (`ramp`, `transition`,
 `hold`, `wrap`, `crossing`) fill what is left, each tier spread across the recording worst-first. The
 summary still counts everything.
+
+Among the defects, a **one-off ranks before a `recurring` one**. A defect is `recurring` when
+its channel reports 20 or more of its kind and it is no larger than 1.5× their median: a
+following error peaks alike on every stroke, and on one real axis those 1 027 spikes took 13 of
+20 slots. The flag says the channel always does this, not that it is harmless — a fault that
+repeats identically on every cycle is recurring too, so read what the summary counts.
 Both names matter — filtering for `step` is how you find the jumps worth explaining, and a
 commanded move is not one of them.
 

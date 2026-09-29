@@ -31,9 +31,11 @@ First public release. The development history before it is in git and in `evals/
 - `manifest` reports channels, units, per-group sample rates, duration, gaps, duplicated
   display channels, and whether cross-group timing in the export can be trusted.
 - `stats` reports per-channel health: rails, flat stretches, quantisation, outliers.
-- `events` finds steps, ramps, spikes, transitions, flatlines, holds, clipping and threshold
-  crossings. One excursion is one event; command channels, still axes and integer channels are
-  recognised so they do not flood the result; the output is ranked and spread across the
+- `events` finds steps, ramps, spikes, transitions, flatlines, holds, modulo wraps, clipping and
+  threshold crossings. One excursion is one event; command channels, still axes and integer
+  channels are recognised so they do not flood the result, and clean NC feedback that stands
+  still while its setpoint moves is reported as frozen. The output is ranked - one-off defects,
+  then defects that recur alike on a channel, then routine motion - and spread across the
   recording, with a complete summary of everything found.
 - `plot` draws a min/max envelope per pixel bucket, never decimation.
 - `correlate` normalises, reports the lag with its sign and which channel leads, and refuses

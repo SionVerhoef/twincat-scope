@@ -1121,6 +1121,56 @@ def clean_feedback_checks():
               truth["at_min"] > 0.01, f"{truth['at_min']:.3f}")
 
 
+def write_recurring_spike_export(path, strokes=60, period=200, height=3.3, seed=11):
+    """A following error that peaks alike on every stroke, and one real fault.
+
+    PosDiff: noise, plus a 3-sample peak of `height` ±5% once a stroke - the
+    routine peak of a reciprocating axis. Torque: noise, with one modest step
+    two thirds of the way through - the fault, far smaller against its own
+    noise than the routine peaks are against theirs.
+    """
+    import random
+    rng = random.Random(seed)
+    rows, fault_at = [], (2 * strokes // 3) * period + period // 2
+    for i in range(strokes * period):
+        if i % period == 0:
+            this = height * (1 + rng.uniform(-0.05, 0.05))
+        peak = this if i % period in (100, 101, 102) else 0
+        diff = rng.gauss(0, 0.01) + peak
+        torque = 1.0 + rng.gauss(0, 0.02) + (0.5 if i >= fault_at else 0.0)
+        rows.append(f"{i:.1f},{diff:.6f},{torque:.6f}")
+    path.write_text("\n".join(["TwinCAT Scope Export", "", "Name,PosDiff,Torque"] + rows)
+                    + "\n", encoding="utf-8", newline="")
+    return {"strokes": strokes, "fault_s": fault_at / 1000.0}
+
+
+def recurring_spike_checks():
+    """Field round c137eb9, J3: a following error's routine peak - 1 027
+    spikes on one real axis, alike to within a few percent - took 13 of 20
+    capped slots, because a spike is a defect and its severity outscored
+    anything quieter. A defect that looks like dozens of others on its own
+    channel is what that channel does, not a fault.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        csv = Path(tmp) / "recurring.csv"
+        truth = write_recurring_spike_export(csv)
+        full = run("events", csv, "--max-events", 1000).get("events", [])
+        spikes = [e for e in full if e["channel"] == "PosDiff" and e["kind"] == "spike"]
+        fault = [e for e in full if e["channel"] == "Torque" and e["kind"] == "step"]
+        check("the fixture has a routine spike per stroke and one step",
+              len(spikes) == truth["strokes"] and len(fault) == 1
+              and near(fault[0]["time"], truth["fault_s"], 0.01)
+              and all(s["severity"] > fault[0]["severity"] for s in spikes),
+              f"spikes={len(spikes)} fault={[(e['time'], e['severity']) for e in fault]}")
+        check("a spike alike on every stroke is marked recurring, the fault is not",
+              all(s.get("recurring") for s in spikes) and not fault[0].get("recurring"),
+              f"{sum(bool(s.get('recurring')) for s in spikes)} of {len(spikes)} recurring")
+        cut = run("events", csv, "--max-events", 5).get("events", [])
+        check("a capped answer returns the one-off fault before routine peaks",
+              any(e["channel"] == "Torque" and e["kind"] == "step" for e in cut),
+              str([(e["channel"], e["kind"], e["severity"]) for e in cut]))
+
+
 def still_channel_checks():
     """Field round 7, bead htl: rails that are not rails.
 
@@ -2695,6 +2745,7 @@ def main():
     still_channel_checks()
     command_channel_checks()
     clean_feedback_checks()
+    recurring_spike_checks()
     long_correlate_checks()
     parquet_memory_checks()
     two_rate_checks()
