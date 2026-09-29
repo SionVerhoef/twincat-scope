@@ -985,8 +985,10 @@ def command_channel_checks():
               len(frozen) == 1 and near(frozen[0].get("time"), truth["frozen_s"][0], 0.01),
               str([(e.get("time"), e.get("samples")) for e in frozen]))
 
-        # With a cap smaller than the defects, routine motion gets no slot.
-        cut = run("events", csv, "--max-events", 2)
+        # With a cap no larger than the defects, routine motion gets no slot.
+        # The frozen torque is the one defect: a setpoint's rest position is
+        # not clipping (field round c137eb9, J4).
+        cut = run("events", csv, "--max-events", 1)
         check("a capped answer spends its slots on defects before routine motion",
               cut.get("truncated") is True and cut.get("events")
               and not [e for e in cut["events"] if e["kind"] in ("ramp", "hold")]
@@ -1020,6 +1022,153 @@ def command_channel_checks():
               len(of("SetVelo", "ramp")) == 3 * truth["moves"]
               and len(of("SetPos", "ramp")) == 2 * truth["moves"],
               f"SetVelo={len(of('SetVelo', 'ramp'))} SetPos={len(of('SetPos', 'ramp'))}")
+
+
+def write_clean_feedback_export(path, moves=6, dwell=1500, ramp=60, cruise=150,
+                                period=45.0, frozen_move=3, lag=0):
+    """A simulated axis: its feedback is its setpoint, sample for sample.
+
+    ActPos equals SetPos exactly, so it moves without noise and is a command by
+    behaviour. ActPosModulo is ActPos modulo `period` and wraps several times a
+    move. During move `frozen_move` both freeze while SetPos moves on - the
+    defect - and catch up in one jump when the move ends. `lag` delays the
+    feedback behind its setpoint by that many samples, as a real axis does.
+    """
+    velo, v_max = [], 0.5
+    starts = []
+    for m in range(moves):
+        sign = 1 if m % 2 == 0 else -1
+        velo += [0.0] * dwell
+        starts.append(len(velo))
+        velo += [sign * v_max * (i + 1) / ramp for i in range(ramp)]
+        velo += [sign * v_max] * cruise
+        velo += [sign * v_max * (ramp - 1 - i) / ramp for i in range(ramp)]
+    velo += [0.0] * dwell
+    frozen = (range(starts[frozen_move], starts[frozen_move] + 2 * ramp + cruise)
+              if frozen_move is not None else range(0))
+    rows, pos, act, wraps, setpos = [], 0.0, 0.0, 0, []
+    for i, v in enumerate(velo):
+        pos += v
+        setpos.append(round(pos, 6))
+        act = act if i in frozen else setpos[max(0, i - lag)]
+        mod = round(act, 6) % period
+        # The catch-up after the freeze is a jump, not a wrap.
+        if rows and i - 1 not in frozen and abs(mod - last) > period / 2:
+            wraps += 1
+        last = mod
+        rows.append(f"{i:.1f},{pos:.6f},{act:.6f},{mod:.6f}")
+    path.write_text("\n".join(["TwinCAT Scope Export", "",
+                               "Name,SetPos,ActPos,ActPosModulo"] + rows) + "\n",
+                    encoding="utf-8", newline="")
+    return {"moves": moves, "rests": moves + 1, "wraps": wraps, "period": period,
+            "at_min": setpos.count(min(setpos)) / len(setpos),
+            "frozen_s": (frozen.start / 1000.0, frozen.stop / 1000.0)}
+
+
+def clean_feedback_checks():
+    """Field round c137eb9, J2 and J4: a noise-free ActPosModulo was a command,
+    so a frozen sensor would have hidden among its 332 holds, its 650
+    wrap-arounds were `step`s (a defect kind), and a setpoint resting at its
+    minimum 63% of the time reported `clipping`.
+
+    A simulated axis's feedback is as clean as its setpoint, so calling every
+    standstill a flatline instead would bury the answer under rests. What tells
+    a frozen sensor from a rest is its setpoint moving at the same time.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        csv = Path(tmp) / "clean.csv"
+        truth = write_clean_feedback_export(csv)
+        ev = run("events", csv, "--max-events", 1000)
+        events = ev.get("events", [])
+
+        def of(name, kind):
+            return [e for e in events if e["channel"] == name and e["kind"] == kind]
+
+        t0, t1 = truth["frozen_s"]
+        for name in ("ActPos", "ActPosModulo"):
+            flat = of(name, "flatline")
+            check(f"clean {name} frozen while SetPos moves is a flatline, its rests are holds",
+                  len(flat) == 1 and flat[0]["time"] < t0 < t1
+                  <= flat[0]["time"] + flat[0]["samples"] / 1000.0 + 0.01
+                  and flat[0].get("while_moving") == "SetPos"
+                  and len(of(name, "hold")) == truth["rests"] - 1,
+                  f"flatlines={[(e['time'], e['samples'], e.get('while_moving')) for e in flat]} "
+                  f"holds={len(of(name, 'hold'))}")
+        wraps = of("ActPosModulo", "wrap")
+        check("a modulo channel's wrap-around is a wrap, not a step",
+              len(wraps) == truth["wraps"]
+              and not [e for e in of("ActPosModulo", "step")
+                       if abs(e["delta"]) > truth["period"] / 2],
+              f"wraps={len(wraps)} of {truth['wraps']} "
+              f"steps={[round(e['delta'], 1) for e in of('ActPosModulo', 'step')]}")
+        # Feedback trails its setpoint, so the setpoint is already moving as
+        # each rest on the feedback ends. That is not a frozen sensor.
+        lagged = Path(tmp) / "lagged.csv"
+        write_clean_feedback_export(lagged, frozen_move=None, lag=30)
+        late = run("events", lagged, "--max-events", 1000).get("events", [])
+        check("clean feedback trailing its setpoint rests as holds, not flatlines",
+              not [e for e in late if e["kind"] == "flatline"]
+              and sum(e["kind"] == "hold" for e in late if e["channel"] == "ActPos")
+              == truth["rests"],
+              str([(e["channel"], e["time"]) for e in late if e["kind"] == "flatline"]))
+        check("a setpoint resting at its minimum is not clipping",
+              not of("SetPos", "clipping") and not of("ActPosModulo", "clipping"),
+              str([(e["channel"], e["edge"], e["fraction"])
+                   for e in events if e["kind"] == "clipping"]))
+        # The fixture must really rest at its minimum, or the check above
+        # proves nothing.
+        check("the clean fixture's setpoint rests at its minimum over 1% of the time",
+              truth["at_min"] > 0.01, f"{truth['at_min']:.3f}")
+
+
+def write_recurring_spike_export(path, strokes=60, period=200, height=3.3, seed=11):
+    """A following error that peaks alike on every stroke, and one real fault.
+
+    PosDiff: noise, plus a 3-sample peak of `height` ±5% once a stroke - the
+    routine peak of a reciprocating axis. Torque: noise, with one modest step
+    two thirds of the way through - the fault, far smaller against its own
+    noise than the routine peaks are against theirs.
+    """
+    import random
+    rng = random.Random(seed)
+    rows, fault_at = [], (2 * strokes // 3) * period + period // 2
+    for i in range(strokes * period):
+        if i % period == 0:
+            this = height * (1 + rng.uniform(-0.05, 0.05))
+        peak = this if i % period in (100, 101, 102) else 0
+        diff = rng.gauss(0, 0.01) + peak
+        torque = 1.0 + rng.gauss(0, 0.02) + (0.5 if i >= fault_at else 0.0)
+        rows.append(f"{i:.1f},{diff:.6f},{torque:.6f}")
+    path.write_text("\n".join(["TwinCAT Scope Export", "", "Name,PosDiff,Torque"] + rows)
+                    + "\n", encoding="utf-8", newline="")
+    return {"strokes": strokes, "fault_s": fault_at / 1000.0}
+
+
+def recurring_spike_checks():
+    """Field round c137eb9, J3: a following error's routine peak - 1 027
+    spikes on one real axis, alike to within a few percent - took 13 of 20
+    capped slots, because a spike is a defect and its severity outscored
+    anything quieter. A defect that looks like dozens of others on its own
+    channel is what that channel does, not a fault.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        csv = Path(tmp) / "recurring.csv"
+        truth = write_recurring_spike_export(csv)
+        full = run("events", csv, "--max-events", 1000).get("events", [])
+        spikes = [e for e in full if e["channel"] == "PosDiff" and e["kind"] == "spike"]
+        fault = [e for e in full if e["channel"] == "Torque" and e["kind"] == "step"]
+        check("the fixture has a routine spike per stroke and one step",
+              len(spikes) == truth["strokes"] and len(fault) == 1
+              and near(fault[0]["time"], truth["fault_s"], 0.01)
+              and all(s["severity"] > fault[0]["severity"] for s in spikes),
+              f"spikes={len(spikes)} fault={[(e['time'], e['severity']) for e in fault]}")
+        check("a spike alike on every stroke is marked recurring, the fault is not",
+              all(s.get("recurring") for s in spikes) and not fault[0].get("recurring"),
+              f"{sum(bool(s.get('recurring')) for s in spikes)} of {len(spikes)} recurring")
+        cut = run("events", csv, "--max-events", 5).get("events", [])
+        check("a capped answer returns the one-off fault before routine peaks",
+              any(e["channel"] == "Torque" and e["kind"] == "step" for e in cut),
+              str([(e["channel"], e["kind"], e["severity"]) for e in cut]))
 
 
 def still_channel_checks():
@@ -2299,7 +2448,8 @@ def robustness_checks():
             if action.option_strings and not action.help]
     check("every option carries help text", not bare, ", ".join(bare))
     events_help = next(a.help for a in verbs._choices_actions if a.dest == "events")
-    kinds = ("step", "ramp", "spike", "transition", "flatline", "hold", "clipping", "crossing")
+    kinds = ("step", "ramp", "spike", "transition", "flatline", "hold", "wrap", "clipping",
+             "crossing")
     check("events help lists every kind it reports",
           all(kind in events_help for kind in kinds), events_help)
 
@@ -2594,6 +2744,8 @@ def main():
     export_copy_checks()
     still_channel_checks()
     command_channel_checks()
+    clean_feedback_checks()
+    recurring_spike_checks()
     long_correlate_checks()
     parquet_memory_checks()
     two_rate_checks()
