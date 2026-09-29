@@ -901,23 +901,37 @@ def long_correlate_checks(rows=300_000, delay=25):
           took < 30, f"{took:.1f} s")
 
 
-def write_command_export(path, moves=6, dwell=400, ramp=60, cruise=150, seed=5):
+def write_command_export(path, moves=6, dwell=400, ramp=60, cruise=150, seed=5,
+                         out_and_back=False):
     """A clean setpoint beside the noisy signals that follow it.
 
     SetPos and SetVelo are what the NC's trajectory generator writes: noise-free
     trapezoid moves with exact standstills between them. ActPos follows with
     encoder noise; ActTorque is noisy throughout except for one second where it
     freezes bit-exact, the defect.
+
+    out_and_back: each move goes out and comes straight back with no rest at the
+    far end, as a reciprocating axis does - its run of change nets to zero.
     """
     import random
     rng = random.Random(seed)
     velo, v_max = [], 0.5          # units per sample at cruise
+
+    def leg(sign):
+        return ([sign * v_max * (i + 1) / ramp for i in range(ramp)]
+                + [sign * v_max] * cruise
+                + [sign * v_max * (ramp - 1 - i) / ramp for i in range(ramp)])
     for m in range(moves):
-        sign = 1 if m % 2 == 0 else -1
         velo += [0.0] * dwell
-        velo += [sign * v_max * (i + 1) / ramp for i in range(ramp)]
-        velo += [sign * v_max] * cruise
-        velo += [sign * v_max * (ramp - 1 - i) / ramp for i in range(ramp)]
+        if out_and_back:
+            # Sampled, the reversal falls between two samples: no sample of the
+            # real stroke stands still, so the run of change is unbroken, and
+            # the velocity sweeps through zero in even steps.
+            velo += [v_max * (i + 1) / ramp for i in range(ramp)] + [v_max] * cruise
+            velo += [v_max * (ramp - i - 0.5) / ramp for i in range(2 * ramp)]
+            velo += [-v_max] * cruise + [-v_max * (ramp - 1 - i) / ramp for i in range(ramp)]
+        else:
+            velo += leg(1 if m % 2 == 0 else -1)
     velo += [0.0] * dwell
     rows, pos = [], 0.0
     frozen_from, frozen_to = len(velo) // 2, len(velo) // 2 + 1000
@@ -979,6 +993,33 @@ def command_channel_checks():
               and any(e["kind"] == "flatline" and e["channel"] == "ActTorque"
                       for e in cut["events"]),
               str([(e["channel"], e["kind"]) for e in cut.get("events", [])]))
+
+        # Field round c137eb9: a real reciprocating axis goes out and straight
+        # back, 511 of its 655 strokes with no rest at the far end. Each such run
+        # of change nets to zero, fell under --min-step, and gave no ramp at all
+        # - 144 ramps for 1166 legs on SetPos, and 0 on SetVelo.
+        strokes = Path(tmp) / "strokes.csv"
+        truth = write_command_export(strokes, dwell=1500, out_and_back=True)
+        events = run("events", strokes, "--max-events", 1000).get("events", [])
+        check("an out-and-back setpoint move is two ramps, one per leg",
+              len(of("SetPos", "ramp")) == 2 * truth["moves"],
+              str([(e["time"], round(e["delta"], 1)) for e in of("SetPos", "ramp")]))
+        # Up to cruise, down through zero to the opposite cruise, back to zero.
+        check("its velocity setpoint ramps three times per stroke",
+              len(of("SetVelo", "ramp")) == 3 * truth["moves"],
+              str([(e["time"], round(e["delta"], 1)) for e in of("SetVelo", "ramp")]))
+        check("the strokes still rest as holds, never flatlines",
+              len(of("SetPos", "hold")) == truth["holds"] and not of("SetPos", "flatline"),
+              f"holds={len(of('SetPos', 'hold'))} flatlines={len(of('SetPos', 'flatline'))}")
+        # The real strokes never reach a cruise: velocity rises, falls through
+        # zero and rises again in one unbroken run - 0 ramps on SetVelo.
+        triangle = Path(tmp) / "triangle.csv"
+        truth = write_command_export(triangle, dwell=1500, cruise=0, out_and_back=True)
+        events = run("events", triangle, "--max-events", 1000).get("events", [])
+        check("a triangular velocity setpoint still ramps three times per stroke",
+              len(of("SetVelo", "ramp")) == 3 * truth["moves"]
+              and len(of("SetPos", "ramp")) == 2 * truth["moves"],
+              f"SetVelo={len(of('SetVelo', 'ramp'))} SetPos={len(of('SetPos', 'ramp'))}")
 
 
 def still_channel_checks():
@@ -2490,6 +2531,20 @@ def main():
                 check(f"TriggerAction {value} is not a fixed window",
                       got.get("fixed_window") is False
                       and not any("fixed" in w for w in got.get("warnings", [])),
+                      str(got.get("warnings")))
+                check(f"TriggerAction {value} draws no licence warning",
+                      not any("licence" in w for w in got.get("warnings", [])),
+                      str(got.get("warnings")))
+
+            # Field round c137eb9: recording with a Subsave trigger on a Base
+            # licence was refused by Scope View - "A feature is denied:
+            # 'SubSaveTrigger' ... PROFESSIONAL is required; current level is
+            # BASE". The file cannot show the licence, so it is said up front.
+            for value in ("START_SUBSAVE", "STOP_SUBSAVE"):
+                got = action(value)
+                check(f"TriggerAction {value} warns that it needs the Professional licence",
+                      any("licence" in w and "Professional" in w and value in w
+                          for w in got.get("warnings", [])),
                       str(got.get("warnings")))
 
             # Pre-/post-trigger are 100 ns ticks. Scope keeps a pre-trigger it

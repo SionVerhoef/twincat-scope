@@ -1611,7 +1611,15 @@ def cmd_events(args):
         # so each run of change is one ramp - unless a step or spike above
         # already covers it.
         if command:
+            # A run is split where it turns round. A reciprocating axis goes out
+            # and straight back with no sample at rest, so a whole stroke is one
+            # run that nets to zero - 511 of 655 real strokes gave no ramp.
+            legs = []
             for s, e in zip(*(r.tolist() for r in _runs(np, np.isfinite(d) & (d != 0)))):
+                turns = np.flatnonzero(np.diff(np.sign(d[s:e])) != 0) + s + 1
+                bounds = [s] + turns.tolist() + [e]
+                legs += list(zip(bounds[:-1], bounds[1:]))
+            for s, e in legs:
                 # A move covers real distance: creep of 1e-9 a sample at rest
                 # changes every sample too, and was 57 "ramps" on one move.
                 if (e - s <= args.ramp_samples or abs(col[e] - col[s]) < args.min_step * span
@@ -3505,6 +3513,18 @@ def cmd_checkscope(args):
                 f"The pre-trigger ({pre:g} s, TriggerAction {g['action']}) is longer "
                 f"than the {record_seconds:g} s record window, so it cannot all be kept."
             )
+
+    # Seen in the field: on a Base licence Scope View refuses to record with a
+    # Subsave trigger ("A feature is denied: 'SubSaveTrigger'"). The file
+    # cannot say which licence the machine has, so the need is stated here.
+    subsave = sorted({g["action"] for g in active
+                      if g["action"].upper() in ("START_SUBSAVE", "STOP_SUBSAVE")})
+    if subsave:
+        warnings.append(
+            f"TriggerAction {', '.join(subsave)} needs a TE130x Scope View Professional "
+            "licence. On a Base licence Scope View refuses the SubSaveTrigger when "
+            "recording starts - check the licence, or use Start/Stop Record."
+        )
 
     # The one check that needs the program, not just the file: does each symbol
     # exist, and at the width written? Done by hand, it would have caught every
