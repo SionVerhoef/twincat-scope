@@ -1189,6 +1189,56 @@ def recurring_spike_checks():
               str([(e["channel"], e["kind"], e["severity"]) for e in cut]))
 
 
+def integer_sequence_checks(cycles=60, period=300, seed=13):
+    """Field round 49a8e9b, K4: a PLC step-sequence variable changes through
+    the same states every cycle, but by different amounts, so the size test
+    did not call it recurring - and 9 of 20 capped slots went to it.
+
+    Seq cycles 0 -> 10 -> 20 -> 35 -> 0. ErrCode goes 0 -> 17 and back once,
+    and 0 -> 42 and back once: integer changes that are faults. (With only two
+    values it would read as a digital signal.) Torque has one modest step: a
+    fault quieter against its own noise than the sequence's largest step.
+    """
+    import random
+    rng = random.Random(seed)
+    states = [0, 10, 20, 35]
+    fault_at, err_at = (2 * cycles // 3) * period + 37, (cycles // 3) * period + 111
+    rows = []
+    for i in range(cycles * period):
+        seq = states[(i % period) * len(states) // period]
+        err = (17 if err_at <= i < err_at + 500 else
+               42 if err_at + 2 * period <= i < err_at + 3 * period else 0)
+        torque = 1.0 + rng.gauss(0, 0.02) + (0.5 if i >= fault_at else 0.0)
+        rows.append(f"{i:.1f},{seq},{err},{torque:.6f}")
+    with tempfile.TemporaryDirectory() as tmp:
+        csv = Path(tmp) / "sequence.csv"
+        csv.write_text("\n".join(["TwinCAT Scope Export", "", "Name,Seq,ErrCode,Torque"]
+                                 + rows) + "\n", encoding="utf-8", newline="")
+        full = run("events", csv, "--max-events", 1000).get("events", [])
+        seq = [e for e in full if e["channel"] == "Seq"]
+        err = [e for e in full if e["channel"] == "ErrCode"]
+        fault = [e for e in full if e["channel"] == "Torque" and e["kind"] == "step"]
+        # Every change of state, the steps of 10 too: a threshold taken from a
+        # channel with no noise hid them under the steps of 35.
+        check("every change of a state channel is an event, and some outrank the faults",
+              len(seq) == 4 * cycles - 1 and len(fault) == 1 and len(err) == 4
+              and max(e["severity"] for e in seq)
+              > max(e["severity"] for e in err + fault),
+              f"seq={len(seq)} err={len(err)} fault={len(fault)}")
+        check("a step sequence's transitions are recurring, a one-off error code is not",
+              all(e.get("recurring") for e in seq)
+              and not any(e.get("recurring") for e in err + fault),
+              f"{sum(bool(e.get('recurring')) for e in seq)} of {len(seq)} recurring; "
+              f"err={[e.get('recurring') for e in err]}")
+        check("an integer change says what it changed from and to",
+              [(e.get("from"), e.get("to")) for e in err] == [(0, 17), (17, 0), (0, 42), (42, 0)],
+              str([(e.get("from"), e.get("to")) for e in err]))
+        cut = run("events", csv, "--max-events", 5).get("events", [])
+        check("a capped answer returns the faults before the sequence",
+              sorted(e["channel"] for e in cut) == ["ErrCode"] * 4 + ["Torque"],
+              str([(e["channel"], e["kind"], e["severity"]) for e in cut]))
+
+
 def sharp_pulse_checks():
     """Bead ky7: a pulse with no plateau is one run of over-threshold change.
 
@@ -2847,6 +2897,7 @@ def main():
     clean_feedback_checks()
     recurring_spike_checks()
     sharp_pulse_checks()
+    integer_sequence_checks()
     long_correlate_checks()
     parquet_memory_checks()
     two_rate_checks()
