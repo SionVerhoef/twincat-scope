@@ -1408,8 +1408,16 @@ def _excursions(np, col, d, thresh, gap):
     it would erase the out-and-back shape the spike test looks for.
     """
     starts, ends = _runs(np, np.abs(d) > thresh)
-    merged = []
+    # A pulse with no plateau goes up and straight back down in one run of
+    # change that nets to ~0 - a single bad reading is one. Split where the
+    # direction turns, so the spike test sees an out edge and a return edge.
+    edges = []
     for s, e in zip(starts.tolist(), ends.tolist()):
+        turns = np.flatnonzero(np.diff(np.sign(d[s:e])) != 0) + s + 1
+        bounds = [s] + turns.tolist() + [e]
+        edges += zip(bounds[:-1], bounds[1:])
+    merged = []
+    for s, e in edges:
         if merged:
             ps, pe = merged[-1]
             if s - pe <= gap and (col[e] - col[s]) * (col[pe] - col[ps]) > 0:
