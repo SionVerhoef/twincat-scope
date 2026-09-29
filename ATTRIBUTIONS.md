@@ -32,9 +32,8 @@ inheriting anyone's notice requirements onto a file people will copy into their 
 | _(none yet)_ | | | |
 
 When adding a row, check the licence in the upstream repository's actual `LICENSE` file
-rather than the badge on its GitHub page. Note also that a `NOASSERTION` licence across
-Beckhoff's GitHub estate generally resolves to Zero-Clause BSD, which is effectively public
-domain and needs no notice.
+rather than the badge on its GitHub page. A `NOASSERTION` badge means GitHub could not
+classify it — read the file.
 
 ## Trademarks
 

@@ -4,26 +4,19 @@ Configuration only. A `.tcscopex` holds *what to record and how to draw it*, wit
 data — which is what makes it templatable, diffable and safe to commit. Recorded data lives in
 `.svdx` (and `.svd` before TwinCAT 3.3.3140).
 
-**Verification status:** this schema was derived by reading real Beckhoff sample projects. A
-file generated from it first opened and recorded nothing (`evals/field-review-1fa0e9b.md`);
-with the type, name and port fixes described below, files generated unedited **record** — NC
-axis channels on 501, and PLC `BIT`, `INT16` and `REAL64` channels on 851, with an
-`AxisStyle` on every axis (`evals/field-review-fe9b487.md`) — and a trigger configured in
-Scope View on a generated file was detected by `checkscope` and recorded
-(`evals/field-review-3e4c44d.md`).
+This schema was derived by reading real Beckhoff sample projects. Files generated from it,
+unedited, record NC axis channels on 501 and PLC `BIT`, `INT16` and `REAL64` channels on 851
+(`evals/field-review-fe9b487.md`).
 
-**What Scope rewrites on first save** is listed in `evals/field-review-3e4c44d.md`: it drops
-`IsFileBased`/`Suffix`, fills unit and style blocks, and keeps one time-axis `AxisStyle` per
-tab. None of it affects loading or recording, and a saved file is the one to diff against.
-Scope also fills an empty PLC acquisition's `<Comment>` with the variable's declaration
-comment, so that field is not free for PLC channels. A hand-written comment replaces it and
-survives a save, and the CSV export's `SymbolComment` row then carries the hand-written text
-instead of the declaration comment.
+**What Scope rewrites on first save:** it drops `IsFileBased`/`Suffix`, fills unit and style
+blocks, and keeps one time-axis `AxisStyle` per tab. None of it affects loading or recording,
+and a saved file is the one to diff against. Scope also fills an empty PLC acquisition's
+`<Comment>` with the variable's declaration comment; a hand-written comment replaces it,
+survives a save, and is what the CSV export's `SymbolComment` row then carries.
 
-**Saving in XAE: name the menu item.** After edits in the scope's Properties grid, Ctrl+S did
-not reach the scope editor — seven changed settings were not written. *File → Save
-<name>.tcscopex*, with the scope's node selected in Solution Explorer, saved them
-(`evals/field-review-79660f4.md`). Tell a user that, not "save the project".
+**Saving in XAE: name the menu item.** After edits in the scope's Properties grid, Ctrl+S may
+not reach the scope editor and the changes are lost. Tell the user *File → Save
+<name>.tcscopex* with the scope's node selected in Solution Explorer, not "save the project".
 
 ## Byte conventions
 
@@ -43,12 +36,9 @@ regardless of `core.autocrlf`. `scripts/tcscope.py` writes both conventions.
 196 in an older sibling. Newer TwinCAT writes newer projects.
 
 The templates here declare `1.0.0.0`, the most conservative value observed, on the assumption
-that a newer Scope View upgrades an older project rather than rejecting it. **So far:** files
-generated from `axis-diagnosis.tcscopex`, which keep its `1.0.0.0`, loaded in TE130x Scope
-View in both field sessions (builds not recorded) — every error came later, at connect — and
-one recorded. If a template is
-refused on yours, raising `Version` to match a project your installation writes is the first
-thing to try.
+that a newer Scope View upgrades an older project rather than rejecting it. Generated files
+with `1.0.0.0` have loaded in every field session so far. If a template is refused on yours,
+raising `Version` to match a project your installation writes is the first thing to try.
 
 **Open a generated file by adding it to an existing Measurement project.** Double-clicked on
 its own, one started a new-scope-project wizard and hung; added to a project, it opened at
@@ -138,41 +128,36 @@ which has nothing to stack. Channels sharing a band are also given different `Di
 values, because two traces of the same colour on one axis is the same failure by another
 route.
 
-**Seen in Scope View:** a one-tab, four-band layout arrived exactly as written — `Position`
-{ActPos, SetPos}, `Following error`, `Velocity`, `Torque / current` — and a file with three
-`YTChart` siblings arrived as three tabs (`evals/field-review-1fa0e9b-rounds.md`,
-`evals/field-review-fe9b487.md`).
+Scope View draws the layout exactly as written: a one-tab, four-band file arrives as four
+stacked bands, and three `YTChart` siblings arrive as three tabs.
 
-**Change a layout by regenerating, not by editing the XML.** A generated file came back from
-the field with every band disabled and hand-written band names, showing nothing until someone
-enabled the bands in Scope View — most likely edited after `newscope` wrote it. If you must
-edit one, copy an element that is enabled, and run `checkscope` again afterwards.
+**Change a layout by regenerating, not by editing the XML.** A hand-edited file with every
+band disabled shows nothing until someone enables the bands in Scope View. If you must edit
+one, copy an element that is enabled, and run `checkscope` again afterwards.
 
 ## Colours
 
 Every colour is absolute: a signed 32-bit ARGB integer (`-921103` is `0xFFF1F1F1`) or a .NET
 colour name (`Black`). Scope draws them as written: a dark-styled generated file stayed dark
-with the IDE in dark theme and in light (`evals/field-review-fe9b487.md`). Whether it would
+with the IDE in dark theme and in light. Whether it would
 theme a colour the file leaves out is untested, so `newscope` writes them all and a file is
 styled for one background. What each one is taken to colour — **read from the structure; the
 dark theme was seen working as a whole, not checked element by element**:
 
 | Element | Its `DisplayColor`, as read |
 |---|---|
-| `YTChart`, `AxisGroup`, `OverviewChart` | the panel behind the traces. The light greys `newscope` used to write here were the reported glare, which fits; `OverviewChart` has not been seen |
+| `YTChart`, `AxisGroup`, `OverviewChart` | the panel behind the traces; `OverviewChart` has not been seen |
 | `TimeAxis` / `ValueAxis` → `SubMember/AxisStyle` | axis text; `GridColor` is the grid. `ColorMode` is `CustomColor` in every real file seen; Scope View offers Custom, First Channel, or one named channel of the band — none follows the IDE theme |
 | `Channel` and its `ChannelStyle` | the trace. Which of the two Scope draws with is not established, so `newscope` writes both |
 
-Real projects carry an `AxisStyle` on **every** axis, time and value alike; files from older
-versions of `newscope` carry none, and `checkscope` says so. `newscope --theme dark` (default)
+Real projects carry an `AxisStyle` on **every** axis, time and value alike, and `checkscope`
+warns about an axis without one. `newscope --theme dark` (default)
 writes a `#252526` background with `#F1F1F1` axis text — the values a real dark-styled project
 uses — and `--theme light` a near-white one. The trace palette is stepped per background and
 checked for contrast against it; its first four are also checked for colour-blind separation
 between every pair, because every trace in a band shares one axis. With five or more in a band
-some pairs are close, and the channel name is what separates them. A light chart in a dark IDE
-was reported from the field as glaring; the dark default read well with the IDE in both
-themes. The generated `AxisStyle` matched one Scope wrote element for element, the grid colour
-aside, and Scope accepted it on every axis.
+some pairs are close, and the channel name is what separates them. Dark is the default
+because a light chart in a dark IDE glares, while a dark chart reads well in both IDE themes.
 
 ## `AdsAcquisition` fields that matter
 
@@ -198,7 +183,7 @@ Project-level, `RecordTime` is also in 100 ns ticks — `600000000` is 60 second
 py -3 scripts/tcscope.py newscope templates/axis-diagnosis.tcscopex \
     -o MyScope.tcscopex \
     --channels "MAIN.fbAxis.NcToPlc.ActPos:LREAL,MAIN.fbStation.sbBlocked:BOOL,Axes.Axis1.ActPos" \
-    --netid 192.168.1.10.1.1 --port 851 --sample-time-ms 1 --record-time 120
+    --netid 1.2.3.4.1.1 --port 851 --sample-time-ms 1 --record-time 120
 
 py -3 scripts/tcscope.py checkscope MyScope.tcscopex
 ```
@@ -247,13 +232,10 @@ It also lays them out, rather than piling every trace onto one axis:
 - **No band past eight traces.** A band that would hold more is split into even parts —
   `Digital / state`, `Digital / state (2)` — because that is where `checkscope` starts warning,
   and a generator should not write what its own checker complains about.
-- **Flags stay on 0/1.** Two things were learned trying to separate them. Scope saves no band
-  height — resizing a band in Scope View changed no field in the file. A display offset
-  (`Channel/SubMember/AcquisitionInterpreter/Offset`) moves only the drawn trace — a flag at
-  offset 2 exported only 0 and 1, the CSV's `Offset` header recording the 2. Flags stacked at
-  1.5 apart that way were rejected in the field: the lanes were too close to tell which trace
-  was high, and the axis labels no longer lined up with anything. So `newscope` writes no
-  offset, and colour is what tells flags in one band apart.
+- **Flags stay on 0/1.** Scope saves no band height, so the file cannot give flags more room.
+  A display offset (`Channel/SubMember/AcquisitionInterpreter/Offset`) moves only the drawn
+  trace, and flags stacked that way were too close to tell apart, with axis labels that no
+  longer lined up. So `newscope` writes no offset, and colour tells flags in one band apart.
 - **A lone parent is drawn beside what it drives.** A block with one channel and blocks
   beneath it — `GVL.fbCell.fbControl.seStep` above `…fbControl.fbStartup.*` — gets no tab of
   its own; the channel is drawn first in its band in each descendant's tab, as extra display

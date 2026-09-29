@@ -1,570 +1,63 @@
 # Changelog
 
-## Unreleased
-
-First working version. Not yet published.
-
-### `events` tells a setpoint at rest from a frozen sensor
-
-On a noise-free command channel (SetPos, SetVelo) a move has a constant first difference, so
-`events` reported no ramp for it, and every standstill as a `flatline` - "stopped updating" -
-with a severity that grew with the rest: on a real axis, 656 moves gave 0 ramps and 655
-flatlines, and long rests outranked real faults (`evals/field-review-79660f4.md`, H2). A channel
-that moves without noise is now a command: each move is one `ramp`, each exact standstill a new
-descriptive kind, `hold`, and `command_channels` names them. A noisy signal that freezes is
-still a `flatline`. When the output is capped, defects (`spike`, `step`, `flatline`,
-`clipping`) take the slots before descriptive kinds (`ramp`, `transition`, `hold`, `crossing`).
-
-### Field review of 79660f4: the G fixes on real files, and Parquet at half the memory
-
-Every fix from the 8bf9230 round held on real exports and real projects
-(`evals/field-review-79660f4.md`). Two defects were new:
-
-- **A ring-buffer recording is no longer called a fixed window.** Scope View's project
-  property *Ringbuffer* is saved as `StopMode`: `AutoStop` off, `ClientStop` on. A ring buffer
-  records until someone stops it and keeps the last `RecordTime`. `checkscope` never read
-  `StopMode`, so 4 of 25 real files were told they recorded "a fixed … window" with no trigger,
-  with advice about catching intermittent faults that does not apply to them. It now reports
-  `ring_buffer` and, when no trigger stops the recording, says to stop it soon after the fault
-  or add a Stop Record trigger.
-
-- **The Parquet memory defect was found on a real export too.** On a 600 s, 33-channel
-  recording (151 MB of samples), `manifest`, `stats` and `events` peaked at 518-534 MB from the
-  Parquet against 326-340 MB from the CSV. The field round's own per-column fix brought them to
-  304-334 MB with byte-identical output. The fix that shipped is the one below ("Parquet no longer
-  costs more memory"), which does the same without copying; the field round's check on Arrow's
-  pool peak is kept beside it, because it also runs on Windows.
-
-`references/export-tool.md` now describes the tool's `channel=`, `start=` and `end=`: the
-range is FILETIME ticks, and any other format is ignored without an error.
-
-### `ingest` never answers from another recording's CSV
-
-The export tool's CSV went to the cache as `<stem>.csv`, so two recordings with Scope's
-default name shared it, and a tool run that exited 0 without writing anything left the last
-recording's CSV to be read as this one's. The CSV is now `<stem>-<path hash>.csv`, like the
-default Parquet; it is removed before the tool runs, and a run that writes nothing is
-refused.
-
-### Parquet no longer costs more memory than the CSV it came from
-
-The verbs read a Parquet whole and then copied every column to NumPy, holding the samples
-twice; Arrow's default allocator also kept what it freed. On a real 600 s, 33-channel export
-they peaked near 500 MB against ~350 MB from the CSV. They now read one column at a time,
-hand it over without a copy, and use the system allocator. On a generated 300 000-row,
-35-column export: 200–230 MB, was 370–385 MB; the CSV path is ~230 MB. A check fails if
-`manifest` on a Parquet peaks above the same on its CSV (skipped where `resource` is missing,
-i.e. Windows).
-
-### Field review of 8bf9230: the export tool's options, run on a real recording
-
-A field test ran `TC3ScopeExportTool.exe` on real recordings, once per CSV option, then the
-options that matter again from Scope View's own dialog (`evals/field-review-8bf9230.md`). It
-found five defects in the reader, two in `checkscope`, one in the tests and three rough edges
-an agent hit in the CLI. Each is now held by a check that fails on the previous code.
-
-- **An export with no header rows is refused.** Header preset *None* writes the data and
-  nothing above it. The reader took column 0 as the only time column and turned the slower
-  group's clock into a channel. A 60 s recording of two groups came back as one 30 s group of
-  three channels, with `ok: true`.
-- **Blank and Colon separators are refused by name.** Both are options in Scope's export.
-  They were refused as "no numeric rows", or as `,` used twice, which pointed the user at the
-  wrong setting.
-- **`checkscope` reads a `.svdx`.** A saved recording ends with its whole project as XML.
-  `checkscope` died on the binary before it with a `UnicodeDecodeError` traceback. It now
-  checks that project, and a file with no project in it is refused in JSON.
-- **The test fixtures were written wrong on Windows.** `Path.write_text` turns each `\n` into
-  `\r\n`, so every `"\r\n"`-joined fixture came out as `\r\r\n`. There, 2 checks failed and
-  the suite then crashed.
-  Fixtures are now written with `newline=""`, and a check rejects any `\r\r\n`.
-- **A trigger-info table is no header.** A headerless export with *Include trigger info*
-  has the release table above the data, and that got it past the refusal above: one 30 s
-  group of three channels again, `ok: true`.
-- **An export with no time column is refused.** Scope View's Timelines *None* writes values
-  only, and the first was read as the clock (`t_last` before `t_first`, `ok: true`). A group
-  whose time column runs backwards in over 1% of its steps is now refused, with Timelines
-  named in the fix; a single reset is counted as `time_backsteps` instead.
-- **`checkscope` judges a trigger by what it does.** Only *Start/Stop Record* and
-  *Start/Stop Subsave* change what is recorded; display, export and reporting actions left
-  a fixed window without the warning. `NONE` is named as Scope View's *Set Mark*. Each
-  trigger group's pre- and post-trigger are reported in seconds (`trigger_groups`), since
-  Scope keeps a hidden pre-trigger. A Stop Record pre-trigger longer than the record window
-  is warned about, and a disabled trigger group counts for nothing.
-- **`ingest -o` is optional.** Without it the Parquet goes to the cache dir, named by the
-  recording's stem and a hash of its path, and `output` says where.
-- **Argument errors are JSON.** A missing argument, unknown verb or unknown flag was the one
-  answer printed as plain text.
-- **`ingest` reports `time_columns`, not `groups`.** On a per-channel export it said 33 where
-  `manifest` listed 5 merged entries.
-- `correlate`'s cross-group note names both groups ("from its own 1 axis" before).
-- `SKILL.md` tells the agent to quote an error code only from the recording or a named
-  source. An agent in the field offered NC error IDs from memory.
-
-`references/export-tool.md` now records what was measured. The tool ignores the export
-settings saved in a `.svdx`, and only `config=` changes its output. At the same export range
-it writes the same samples as Scope View. It ignores interpolation, and with Timelines *None* it
-writes no file. Its FILETIME ticks are UTC. The options it honours are marked
-tool-verified, each with its `CSVProperties` element name. Scope View's own defaults are now
-recorded beside them: `,`/`.` with a **Name-only header**, so the settings table now tells
-users to change the header to *Full*. The dialog remembers the last settings used.
-
-### Scope View's CSV export options
-
-Users export the same recording with different settings. Variants of a real two-rate export
-now read the same way, or are refused with a reason:
-
-- **The delimiter vote no longer counts the half line** that ends `sniff_csv`'s 200 kB sample.
-  On an export with integer times and one decimal comma per row, that half line broke the tie
-  in favour of `,`, and a TAB or `;` file failed with "found no numeric rows".
-- **Full Timestamp (FILETIME) time columns are converted** to time since the first sample.
-  They were read as ms, so durations and sample times came out 10 000 times too long.
-  `manifest` reports `start_filetime`, and it survives Parquet.
-- **`,` as both separator and decimal mark is refused.** The reader used to skip some rows
-  silently and read the rest as one group.
-- A trailing `EOF` row is skipped, not counted. `ingest` reports `malformed_rows`, and the
-  count survives Parquet.
-- `references/export-tool.md` lists which export settings to choose, and marks which are
-  verified and which are untested.
-
-### Field-test fixes: short rows, cross-group timing, TriggerAction
-
-A field test found three defects. Each is now held by a check that fails on
-the previous code.
-
-- **Rows that stop where a group begins are read, not dropped.** A slow group that is not
-  repeat-padded writes its samples on the first rows; after that the export writes shorter
-  rows carrying the fast group alone. Those rows were discarded, and with them half of the
-  fast group. They are now filled with NaN and each group trimmed to its own length. A row
-  that stops partway through a group is still skipped, and now counted: `malformed_rows`.
-- **Cross-group timing is judged per group, not row by row.** `max_skew_ms` is the largest
-  disagreement between the groups' first or last timestamps. Row by row, a truncated 4 ms
-  group beside a 2 ms one disagreed by 30 s and a sound export was called broken, so
-  `correlate --allow-cross-group` refused it. New fixtures hold both real layouts, a 2 ms and
-  a 4 ms group over 60 s: repeat-padded (30001 full rows) and truncated (15001 full rows, then
-  2-field rows).
-- **`checkscope` reports `trigger_action` as written.** `TriggerAction` `NONE` without
-  `AutoRestartRecord` now warns that the window is fixed, even with a trigger configured.
-- **`correlate`'s `a` and `b` follow the `--channels` order**, so the lag sign does too; they
-  followed file order. `ingest` writes the export tool's CSV to the cache dir instead of
-  beside the `.svdx`.
-
-### A slimmer skill, before the next measurement
-
-Eval round 2 showed the skill arm reading more, not less. Before round 3 measures token
-cost, the cost is cut where it was known to be paid:
-
-- **`SKILL.md` is 40% smaller.** Each rule now appears once, as a line with its reason,
-  pointing at the reference that carries the detail; the field history moved to the README's
-  *Status*, and the long-form writing stays in `references/`. Nothing was dropped — the
-  timing-block table moved into `data-triage.md`, the hand-edited-layout story into
-  `scope-configuration.md`, and the trigger description is byte-identical.
-- **`manifest` merges groups that differ only in their id** into one entry naming them all
-  (`"groups": "0-39"`), so a per-display-channel export no longer buries the one group that
-  disagrees under 39 copies of its twin.
-- **The numpy-missing message names the trap it used to spring.** `uv run python
-  scripts/tcscope.py` skips the script's inline dependencies and lands on the very error
-  whose fix said "run this through uv" — the message now spells out both the working and
-  the broken invocation.
-- The stale claim in `export-tool.md` that no real `.svdx` had been converted is corrected:
-  two were, first time (`evals/field-review-3e4c44d.md`); what remains unproven is variety.
-- CI's business-name guard is removed rather than encoded. It fired only after a push had
-  already published the leak, it never fired in practice, and a hidden pattern with a
-  comment explaining the hiding is an invitation to decode it. The anonymisation rules are
-  the actual defence; the certification-claim and absolute-path checks stay.
-### Big CSVs read in a third less memory
-
-- **The CSV is read a chunk at a time.** The whole decoded file and its line list were both
-  held while it was split, over half the peak. A 20 M-sample export now peaks at 384 MB, not
-  630 MB, at the same speed. Lines split exactly as before, so the header row is found where
-  the sniffer found it; a check runs the split at chunk sizes down to one character.
-
-### Restyling a project keeps its targets
-
-- **`newscope` without `--channels` no longer resets every channel's target.** It rewrote
-  every AmsNetId to `0.0.0.0.0.0` and every PLC port to 851, so a channel on 852 moved in
-  silence. It now changes the NetID or the port only when `--netid` or `--port` is given,
-  and lists every change under `retargeted`.
-
-### Checking symbols against the compiled program
-
-- **`checkscope --tmc <PLC>.tmc`** looks every PLC channel up in the compiled symbol table
-  before anyone walks to the machine. A symbol that does not exist, a whole block or array,
-  and a width that does not match the compiled type are problems; a type the `.tmc` does not
-  describe is a warning. Written from the structure field-recorded in
-  `evals/field-review-fe9b487.md`; not yet run against a real `.tmc`.
-
-### Rails that are not rails, and copies in any column order
-
-Round 7 of the field test (`evals/field-review-44d4951.md`): a 48.7 s recording at 125 Hz with
-axes moving, parked and standing still.
-
-- **An axis standing still no longer reports clipping or steps.** At rest a position
-  dithered over 49–80 quantisation levels; three of four still axes clipped at 1–11 % and all
-  four fired a micrometre "step" together. A real-valued channel spanning fewer than 100 of
-  its own quantisation steps is now treated as still, and `events` lists it under
-  `still_channels`.
-- **A step enum held at one value is no longer a rail.** It clipped at severities up to 73,
-  the highest in the recording. Integer channels are exempt from clipping and flatline, as
-  bits were.
-- **A moved-then-parked axis did not clip** — it settles a few micrometres off its extreme —
-  so the known limitation in `references/data-triage.md` is rewritten to what was measured.
-- **Copies in Scope View's own export are matched in any column order.** A `<name> (1)` ahead
-  of its `<name>` was kept as an original, leaving 41 channels of 40.
-- A re-save in Scope View keeps an 8 ms sample time on a 4 ms task.
-
-### Flags back on 0/1, and Scope View's own CSV export
-
-Round 6 of the field test (`evals/field-review-6872161.md`).
-
-- **Flags are drawn on 0/1 again.** Stacking them 1.5 apart by display offset was tried and
-  rejected: the lanes were too close to tell which trace was high, and the axis labels no
-  longer lined up with anything. Colour is what separates flags in one band.
-- **Copies are collapsed in Scope View's own CSV export too.** That export has one shared
-  time column and no symbol rows, so the only evidence of a copy is Scope's `<name> (n)`
-  naming beside a `<name>` with identical data; `copies_collapsed` now says which evidence
-  was used (`matched_on: "symbol"` or `"name"`). The docs say to prefer `ingest` on the
-  `.svdx`.
-- The re-read of round 5's recordings with the new reader: 40 channels, not 42, and nothing
-  else lost. `ColorMode` offers Custom, First Channel or a named channel — nothing that
-  follows the IDE theme.
-
-### The whole path, run once — and a copy the export made
-
-Round 5 of the field test (`evals/field-review-3e4c44d.md`): a generated 40-channel file
-recorded, a trigger configured in Scope View was detected, and the real export tool converted
-the `.svdx` with `ingest`'s command line on its first run. `BaseSampleTime` being 100 ns ticks
-is confirmed a second way: Scope saved 80000 and the recording ran at 125 Hz.
-
-- **Exported copies are read as one channel.** Scope exports a column per display channel, so
-  the parent step `newscope` draws in three tabs came out three times — 42 columns for 40
-  acquisitions. Exact copies (same symbol and port, same time column, same values) are
-  collapsed on read, listed in `manifest` as `copies_collapsed`, and kept through Parquet.
-- **`display_offset` in `manifest`.** The CSV's `Offset` header row is where a trace was drawn;
-  the values under it are raw. It is reported, and never added.
-- **`newscope` notes that Scope snaps the sample time** to a multiple of the task cycle —
-  10 ms was saved as 8 ms on a 4 ms task.
-
-### A sequencer's step drawn beside what it drives
-
-From the Part A field review: a parent sequencer's step got a tab to itself, and a step is
-read against the blocks it drives, not alone.
-
-- **A block with one channel and blocks beneath it gets no tab of its own.** Its channel is
-  drawn first in its band in each descendant's tab — extra display channels on one
-  acquisition, so recorded once. A namespace (`GVL`, `MAIN`) or a lone block with nothing
-  beneath it keeps its tab.
-- **`checkscope` tells context from a slip.** One acquisition drawn in several tabs is
-  counted (`acquisitions_in_several_tabs`) instead of drawing a warning; drawn twice in one
-  tab, it is two identical traces on one axis and still warns.
-
-### This version's own output, recorded
-
-Part A of the field-test brief, run on this version's `newscope` output with no hand edits
-(`evals/field-review-fe9b487.md`). Status lines throughout now say what it showed.
-
-- **Round 3 on main's own output recorded**: five NC axis channels, dark theme, an `AxisStyle`
-  on all eight axes — accepted, and matching one Scope wrote element for element but the grid
-  colour.
-- **The first bit, integer and PLC channels from a generated file recorded**: two NC axis
-  channels on 501 and a `BOOL`, an `INT` enum and an `LREAL` on 851, across three tabs.
-- **Scope draws the stored colours as written** and does not follow the IDE theme; the dark
-  default read well in both.
-- A 40-channel function-block recording laid out with no crowding warning and every band
-  enabled. Two readability findings are open: a band of two flags is hard to read next to
-  taller neighbours, and a lone step enum or flag gets a tab to itself.
-
-### Bands that do not flatten each other, and disabled elements said out loud
-
-A follow-up field session regenerated a 32-channel function-block recording, in a
-prefix-style house, with the current version. Names were now unique, but the layout had three
-faults, and an older hand-edited file had a fourth.
-
-- **Bits and integers get separate bands.** A step enum and a counter shared the digital
-  axis with seven 0/1 flags, and a step running to 200 draws every flag as a flat line. Bits
-  now band as `Digital / state`; integers as `Step / count`, even when their name says
-  "state".
-- **"Loading" is not a load.** A length named for a loading zone matched `load` and was filed
-  under torque.
-- **`newscope` no longer writes a band `checkscope` calls crowded.** Past eight traces a band
-  is split into even parts, so eleven flags become 6 + 5. `--layout flat` still means one
-  axis.
-- **`checkscope` warns about disabled acquisitions, bands and channels.** A file came back
-  with every band `Enabled=false`, showing nothing until they were enabled by hand; `newscope`
-  never writes `Enabled`, so it was edited afterwards. A warning, not a failure: disabling is
-  a Scope View feature. `SKILL.md` now says to change a layout by regenerating.
-
-Names such as `…TravelActual` or `…Target1` still land in `Other`: nothing in them says
-position, and a guess would misfile the channels whose names mean something else.
-
-### A generated file records, and charts styled for one background
-
-A second field session took one generated file through three rounds on a live target. An IEC
-type was read by Scope as `VOID` and refused; with `REAL64`, an axis symbol on port 851 was
-"not found"; with port 501 as well, **it recorded** — the first data a generated `.tcscopex`
-has produced. Both blockers were already fixed here; the session ran an older version. Its
-write-up, anonymised, is `evals/field-review-1fa0e9b-rounds.md`.
-
-- **`newscope --theme dark|light`**, dark by default. Generated charts rendered as near-white
-  panels in a dark IDE, from hard-coded light greys and no axis styling at all. Every axis now
-  carries an `AxisStyle` — where real projects keep one — and panels, axis text, grid and
-  traces are chosen for one background. The trace palette is checked for contrast against it,
-  and its first four for colour-blind separation between every pair, since a band's traces
-  share one axis. No value that follows the IDE theme has been seen, and whether Scope themes
-  colours a file leaves out is untested, so a file picks one. Since seen in the field: Scope
-  accepted the `AxisStyle` on every axis, the file recorded, and it read well with the IDE in
-  either theme (`evals/field-review-fe9b487.md`).
-- **`checkscope` refuses `VOID`.** It is what Scope wrote back after failing to read `LREAL`,
-  so a `VOID` means the file has been opened, misread and saved; it drew only a soft warning.
-  `checkscope` also reports which `theme` a file is styled for, warns about axes with no
-  `AxisStyle`, and warns when a known NC field carries a type other than the table's.
-- **NC axis fields are typed from their names.** For `Axes.<axis>.<field>` on the NC port,
-  `ErrorCode`, `AxisState` and the other status fields are `UINT32` and the motion values
-  `REAL64` — every such acquisition in the nine files of one real project agrees, and the names
-  are Beckhoff's rather than a house style. `ErrorCode` was written 8 bytes wide, and every
-  axis channel was reported as a defaulted guess, which buried the defaults that matter. A
-  declared type, an explicit non-NC port or a deeper path still wins.
-- `INT8` and `UINT32` join the types seen in real files; the docs no longer claim an IEC type
-  name is "accepted by nothing and rejected by nothing".
-- **How to open a generated file:** add it to an existing TwinCAT Measurement project.
-  Double-clicked, one started a new-project wizard that hung.
-- Both templates are restyled for the dark default with their GUIDs unchanged, and keep
-  `TargetPort` 851: their symbols are the PLC's `NcToPlc` copy of the axis, not NC symbols.
-
-### A generated file that can actually record
-
-A field session took a generated 53-channel project to a running machine. It opened in Scope
-View, `checkscope` passed it, and it recorded nothing — every channel had the wrong type and
-width, every axis channel was looked up in the wrong runtime, and every column of the export
-was called `Signal`. The review is in `evals/field-review-1fa0e9b.md`.
-
-- **The ADS port follows the symbol.** `Axes.…` is served by the NC runtime on 501, every
-  other symbol by `--port`. One port across both namespaces resolves the PLC channels and
-  fails the axis ones with "Symbolname could not be found", which reads as a naming problem
-  and is not one.
-- **`DataType` is Scope's vocabulary, not IEC's** — `BIT`, `INT16`, `REAL64`, with
-  `VariableSize` to match. Declare a type per channel as `SYMBOL:BOOL`, `:INT`, `:LREAL`.
-  Undeclared channels are still written as `REAL64`, but are now reported as *defaulted*
-  rather than passed off as resolved. Both templates shipped `LREAL`, which appears in none
-  of the seven real project files this schema was read from; they now ship `REAL64`.
-- **Every channel gets its own name.** `<Name>` is the Scope tree label *and* the CSV column
-  header, so the template's placeholder exported fifty-three columns called `Signal`. Names
-  are derived from the symbol's leaf and lengthened along the path only where two would
-  collide.
-- **`--record-time <seconds>`.** The window was fixed at the template's 60 s with no way to
-  change it, while the event being chased ran longer than that. `checkscope` already warned
-  about the window; there is now a way to act on the warning.
-- **A band decided by type where the name says nothing.** Houses that write `seStep` and
-  `sbBlocked` match no quantity keyword, so a whole function block landed on one axis. Bits
-  and integers now band as state.
-- **`checkscope` refuses all of it**: an NC symbol on a PLC port, an IEC type name (naming the
-  Scope one it means), a width that contradicts its type, and channels that would export as
-  columns nobody can tell apart — and a field that is simply *absent* counts as the same
-  failure as a wrong one, since an empty `DataType` says no more about how to read a variable
-  than a wrong one does.
-- **Bad input answers in JSON, not with a traceback**: a record window that is not a positive
-  finite number of ticks, an entry with no symbol, an unrecognised type, one symbol declared
-  two different ways, and a template missing a field this version needs to write — which
-  would otherwise be skipped silently, leaving the template's own values in the file.
-- **A port no runtime answers is caught here rather than at the machine.** `--port 85`, one
-  keystroke from 851, used to pass every check and record nothing. A port outside 1–65535 is
-  now refused outright, and a PLC symbol on a port below 851 — where no TwinCAT 3 PLC runtime
-  listens — is reported by `newscope` and warned about by `checkscope`.
-- **A channel really called `Signal` keeps its name.** The placeholder check asks whether the
-  name is the symbol's own leaf, so `MAIN.fbIO.Signal` is a name rather than a template
-  leftover. It also no longer hides behind the duplicate-name check, since fifty-three
-  channels called `Signal` are both at once, and acquisitions with no name are all reported
-  together instead of one per run.
-- **`--channels ",,,"` is refused.** An entry list that names no symbol filtered to empty and
-  fell through to the template's own channels, reported as `ok` — the channels someone asked
-  for silently not in the file.
-- **The state band follows the type table.** Which types band as state is derived from the
-  table that sizes them, rather than a second list beside it, so a type added to one cannot
-  go missing from the other and land on a shared axis.
-
-`SYMBOL:TYPE:PORT` is the whole channel grammar; the port field overrides the `Axes.` rule and
-reaches a second PLC runtime (852, 853…) per channel. Fields are read from the right and only
-when recognisable, so a mistyped type is an error rather than part of a symbol name.
-
-Documentation moved to `py -3`, which is how Windows invokes Python and therefore how these
-commands run on a machine with TwinCAT on it; every block that uses it says what the command
-is everywhere else.
-
-### Charts laid out to be read, not just to be valid
-
-Field feedback from a first real use of `newscope`: every requested channel arrived in a single
-chart, sharing one auto-scaled axis, all in the same colour. Nothing was wrong with the file —
-that is the point. A following error of a few microns next to a position of a metre is drawn
-as a flat line on zero, so a correctly recorded signal is an invisible one.
-
-- **One chart tab per device.** Taken from the symbol path with the wrapper structs stripped,
-  so `MAIN.fbAxis1.NcToPlc.ActPos` groups under `fbAxis1`. Two devices whose paths end in the
-  same segment keep their full paths rather than merging into one tab.
-- **One stacked band per quantity inside a tab**, ordered position, following error, velocity,
-  acceleration, torque/current, pressure, temperature, digital state, other. Set and actual
-  position deliberately share a band — same unit, same magnitude, and the gap between them is
-  the measurement. Read from the leaf name, so `PosDiff` is a following error rather than a
-  position and `bPosReached` is a state rather than either. Anything unrecognised lands in a
-  labelled `Other` band instead of being misfiled.
-- **Channels sharing an axis get different colours**, and `StackedAxes` is set whenever a
-  chart holds more than one band. `--layout flat` restores a single axis for channels that
-  genuinely share a scale.
-- **`checkscope` reports the layout** — charts, bands and their channels — and warns when a
-  chart stacks more than six bands or a band overlays more than eight channels. Readability,
-  not validity: the file is fine, the picture is not.
-- **A symbol asked for twice is now recorded once**, rather than costing target bandwidth
-  twice for one signal.
-- `templates/axis-diagnosis.tcscopex` was regenerated in that shape: five channels, four
-  bands, set and actual position together.
-
-Still unopened in TwinCAT, so that multiple `YTChart` siblings arrive as tabs and that
-`StackedAxes` is what stacks the bands remain readings of the schema rather than observations.
-
-### Triage that survives real machine data
-
-A second field review on the same 19 genuine exports — kept in
-`evals/field-review-af54888.md`, since the files themselves cannot be — confirmed the group
-model is correct and found that `events` was not.
-
-- **An excursion is one event, however long it lasts.** Reporting each over-threshold sample
-  separately turned a single commanded move into 1199 "steps". Real exports fired 170–413
-  events per channel; on the new at-rest fixture the count went from 713 to 11.
-- **The detection threshold has a floor.** An axis at rest has a first-difference MAD of
-  ~1e-9 — non-zero, so it passed the old zero-guard, and `6·MAD·1.4826` then flagged every
-  acceleration sample. `--min-step` floors it at a fraction of the channel's own travel.
-- **New event kinds `ramp` and `transition`**, so `step` keeps meaning a discontinuity worth
-  explaining rather than "the machine moved". Two-valued channels are exempt from the
-  clipping and flatline tests, which describe a BOOL wrongly in both directions.
-- **Truncation is no longer chronological.** It returned the first 100 events — 0.1% of one
-  recording — while the fault sat at 9 s. Events are now ranked worst-first within each tenth
-  of the recording, and a `summary` totalling *every* event by kind, by channel and by time
-  decile is always returned, truncated or not.
-- **`window` reads distinct instants**, so a repeat-padded group no longer prints every
-  sample twice under one timestamp with its row cap biting at half the promised width.
-  `stats` reports `n_samples` so a standard deviation can be audited against what it covered.
-- **Scale is measured rather than claimed.** `tests/make_scale_fixture.py` and
-  `tests/bench_scale.py`; budget in `references/data-triage.md`. Chunked parsing cut peak
-  memory from 785 MB to 340 MB at ten million samples and ran 30% faster; `manifest` output
-  is byte-identical to the previous reader on every fixture.
-- **Acquisition load is graded into bands** taken from seven real projects, replacing a
-  threshold that sat above every project anyone had built and so never fired.
-- **Regression-tested as correct**: symbol names truncated mid-parenthesis by Beckhoff's own
-  exporter, and the literal unit string `(None)`.
-
-### Reading real Scope exports
-
-Measured against 19 genuine `TC3ScopeExportTool.exe` exports from a Beckhoff CX/AX8000
-machine. The reader had been written from assumptions and was wrong about the file's basic
-shape: it failed outright on the TAB dialect and was silently wrong on most of the rest.
-
-- **A Scope CSV is a horizontal concatenation of acquisition groups**, each with its own
-  time column and often its own sample rate — so a physical row is not one instant in time.
-  The reader now parses the group layout from the metadata rows, and every channel is
-  timestamped from its own group's clock. Forcing group 0's axis on everything was wrong by
-  2–10 ms on repeat-padded exports and by up to 31 seconds on unpadded ones.
-- **Delimiter election prefers `;`, then TAB, then `,`.** On a European TAB export every row
-  holds as many decimal commas as TABs, so a consistency-only vote elected `,`, collapsed
-  the column count and reported no numeric rows at all.
-- **Decimal separator is scored over data rows**, not inferred from the delimiter — the TAB
-  dialect is a EU export and nothing about a TAB says so.
-- **A data row must be entirely numeric.** Metadata rows are key/value pairs and so exactly
-  50% numeric, which the old "at least half" rule accepted as data.
-- **Channel names come from `SymbolName`, else `Name`**, never from a metadata value row —
-  which is how every channel in a TAB export ended up named `0`. Channels expose both a
-  short `name` (the selector) and the qualified `symbol_name`.
-- **Group time columns are no longer reported as data channels**, so a 0-to-20280 time ramp
-  stops appearing in stats, events and correlations.
-- `manifest` reports per-group sample time (declared and measured), `repeat_factor`, span
-  and NaN count, plus a `timing` block: `row_is_one_instant`, `max_skew_ms` and
-  `cross_group_timing_valid`. An export whose groups were never repeat-padded is flagged as
-  broken, and cross-group claims on it are refused rather than averaged away.
-- Times are read as milliseconds and reported as seconds throughout.
-- Blank cells inside the data block no longer fabricate values: NaN stays NaN instead of
-  becoming a real reading of `0.0`, so a gap is not reported as a step or a flatline, and a
-  blank in a time column no longer poisons the measured rate.
-- `correlate` normalises before correlating, documents its lag sign (negative means `a`
-  leads `b`), uses each group's own `dt`, and refuses cross-group pairs unless
-  `--allow-cross-group` is passed. `--max-lag-samples` now bounds the lag search rather than
-  truncating the recording to its first N samples.
-- `window` returns one block per group; rows from different groups are never merged under a
-  single timestamp.
-- `ingest` stores the group layout in the Parquet schema metadata, so per-group time axes
-  survive the round trip, and no longer drops columns that share a channel name.
-- `plot` labels the y-axis with the short name and the qualified path in the title, labels
-  time in seconds, and gives groups with different rates their own x-axis.
-- `checkscope` warns about acquisitions wired to no display channel, reports shared
-  `AcquisitionGUID`s instead of counting past the acquisition total, notes acquisitions with
-  no declared `BaseSampleTime` that the load figure therefore omits, and no longer counts
-  the null GUID as a duplicate. The load warning drops from 100 000 to 20 000 samples/s: the
-  densest real project measured 16 250, so the old line never fired.
-- `tests/make_real_fixtures.py` regenerates structural copies of all five real layouts, and
-  the suite covers group counts, channel counts, per-group rates, repeat factors, skew,
-  blank cells, cross-group refusal, the Parquet round trip, and a planted step proved
-  against each group's own time axis.
-
-### Analysis
-
-- `manifest`, `stats`, `events`, `plot`, `window`, `correlate` — a ladder of verbs that
-  summarise a recording instead of returning samples from it.
-- `plot` draws a **min/max envelope per pixel bucket** rather than decimating, so a
-  three-sample spike survives a 22:1 reduction instead of having a 1-in-7 chance of showing up.
-- `window` caps its row count and refuses to widen, so a broad question cannot flood a context
-  window by accident.
-- CSV reader sniffs delimiter and decimal separator, handling the European `;` + `,` export
-  that would otherwise parse `1,5` as `15`.
-- `ingest` converts `.svdx` and CSV to Parquet once, via `TC3ScopeExportTool.exe` where needed.
-
-### Acquisition
-
-- `newscope` writes a `.tcscopex` with freshly minted GUIDs, cloning both the acquisition and
-  its matching display channel per requested symbol, and rewriting `AcquisitionGUID` so each
-  channel still points at its own data source.
-- `checkscope` validates GUID uniqueness, resolves every `AcquisitionGUID`, and warns when the
-  total sample rate is high enough to perturb the machine being measured.
-- `doctor`, `newscope` and `checkscope` need no third-party packages, so acquisition works on a
-  machine that has never seen `uv`.
-
-### Documentation
-
-- `references/data-triage.md` — the method: why samples never enter the conversation, and why
-  envelopes beat decimation.
-- `references/recording-load.md` — a recording is not free; propose it, let a human start it.
-- Four hard rules in `SKILL.md`: no safety logic, no writes to a live machine, no unverified
-  claims, and — specific to measurement — a recording is not free.
-
-### Measured against a no-skill baseline
-
-`evals/` runs each prompt twice — once by an agent following this skill, once by an agent with
-it withheld — and grades both mechanically. Iteration 1 found four of six evals scoring
-identically in both arms, and three places where the *baseline* gave better guidance than this
-skill's own references. Those three are now folded in:
-
-- `checkscope` reads `RecordTime`, `TriggerModule` and `AutoRestartRecord`, and warns when a
-  project records a fixed window with no trigger — correct wiring and the wrong plan. The
-  templates ship exactly this way: a 60 s window, which for an hourly intermittent fault
-  catches it under 2% of the time. It is a warning, never a problem; a file can be perfectly
-  built and still be a lottery ticket.
-- `references/recording-load.md` names the cycle that actually sets the floor. Axis data off
-  the NC interface updates once per NC SAF cycle (typically 1–2 ms), so a request for 50 µs on
-  those channels buys 20–40 identical samples per real update at 20–40× the bandwidth. Adds
-  the drive-internal route (an AX8000 samples its own current loop at ~62.5 µs) for questions
-  genuinely shorter than one fieldbus cycle, which no scope on the target can see.
-- `references/data-triage.md` gains *Recovering a clipped channel*. Refusing to give a number
-  for a saturated signal is the floor, not the ceiling: velocity clipped with position intact
-  is recoverable by differentiating position, a clipped sine can be fitted from its unpinned
-  samples, and the pinned fraction itself gives the amplitude via
-  `1 − (2/π)·arcsin(C/A)`. Three routes agreeing is what makes it a reconstruction rather than
-  a guess — and it must still be reported as reconstructed.
-
-The evals' own headline is not that the skill scored 33/33 against 28/33. It is that the
-fixtures are too small to test this skill's central claim: `needle-in-the-haystack` runs
-against 20,000 rows, which pandas holds whole, while `SKILL.md` exists because twelve million
-samples cannot be. See `evals/results-iteration-1.md`.
+## 1.0.0 — unreleased
+
+First public release. The development history before it is in git and in `evals/`.
+
+### Building a recording
+
+- `newscope` writes a `.tcscopex` from a template: fresh GUIDs with every display channel
+  rewired to its own acquisition, one acquisition and display channel per requested symbol,
+  per-channel `SYMBOL:TYPE:PORT`, Scope's own data types (known NC axis fields typed
+  automatically, anything undeclared reported as defaulted), NC `Axes.…` symbols routed to
+  port 501, sample time and record window.
+- Layout: one chart tab per device, one stacked band per quantity, at most eight traces per
+  band, flags on 0/1, a lone parent block drawn beside what it drives. `--layout flat` for
+  channels that share a scale. Dark (default) or light theme with a contrast-checked palette.
+- `checkscope` validates a `.tcscopex`, or the project stored inside a `.svdx`: duplicate or
+  dangling GUIDs, placeholders, NC symbols on a PLC port, IEC type names and `VOID`, size/type
+  mismatches, unreadable or duplicate channel names, missing `AxisStyle`, disabled elements,
+  and readability of the layout.
+- `checkscope` warns on the recording plan: sample load against measured real projects, a
+  fixed window with no trigger, trigger actions that do not stop a recording, and ring-buffer
+  mode.
+- `checkscope --tmc` checks every PLC symbol against the compiled program's symbol table.
+- `doctor`, `newscope` and `checkscope` need nothing but Python.
+
+### Reading a recording
+
+- `ingest` converts a `.svdx` (via `TC3ScopeExportTool.exe`) or a Scope CSV to Parquet, keeping
+  each acquisition group's own time axis. Intermediate files go to a per-user cache.
+- `manifest` reports channels, units, per-group sample rates, duration, gaps, duplicated
+  display channels, and whether cross-group timing in the export can be trusted.
+- `stats` reports per-channel health: rails, flat stretches, quantisation, outliers.
+- `events` finds steps, ramps, spikes, transitions, flatlines, holds, clipping and threshold
+  crossings. One excursion is one event; command channels, still axes and integer channels are
+  recognised so they do not flood the result; the output is ranked and spread across the
+  recording, with a complete summary of everything found.
+- `plot` draws a min/max envelope per pixel bucket, never decimation.
+- `correlate` normalises, reports the lag with its sign and which channel leads, and refuses
+  channels on different clocks unless `--allow-cross-group` is given.
+- `window` returns capped raw rows, one block per acquisition group.
+- The CSV reader handles the TAB, `;`/`,` and `,`/`.` dialects, multi-rate groups that are
+  repeat-padded or truncated, blank cells, trigger-info tables, EOF rows, FILETIME timestamps
+  and exact copies of a channel. Headerless, Timelines *None*, Blank- and Colon-separated
+  exports are refused by name rather than misread.
+
+### Guidance
+
+- `SKILL.md`: four hard rules (no safety logic, no writes to a live machine, no unverified
+  claims, a human starts every recording) and the two workflows.
+- `references/`: the diagnosis method, sizing a recording, the `.tcscopex` schema, and the
+  export tool with its CSV traps.
+- `evals/`: behaviour and trigger evals against a no-skill baseline, and write-ups of every
+  field session on a real machine.
 
 ### Known gaps
 
-- **The analysis verbs have met one real recording of a generated file.** The whole path —
-  generate, record with a trigger, convert the `.svdx`, `ingest`, `manifest` — ran once
-  (`evals/field-review-3e4c44d.md`); Part B of the brief, the 19 genuine exports re-run, has
-  not.
-- The `;` delimiter appeared in none of the real files. It stays supported on the strength of
-  the synthetic EU fixture alone.
+- The analysis verbs have run against two real recording shapes, not the variety of real
+  exports.
+- The `--tmc` reader has not been run against a real `.tmc` file.
+- Untested: scaled channels, marker windows, what a *Subsave* trigger or a ring buffer records,
+  Timelines *All* on a multi-channel group, and an axis parked exactly at a limit.
+- Installation through GitHub Copilot in VS Code has not been tried.

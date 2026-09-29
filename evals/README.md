@@ -11,6 +11,26 @@ Two halves, different costs:
 | Behaviour | `evals.json` | Does the skill change the answer? | ~1 agent pair per eval, minutes each |
 | Triggering | `triggers.json` | Does the description fire on the right prompts? | one short answer per case |
 
+## What is here
+
+| File | What it is | Current? |
+|---|---|---|
+| `evals.json` | The behaviour evals: prompt, expected output, checks | yes |
+| `triggers.json` | Prompts that should and should not fire the skill | yes |
+| `grade.py`, `test_grader.py` | Grader and its self-test | yes |
+| `make_eval_fixture.py`, `stage_runs.py` | Build fixtures, stage runs outside the repo | yes |
+| `results-iteration-*.md` | One write-up per eval round; the highest number is the latest | latest only |
+| `field-test-brief.md` | The checklist for a session on a real TwinCAT machine | yes |
+| `field-review-*.md` | Write-ups of those sessions, named after the commit tested | record |
+
+**Latest result** (`results-iteration-4.md`, n=3 per cell, Opus 5.5): the skill arm scored
+28.3/29 against 20.7/29 for the baseline, and a blinded judge ranked the arms the same way on
+every eval. The widest gap is `hand-written-config`: every baseline called a file that cannot
+record "sound".
+
+Anything real in the field reviews is anonymised by substitution — names are stand-ins,
+numbers are as measured. `field-review-af54888.md` is the worked example.
+
 ## The selection rule
 
 An eval earns its place only if a capable model **without** the skill is plausibly, confidently
@@ -32,38 +52,6 @@ Each eval below is built around a specific wrong answer that is easy to reach an
 | `hand-written-config` | A hand-written `.tcscopex` with the NC axis channels on 851 and typed `LREAL`. Both look right to anyone who knows the PLC side — 851 is the PLC's port, `LREAL` its type — and neither records: NC symbols live on 501, and Scope reads `LREAL` as VOID. |
 | `needle-in-the-haystack` | The glitch is 3 samples in 20,000, among uneven moves, dwells, drift and friction that look like events too. Kept as a cheap regression check, not as a discriminator. |
 | `out-of-scope-authoring` | The diagnosis is done and the fix is obviously a few lines of ST. Writing it is the natural next move and the wrong one — and declining on the merits while offering to write it anyway is not declining. |
-
-**Retired in iteration 5**: `armed-but-not-recording`. Its baselines found the XML at the end of
-the `.svdx` and read `TriggerAction NONE`, a 60 s `RecordTime` and `AutoStop`, which say "stops
-after a minute" in plain words; only naming `NONE` as *Set Mark* needed Scope knowledge.
-`overnight-ring-buffer` keeps the scenario and puts the answer on what `ClientStop` means.
-`needle-in-the-haystack` carries a `retire_if` in `evals.json`: a judge gap under 0.5 next round.
-
-**Retired in iteration 4**, after full-mark ties at n=3: `needle-at-scale` (a baseline writes a
-script and prints a summary at 12 million samples as readily as at 20,000) and `multi-rate-ordering`
-(reasoning about the slower channel's sample interval is generic). Three rounds have now shown that
-generic signal-analysis traps do not separate the arms, so the two new evals each need a Scope- or
-TwinCAT-specific fact and start from a Scope file rather than a CSV.
-
-**Retired in iteration 3**, because a capable baseline passed them unaided and they measured
-nothing: `saturated-channel` and `saturated-at-scale` (a rail is as obvious at 12 M samples as at
-20,000), `unwired-acquisition` (the baseline grepped the GUIDs), `over-specified-recording` (the
-baseline computed the load unprompted). `evals.json` keeps the reasons under `retired`, and the
-grader keeps their checks so old runs still regrade. A European-format dialect eval was considered
-and not added: `head` shows the tabs, and no thousands separator has been seen in a real export,
-so a silent misread is not plausible enough to be worth six runs.
-
-The needles now ask for a **ranked list** rather than "what happened". Iteration 2 showed the old
-question had two defensible answers in one file and punished the ranking both arms reached.
-
-### What the scaled pair showed
-
-Iteration 2 added `-at-scale` twins of the needle and the saturated channel, at 600,000 rows by 20
-channels (12 million samples, ~127 MB), because the 20,000-row originals tied. They tied too: a
-baseline agent does not read a 127 MB file into context either, it writes a script and prints a
-summary. So at scale the skill's case is cost, not correctness — which is why every run records
-tokens and seconds — and both were retired. `make_eval_fixture.py --scale` still writes the file,
-so old runs can be regraded.
 
 ## Running the behaviour half
 
@@ -197,3 +185,37 @@ those passes when the number is absent **or** appears next to a refutation, whic
 and will eventually be wrong about something.
 
 Read the answers. The score is a summary of the reading, not a substitute for it.
+
+## History: retired evals
+
+**Retired in iteration 5**: `armed-but-not-recording`. Its baselines found the XML at the end of
+the `.svdx` and read `TriggerAction NONE`, a 60 s `RecordTime` and `AutoStop`, which say "stops
+after a minute" in plain words; only naming `NONE` as *Set Mark* needed Scope knowledge.
+`overnight-ring-buffer` keeps the scenario and puts the answer on what `ClientStop` means.
+`needle-in-the-haystack` carries a `retire_if` in `evals.json`: a judge gap under 0.5 next round.
+
+**Retired in iteration 4**, after full-mark ties at n=3: `needle-at-scale` (a baseline writes a
+script and prints a summary at 12 million samples as readily as at 20,000) and `multi-rate-ordering`
+(reasoning about the slower channel's sample interval is generic). Three rounds have now shown that
+generic signal-analysis traps do not separate the arms, so the two new evals each need a Scope- or
+TwinCAT-specific fact and start from a Scope file rather than a CSV.
+
+**Retired in iteration 3**, because a capable baseline passed them unaided and they measured
+nothing: `saturated-channel` and `saturated-at-scale` (a rail is as obvious at 12 M samples as at
+20,000), `unwired-acquisition` (the baseline grepped the GUIDs), `over-specified-recording` (the
+baseline computed the load unprompted). `evals.json` keeps the reasons under `retired`, and the
+grader keeps their checks so old runs still regrade. A European-format dialect eval was considered
+and not added: `head` shows the tabs, and no thousands separator has been seen in a real export,
+so a silent misread is not plausible enough to be worth six runs.
+
+The needles now ask for a **ranked list** rather than "what happened". Iteration 2 showed the old
+question had two defensible answers in one file and punished the ranking both arms reached.
+
+### What the scaled pair showed
+
+Iteration 2 added `-at-scale` twins of the needle and the saturated channel, at 600,000 rows by 20
+channels (12 million samples, ~127 MB), because the 20,000-row originals tied. They tied too: a
+baseline agent does not read a 127 MB file into context either, it writes a script and prints a
+summary. So at scale the skill's case is cost, not correctness — which is why every run records
+tokens and seconds — and both were retired. `make_eval_fixture.py --scale` still writes the file,
+so old runs can be regraded.

@@ -40,10 +40,9 @@ the controller, the core assignment, what else runs on it, and the task cycle ti
 | warn | > 20,000 | Denser than anything measured in practice; justify it |
 
 The numbers come from seven real Beckhoff-authored projects on one production machine, which
-measured **417, 2,750, 4,000, 5,750, 7,750, 11,667 and 16,250** samples/s. That distribution
-is the whole reason for bands: an earlier single threshold sat at 100,000, then 20,000, above
-every project anyone had actually built, so it never once fired and graded nothing. A check
-that always passes is indistinguishable from no check.
+measured **417, 2,750, 4,000, 5,750, 7,750, 11,667 and 16,250** samples/s. That spread is why
+there are bands rather than one threshold: a single line high enough never to be wrong sits
+above every real project, never fires, and is indistinguishable from no check.
 
 Treat a warning as "justify this", not "this will fail".
 

@@ -1,0 +1,49 @@
+name: Bug report
+description: A verb crashed, refused a valid file, or gave a wrong answer.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **This repository is public. Redact before you paste.** Scope files and exports carry
+        details that identify a machine and its owner. Replace, don't delete:
+
+        - `AmsNetId` values, IP addresses, hostnames → `1.2.3.4.1.1`
+        - Customer, site or machine names in symbol paths, channel names and file names →
+          stand-ins such as `Line1.Axis3.ActPos`
+        - `IndexGroup` / `IndexOffset`, setpoints, recipes, cycle times
+        - Screenshots and plots carry all of the above in their labels — leave them out
+
+        Numbers such as sample rates, row counts and timings are fine and help most.
+        The full checklist is in `examples/README.md`.
+  - type: input
+    id: verb
+    attributes:
+      label: Verb and command line
+      placeholder: "uv run scripts/tcscope.py events rec.parquet --channels ActPos"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output (redacted)
+      description: The JSON or error the tool printed. For a CSV the reader mishandles, add `manifest --dump-header` output.
+      render: shell
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: "Windows 11, TwinCAT 3.1.4026, Scope View 3.4, skill commit abc1234"
+  - type: checkboxes
+    id: redacted
+    attributes:
+      label: Redaction
+      options:
+        - label: I have removed NetIDs, IPs, hostnames and customer, site and machine names from everything above.
+          required: true

@@ -1,9 +1,5 @@
 name: tests
 
-# Runs only once this folder is the root of its own repository. Nested inside a
-# parent repo it never fires, because GitHub reads workflows from the root
-# .github/ only - so until then, run the same steps by hand.
-
 on:
   push:
     branches: [main]
@@ -39,6 +35,9 @@ jobs:
       - name: end-to-end verb tests
         run: python3 tests/test_verbs.py
 
+      - name: eval grader tests
+        run: python3 evals/test_grader.py
+
       - name: standalone contract
         # No reference may point outside this repository, and nothing here may
         # claim a certification that does not exist. The bracket around a first
@@ -48,10 +47,6 @@ jobs:
           ! grep -rniE 'certified [b]eckhoff' . || exit 1
           ! grep -rnE '/[h]ome/|/[p]rojects/|[C]:\\Users' \
               --include='*.md' --include='*.py' --include='*.yml' . || exit 1
-          # The twincat-st guard that used to sit here is gone on purpose: that
-          # companion is published now, so the README's link to it is accurate.
-          # What must still never appear is a path into a sibling checkout, which
-          # the absolute-path check above covers.
 
       - name: no real AMS NetId committed in a template
         # Must be a block scalar. In `run: ! grep ...` YAML reads the leading `!`

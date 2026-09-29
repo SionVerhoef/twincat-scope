@@ -263,7 +263,7 @@ def write_tab(path, groups, columns, truth, rows, wrap_comments=False, symbols=N
         "SymbolName": lambda g, s, c, i: (symbols[g][c] if symbols
                                           else tab_symbol(g, s, c)),
         "SymbolComment": lambda g, s, c, i: comment_for(i, wrap_comments),
-        "NetId": lambda g, s, c, i: "192.168.1.10.1.1",
+        "NetId": lambda g, s, c, i: "1.2.3.4.1.1",
         "Port": lambda g, s, c, i: str(s["port"]),
         "IndexGroup": lambda g, s, c, i: "16448",
         "IndexOffset": lambda g, s, c, i: str(1000 + c * 8),

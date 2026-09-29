@@ -54,26 +54,28 @@ use the git submodule install from README.md instead.
 
 $tag = $release.tag_name
 $zip = Join-Path ([System.IO.Path]::GetTempPath()) "twincat-scope-$tag.zip"
-Write-Host "Downloading $tag..."
-Invoke-WebRequest -Uri $release.zipball_url -OutFile $zip -Headers @{ "User-Agent" = "update-skill" }
-
 $staging = Join-Path ([System.IO.Path]::GetTempPath()) "twincat-scope-unpack-$([guid]::NewGuid())"
-Expand-Archive -Path $zip -DestinationPath $staging -Force
+try {
+    Write-Host "Downloading $tag..."
+    Invoke-WebRequest -Uri $release.zipball_url -OutFile $zip -Headers @{ "User-Agent" = "update-skill" }
+    Expand-Archive -Path $zip -DestinationPath $staging -Force
 
-# GitHub wraps zipball contents in a single commit-ish directory.
-$inner = Get-ChildItem -Path $staging -Directory | Select-Object -First 1
-if (-not $inner) { Write-Error "Archive layout was not what we expected."; exit 1 }
+    # GitHub wraps zipball contents in a single commit-ish directory.
+    $inner = Get-ChildItem -Path $staging -Directory | Select-Object -First 1
+    if (-not $inner) { throw "Archive layout was not what we expected." }
 
-if (Test-Path $Target) {
-    Write-Host "Replacing existing $Target"
-    Remove-Item -Recurse -Force $Target
+    # Only now, with the new copy downloaded and unpacked, is the old one removed.
+    if (Test-Path $Target) {
+        Write-Host "Replacing existing $Target"
+        Remove-Item -Recurse -Force $Target
+    }
+    New-Item -ItemType Directory -Path $Target -Force | Out-Null
+    Copy-Item -Path (Join-Path $inner.FullName "*") -Destination $Target -Recurse -Force
+} finally {
+    Remove-Item -Force -ErrorAction SilentlyContinue $zip
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $staging
 }
-New-Item -ItemType Directory -Path $Target -Force | Out-Null
-Copy-Item -Path (Join-Path $inner.FullName "*") -Destination $Target -Recurse -Force
-
-Remove-Item -Force $zip
-Remove-Item -Recurse -Force $staging
 
 Write-Host ""
 Write-Host "Installed twincat-scope $tag into $Target" -ForegroundColor Green
-Write-Host "Check the environment with:  python3 $Target\scripts\tcscope.py doctor"
+Write-Host "Check the environment with:  py -3 $Target\scripts\tcscope.py doctor"

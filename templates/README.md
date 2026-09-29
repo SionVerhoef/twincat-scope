@@ -14,12 +14,12 @@ pass `scripts/tcscope.py checkscope`.
 py -3 scripts/tcscope.py newscope templates/axis-diagnosis.tcscopex \
     -o MyScope.tcscopex \
     --channels "MAIN.fbAxis.NcToPlc.ActPos,MAIN.fbAxis.NcToPlc.PosDiff:LREAL" \
-    --netid 192.168.1.10.1.1 --sample-time-ms 1
+    --netid 1.2.3.4.1.1 --sample-time-ms 1
 
 py -3 scripts/tcscope.py checkscope MyScope.tcscopex
 ```
 
-`py -3` is the Windows launcher, and TwinCAT runs on Windows; on Linux or macOS (and in this repo's CI) the same commands are `python3`.
+`py -3` is the Windows launcher; on Linux or macOS use `python3`.
 
 **Copying a template file duplicates its GUIDs, and a project with duplicate identifiers is
 invalid.** `newscope` mints fresh ones and — the part that is easy to get wrong — rewrites the
@@ -56,11 +56,8 @@ requesting twenty channels does not produce twenty traces sharing one axis. See
 
 ## Verification status
 
-These were written from a schema derived by reading real Beckhoff sample projects. **Neither
-template has been opened in TwinCAT as shipped.** Files `newscope` generated from
-`axis-diagnosis.tcscopex` have: the first opened and recorded nothing
-(`evals/field-review-1fa0e9b.md`); with the type, name and port fixes, and later with the
-`AxisStyle` elements and dark theme as shipped here, they recorded NC axis and PLC channels
-unedited (`evals/field-review-1fa0e9b-rounds.md`, `evals/field-review-fe9b487.md`). If you
-load one, whether it works or fails, that is worth reporting back — and open it by adding it
-to an existing Measurement project, not by double-clicking it.
+**Neither template has been opened in TwinCAT as shipped.** Files `newscope` generates from
+`axis-diagnosis.tcscopex` have: they open and record NC axis and PLC channels unedited
+(`evals/field-review-fe9b487.md`). If you load a template directly, whether it works or
+fails, that is worth reporting back — and open it by adding it to an existing Measurement
+project, not by double-clicking it.
