@@ -19,8 +19,8 @@ First public release. The development history before it is in git and in `evals/
   mismatches, unreadable or duplicate channel names, missing `AxisStyle`, disabled elements,
   and readability of the layout.
 - `checkscope` warns on the recording plan: sample load against measured real projects, a
-  fixed window with no trigger, trigger actions that do not stop a recording, and ring-buffer
-  mode.
+  fixed window with no trigger, trigger actions that do not stop a recording, ring-buffer
+  mode, and Subsave triggers, which need the Scope View Professional licence.
 - `checkscope --tmc` checks every PLC symbol against the compiled program's symbol table.
 - `doctor`, `newscope` and `checkscope` need nothing but Python.
 
@@ -58,6 +58,7 @@ First public release. The development history before it is in git and in `evals/
 - The analysis verbs have run against two real recording shapes, not the variety of real
   exports.
 - The `--tmc` reader has not been run against a real `.tmc` file.
-- Untested: scaled channels, marker windows, what a *Subsave* trigger or a ring buffer records,
+- Untested: scaled channels, marker windows, what a *Subsave* trigger records (it needs a
+  Professional licence),
   Timelines *All* on a multi-channel group, and an axis parked exactly at a limit.
 - Installation through GitHub Copilot in VS Code has not been tried.
