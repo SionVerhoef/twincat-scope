@@ -1171,6 +1171,37 @@ def recurring_spike_checks():
               str([(e["channel"], e["kind"], e["severity"]) for e in cut]))
 
 
+def sharp_pulse_checks():
+    """Bead ky7: a pulse with no plateau is one run of over-threshold change.
+
+    Its up edge runs straight into its down edge, so the run nets to about
+    zero, the "did it come back" test fails on noise, and it was reported as a
+    step or ramp of ~0 - found building the J3 fixture. A single bad reading
+    is exactly this shape.
+    """
+    import random
+    rng = random.Random(3)
+    # (start sample, heights of the pulse's samples above the baseline)
+    pulses = [(1000, [1.0]), (2500, [-1.0]), (4000, [0.5, 1.0, 0.5]),
+              (5500, [0.3, 0.7, 1.0, 0.7, 0.3])]
+    extra = {}
+    for start, heights in pulses:
+        extra.update({start + k: h for k, h in enumerate(heights)})
+    rows = [f"{i:.1f},{rng.gauss(0, 0.01) + extra.get(i, 0.0):.6f}" for i in range(7000)]
+    with tempfile.TemporaryDirectory() as tmp:
+        csv = Path(tmp) / "pulses.csv"
+        csv.write_text("\n".join(["TwinCAT Scope Export", "", "Name,Sensor"] + rows) + "\n",
+                       encoding="utf-8", newline="")
+        events = run("events", csv, "--max-events", 1000).get("events", [])
+        got = [(e["kind"], e["time"], round(e["delta"], 2)) for e in events]
+        spikes = [e for e in events if e["kind"] == "spike"]
+        check("a pulse with no plateau is one spike of its height, never a ~0 step",
+              len(events) == len(pulses) == len(spikes)
+              and all(near(e["time"], s / 1000.0, 0.003) for e, (s, _) in zip(spikes, pulses))
+              and all(abs(e["delta"]) > 0.3 for e in spikes),
+              str(got))
+
+
 def still_channel_checks():
     """Field round 7, bead htl: rails that are not rails.
 
@@ -2746,6 +2777,7 @@ def main():
     command_channel_checks()
     clean_feedback_checks()
     recurring_spike_checks()
+    sharp_pulse_checks()
     long_correlate_checks()
     parquet_memory_checks()
     two_rate_checks()
