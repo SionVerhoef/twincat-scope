@@ -30,11 +30,13 @@ First public release. The development history before it is in git and in `evals/
 - `ingest` converts a `.svdx` (via `TC3ScopeExportTool.exe`) or a Scope CSV to Parquet, keeping
   each acquisition group's own time axis. Intermediate files go to a per-user cache.
 - `manifest` reports channels, units, per-group sample rates, duration, gaps, duplicated
-  display channels, and whether cross-group timing in the export can be trusted.
+  display channels, display scaling (warning when a CSV's values may have been scaled on
+  export), and whether cross-group timing in the export can be trusted.
 - `stats` reports per-channel health: rails, flat stretches, quantisation, outliers.
 - `events` finds steps, ramps, spikes, transitions, flatlines, holds, modulo wraps, clipping and
   threshold crossings. One excursion is one event; command channels, still axes and integer
-  channels are recognised so they do not flood the result, and clean NC feedback that stands
+  channels are recognised so they do not flood the result. On an integer state channel every
+  change of value is its own step with its `from` and `to` state. Clean NC feedback that stands
   still while its setpoint moves is reported as frozen. The output is ranked - one-off defects,
   then defects that recur alike on a channel, then routine motion - and spread across the
   recording, with a complete summary of everything found.
@@ -60,7 +62,12 @@ First public release. The development history before it is in git and in `evals/
 
 - The analysis verbs have run against real recordings mostly from one machine, not the variety
   of real exports.
-- Untested: scaled channels, marker windows, what a *Subsave* trigger records (it needs a
-  Professional licence), Timelines *All* on a multi-channel group, an axis parked exactly at a
-  limit, and the NC `ToPlc`/`FromPlc` members beyond `ErrorCode` and `AxisState`.
+- A CSV exported from Scope View with *Scale values before export* on carries scaled values
+  under a header identical to a raw export's, and the file does not record the option. `manifest`
+  reports each channel's `scale_factor`/`scale_offset` and, for CSV input, warns that the values
+  may be scaled. It cannot tell which, and with a **Name-only** header, which has no scaling rows,
+  it cannot see the scaling at all. `ingest` on the `.svdx` is not affected: the export tool
+  writes raw values by default (`evals/field-review-333b6c6.md`, M1).
+- Untested: what a *Subsave* trigger records (it needs a Professional licence), marker tables
+  in an export, an axis parked exactly at a limit, and a genuine saturation on a real machine.
 - Installation through GitHub Copilot in VS Code has not been tried.

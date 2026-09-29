@@ -357,6 +357,11 @@ def _parse_groups(meta, ncols, decimal):
             # values below it stay raw - measured in the field, a flag offset
             # by 2 exported only 0 and 1. Report it; never add it.
             offset = cell("Offset", col)
+            # The same Offset, with ScaleFactor, is Scope View's display
+            # scaling. With 'Scale values before export' on, the values below
+            # are factor * raw + offset - under a header identical to a raw
+            # export's, so a CSV cannot say which it holds (field-tested).
+            factor = cell("ScaleFactor", col)
             channels.append({
                 "name": short,
                 "symbol_name": qualified or short,
@@ -367,6 +372,7 @@ def _parse_groups(meta, ncols, decimal):
                 "port": int(port) if port and port.isdigit() else None,
                 "sample_time_ms": _parse_float(declared, decimal) if declared else None,
                 "display_offset": _parse_float(offset, decimal) if offset else None,
+                "scale_factor": _parse_float(factor, decimal) if factor else None,
                 # False when the export had no SymbolName row to read it from.
                 "symbol_known": bool(qualified),
             })
@@ -912,7 +918,7 @@ def parquet_payload(rec):
     columns, used = {}, {}
     layout = {"time_unit": "s", "groups": [],
               "copies_collapsed": rec.info.get("copies_collapsed", [])}
-    for key in ("malformed_rows", "start_filetime"):
+    for key in ("malformed_rows", "start_filetime", "origin"):
         if rec.info.get(key):
             layout[key] = rec.info[key]
     for group in rec.groups:
@@ -930,6 +936,7 @@ def parquet_payload(rec):
                 "data_type": channel["data_type"], "port": channel["port"],
                 "sample_time_ms": channel["sample_time_ms"],
                 "display_offset": channel.get("display_offset"),
+                "scale_factor": channel.get("scale_factor"),
             })
         layout["groups"].append(entry)
     return columns, layout
@@ -977,6 +984,7 @@ def load_parquet(path):
                 "unit": spec.get("unit"), "data_type": spec.get("data_type"),
                 "port": spec.get("port"), "sample_time_ms": spec.get("sample_time_ms"),
                 "display_offset": spec.get("display_offset"),
+                "scale_factor": spec.get("scale_factor"),
                 "values": column(spec["column"]),
             })
         groups.append(_finalise_group(np, group, seconds * MS_PER_S))
@@ -985,7 +993,8 @@ def load_parquet(path):
                               "columns": len(source.schema_arrow.names),
                               "copies_collapsed": layout.get("copies_collapsed", []),
                               "malformed_rows": layout.get("malformed_rows", 0),
-                              "start_filetime": layout.get("start_filetime")})
+                              "start_filetime": layout.get("start_filetime"),
+                              "origin": layout.get("origin")})
 
 
 def load(path):
@@ -1150,6 +1159,9 @@ def cmd_ingest(args):
 
     intermediate = str(src) if src != Path(args.input) else None
     rec = load_csv(src)
+    # The export tool writes raw values unless told otherwise, so only a CSV
+    # someone exported by hand can hold values Scope View scaled.
+    rec.info["origin"] = "svdx" if intermediate else "csv"
     if args.output:
         out = Path(args.output)
     else:
@@ -1255,15 +1267,21 @@ def cmd_manifest(args):
     lead = min(groups, key=lambda g: g["sample_time_ms_measured"]
                if g["sample_time_ms_measured"] == g["sample_time_ms_measured"] else 1e18)
 
-    channels = []
+    channels, scaled = [], []
     for ch in rec.channels:
         entry = dict(channel_label(ch, total),
                      unit=ch["unit"], data_type=ch["data_type"],
                      nan_fraction=float(np.mean(~np.isfinite(ch["values"]))),
                      constant=bool(np.nanmax(ch["values"]) == np.nanmin(ch["values"])))
-        # Where the trace is drawn, not what was recorded: the values are raw.
+        # Where the trace is drawn, not what was recorded: the values are raw -
+        # unless the CSV was exported with 'Scale values before export' on.
         if ch.get("display_offset"):
             entry["display_offset"] = ch["display_offset"]
+        factor = ch.get("scale_factor")
+        if (factor is not None and factor != 1) or ch.get("display_offset"):
+            entry["scale_factor"] = factor if factor is not None else 1.0
+            entry["scale_offset"] = ch.get("display_offset") or 0.0
+            scaled.append(entry["name"])
         channels.append(entry)
 
     merged = _collapse_identical_groups(groups)
@@ -1305,6 +1323,15 @@ def cmd_manifest(args):
         out["copies_note"] = (
             "These columns were exact copies of another - one acquisition drawn "
             "in several tabs exports once per tab - and are read as one channel.")
+    # Scaled and raw exports share one header, and the file keeps no record of
+    # the option. Only the export tool is known to write raw (the .svdx route).
+    if scaled and rec.info.get("origin") != "svdx":
+        out["warnings"] = [
+            f"{', '.join(scaled)}: display scaling is set (scale_factor/scale_offset). "
+            "If this CSV was exported from Scope View with 'Scale values before "
+            "export' on, these values are factor * raw + offset, not raw - the file "
+            "does not record which. Re-export with that option off, or ingest the "
+            ".svdx, whose export tool writes raw values."]
     emit(out)
     return 0
 
@@ -1638,7 +1665,22 @@ def cmd_events(args):
         modulo = channel["symbol_name"].lower().endswith("modulo")
         reported = []  # (start, end) of this channel's excursion events
 
-        if thresh > 0 and not still:
+        if state:
+            # A state channel has no noise to coalesce: each change of value is
+            # one step from one state to the next. Run through the excursion
+            # logic below, changes a few samples apart merged into one ramp or
+            # spike - 100 -> 101 -> 140 became a ramp 100 -> 140, the state
+            # between was lost, and 72 alike on one real sequence were never
+            # recurring, because a ramp is descriptive.
+            for j in np.flatnonzero(np.isfinite(d) & (d != 0)).tolist():
+                reported.append((j, j + 1))
+                found.append(event(
+                    "step", abs(float(d[j])) / thresh,
+                    time=float(t[min(j + 1, t.size - 1)]), index=int(j + 1),
+                    delta=float(d[j]), width_samples=1,
+                    **{"from": int(col[j]), "to": int(col[j + 1])},
+                ))
+        elif thresh > 0 and not still:
             # A sustained change is ONE event. Reporting each over-threshold
             # sample separately turned a single 2.4 s move into 1199 "steps" and
             # buried every real fault under them. NaN compares False, so a gap

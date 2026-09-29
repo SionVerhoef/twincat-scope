@@ -1260,10 +1260,13 @@ def integer_sequence_checks(cycles=60, period=300, seed=13):
         err = (17 if err_at <= i < err_at + 500 else
                42 if err_at + 2 * period <= i < err_at + 3 * period else 0)
         torque = 1.0 + rng.gauss(0, 0.02) + (0.5 if i >= fault_at else 0.0)
-        rows.append(f"{i:.1f},{seq},{err},{torque:.6f}")
+        # A state held for two samples between two others: 100 -> 101 -> 140.
+        phase = i % period
+        burst = 100 if phase < 100 else 101 if phase < 102 else 140
+        rows.append(f"{i:.1f},{seq},{err},{torque:.6f},{burst}")
     with tempfile.TemporaryDirectory() as tmp:
         csv = Path(tmp) / "sequence.csv"
-        csv.write_text("\n".join(["TwinCAT Scope Export", "", "Name,Seq,ErrCode,Torque"]
+        csv.write_text("\n".join(["TwinCAT Scope Export", "", "Name,Seq,ErrCode,Torque,Burst"]
                                  + rows) + "\n", encoding="utf-8", newline="")
         full = run("events", csv, "--max-events", 1000).get("events", [])
         seq = [e for e in full if e["channel"] == "Seq"]
@@ -1284,6 +1287,21 @@ def integer_sequence_checks(cycles=60, period=300, seed=13):
         check("an integer change says what it changed from and to",
               [(e.get("from"), e.get("to")) for e in err] == [(0, 17), (17, 0), (0, 42), (42, 0)],
               str([(e.get("from"), e.get("to")) for e in err]))
+        # Field round 333b6c6: changes a few samples apart were merged into one
+        # `ramp` or `spike`. 100 -> 101 -> 140 came back as one ramp 100 -> 140,
+        # the state between was lost, and a ramp is never recurring - 72 alike
+        # on one real sequence variable, all one-offs.
+        burst = [e for e in full if e["channel"] == "Burst"]
+        pairs = {(e.get("from"), e.get("to")) for e in burst}
+        check("every change of state is its own step, however close the next one is",
+              pairs == {(100, 101), (101, 140), (140, 100)}
+              and {e["kind"] for e in burst} == {"step"}
+              and len(burst) == 3 * cycles - 1,
+              f"{len(burst)} events, kinds={sorted({e['kind'] for e in burst})}, "
+              f"pairs={sorted(pairs, key=str)}")
+        check("each of those state pairs recurs",
+              burst and all(e.get("recurring") for e in burst),
+              f"{sum(bool(e.get('recurring')) for e in burst)} of {len(burst)} recurring")
         cut = run("events", csv, "--max-events", 5).get("events", [])
         check("a capped answer returns the faults before the sequence",
               sorted(e["channel"] for e in cut) == ["ErrCode"] * 4 + ["Torque"],
@@ -2414,6 +2432,50 @@ def svdx_checkscope_checks():
               str(bad.get("error"))[:160])
 
 
+def scale_checks():
+    """Field round 333b6c6, M1: a channel with display scaling (factor 2,
+    offset 10) exported from Scope View with 'Scale values before export' on
+    carries factor * raw + offset, under a header identical to the raw export's.
+    The file does not record the option, so the values were read as raw with no
+    word. ingest on the .svdx is safe: the export tool writes raw by default.
+    """
+    lines = (REAL / "real_tab_2rate_truncated.csv").read_text(encoding="utf-8").splitlines()
+
+    def scaled(line):
+        key = line.split("\t")[0]
+        if key in ("ScaleFactor", "Offset"):
+            fields = line.split("\t")
+            fields[1] = "2,000000" if key == "ScaleFactor" else "10"
+            return "\t".join(fields)
+        return line
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "scaled.csv"
+        path.write_text("\r\n".join(scaled(ln) for ln in lines) + "\r\n",
+                        encoding="utf-8", newline="")
+        man = run("manifest", path)
+        act = next((c for c in man.get("channels", []) if c.get("name") == "ActPos"), {})
+        flag = next((c for c in man.get("channels", []) if c.get("name") == "bFlag"), {})
+        check("a channel's display scaling is reported",
+              act.get("scale_factor") == 2.0 and act.get("scale_offset") == 10.0
+              and "scale_factor" not in flag and "scale_offset" not in flag,
+              str({k: act.get(k) for k in ("scale_factor", "scale_offset", "display_offset")}))
+        warned = [w for w in man.get("warnings", []) if "Scale values" in w]
+        check("a CSV with display scaling warns that its values may be scaled",
+              len(warned) == 1 and "ActPos" in warned[0] and "bFlag" not in warned[0],
+              str(man.get("warnings")))
+        plain = run("manifest", REAL / "real_tab_2rate_truncated.csv")
+        check("a CSV without scaling does not warn",
+              not [w for w in plain.get("warnings", []) if "Scale values" in w],
+              str(plain.get("warnings")))
+        cache = Path(tmp) / "scaled.parquet"
+        run("ingest", path, "-o", cache)
+        back = run("manifest", cache)
+        check("the scaling and its warning survive ingest of a CSV",
+              any(c.get("scale_factor") == 2.0 for c in back.get("channels", []))
+              and [w for w in back.get("warnings", []) if "Scale values" in w],
+              str(back.get("warnings")))
+
+
 def ingest_cache_checks():
     """ingest leaves the export tool's CSV in the cache dir, never beside the
     .svdx - which sits in a project folder that is not ours to fill.
@@ -2956,6 +3018,7 @@ def main():
     parquet_pool_checks()
     export_option_checks()
     ingest_cache_checks()
+    scale_checks()
     svdx_checkscope_checks()
     shareability_checks()
     retarget_checks()

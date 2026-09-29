@@ -165,8 +165,10 @@ on real machines in field sessions, written up in `evals/field-review-*.md`.
   record until the NetId and symbols are set, as intended.
 - `--tmc` against a real 862-symbol `.tmc`: known-good symbols resolve, a misspelled symbol
   and a wrongly-sized type are both caught.
-- An NC `UINT32` status channel (`Axes.<axis>.ToPlc.ErrorCode`, `AxisState`) records and
-  reads back as integers.
+- NC channels by every path `newscope` types — direct axis fields and `ToPlc`/`FromPlc`
+  members, as `UINT32`, `UINT16`, `INT32` and `REAL64` — record on a moving axis and keep their
+  types.
+- Timelines *All* on a 10-channel group reads correctly.
 - `events` on a real 600 s, 33-channel recording, over several rounds of fixes.
 - The test suite on Windows and Linux.
 
@@ -174,12 +176,12 @@ on real machines in field sessions, written up in `evals/field-review-*.md`.
 
 - The analysis verbs across a wide variety of real recordings — most real data so far comes
   from one machine.
-- Scaled channels, marker windows, Timelines *All* on a multi-channel group, an axis parked
-  exactly at a limit, and a genuine saturation.
+- An axis parked exactly at a limit, a genuine saturation, and marker tables in an export.
 - What a *Subsave* trigger records: it needs a Scope View Professional licence, which no test
   machine had.
-- The `ToPlc`/`FromPlc` members other than `ErrorCode` and `AxisState`, typed from Beckhoff's
-  struct definitions but not yet recorded.
+- A Scope View CSV exported with *Scale values* on cannot be told from a raw one: `manifest`
+  warns that its values *may* be scaled, and with a Name-only header cannot see the scaling at
+  all. `ingest` on the `.svdx` reads raw values.
 - Installation through GitHub Copilot in VS Code.
 
 `SKILL.md` rule 3 tells the agent never to claim something is verified when it is not. The
