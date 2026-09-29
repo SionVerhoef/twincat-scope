@@ -158,7 +158,7 @@ Detectors, and what each one actually means on a machine:
 | `step` | A discontinuity that stayed — a setpoint jump, a mode switch, an encoder jump, a re-home |
 | `ramp` | A commanded move: the signal travelled, but it took many samples to get there |
 | `spike` | Something transient — a torque impulse, EMI on an analogue input, a single bad ADC read |
-| `transition` | A digital channel changed state |
+| `transition` | A digital channel changed state: a `BIT`, or an untyped channel with two values. A declared integer with two values (an error code that shows 0 and one code) reports `step`s |
 | `flatline` | A signal that is noisy whenever it moves stopped updating for a sustained run: a frozen sensor, a stalled update |
 | `hold` | A command channel stood exactly still — a setpoint at rest between moves, a velocity setpoint at cruise. Normal, not a fault |
 | `wrap` | A `*Modulo` position jumped most of its range at once: it went round, not a fault |

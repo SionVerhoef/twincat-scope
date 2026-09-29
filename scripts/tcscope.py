@@ -1592,7 +1592,13 @@ def cmd_events(args):
         # Two distinct values means a digital signal. Its "steps" are toggles and
         # its rails are just its two states, so the analogue detectors describe
         # it wrongly in both directions - 100% of a BOOL sits at a rail.
-        digital = bool(np.all((finite == lo) | (finite == hi)))
+        # A declared integer is not a bit, though: an error code that shows 0
+        # and one code in a recording has two values too, and as a
+        # `transition` it ranked after routine motion.
+        declared = scope_type(channel.get("data_type") or "")
+        digital = (bool(np.all((finite == lo) | (finite == hi)))
+                   and not (declared and declared[0] != "BIT"
+                            and declared[0] in DIGITAL_SCOPE_TYPES))
         p_lo, p_hi = np.percentile(finite, [0.5, 99.5])
         span = float(p_hi - p_lo) or (hi - lo)
 

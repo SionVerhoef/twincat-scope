@@ -1189,6 +1189,57 @@ def recurring_spike_checks():
               str([(e["channel"], e["kind"], e["severity"]) for e in cut]))
 
 
+def declared_integer_checks(rows=3000):
+    """Bead 5kf: two distinct values made a channel digital whatever its type.
+
+    An error code that shows 0 and one code in a recording became a
+    `transition`, descriptive, ranked after routine motion. When the export
+    declares an integer type, only a BIT is digital.
+    """
+    from make_real_fixtures import TAB_KEYS, decimal_comma
+
+    groups = [  # (Name, SymbolName, Data-Type, values)
+        ("ErrorCode", "Axes.Axis1.ToPlc.ErrorCode", "UINT32",
+         [17.0 if 1000 <= i < 1600 else 0.0 for i in range(rows)]),
+        ("seStep", "GVL.fbCell.seStep", "INT16",
+         [10.0 if i >= 2000 else 0.0 for i in range(rows)]),
+        ("bFlag", "GVL.fbCell.bFlag", "BIT", [float(i // 500 % 2) for i in range(rows)]),
+    ]
+    meta = {"Name": 0, "SymbolName": 1, "Data-Type": 2}
+    fixed = {"NetId": "1.2.3.4.1.1", "Port": "851", "SampleTime[ms]": "1,000000",
+             "SymbolBased": "True", "VariableSize": "4", "ScaleFactor": "1,000000",
+             "BitMask": "0", "Unit": "(None)", "IndexGroup": "0", "IndexOffset": "0",
+             "SymbolComment": "", "StartTime": "0", "EndTime": "0", "Offset": "0"}
+    lines = ["TwinCAT Scope Export", "File\tdeclared.svdx", "StartTime\t23-9-2026 10:00:00",
+             "EndTime\t23-9-2026 10:00:03", "Version\t3.1.4024.35", ""]
+    for key in TAB_KEYS:
+        row = []
+        for spec in groups:
+            row += [key, spec[meta[key]] if key in meta else fixed[key]]
+        lines.append("\t".join(row))
+    for i in range(rows):
+        row = []
+        for spec in groups:
+            row += [decimal_comma(f"{i * 1.0:.6f}"), decimal_comma(f"{spec[3][i]:.6f}")]
+        lines.append("\t".join(row))
+    with tempfile.TemporaryDirectory() as tmp:
+        csv = Path(tmp) / "declared.csv"
+        csv.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8", newline="")
+        events = run("events", csv, "--max-events", 1000).get("events", [])
+
+        def of(name):
+            return [(e["kind"], e.get("from"), e.get("to")) for e in events
+                    if e["channel"] == name]
+
+        check("a declared UINT32 error code with two values steps, not transitions",
+              of("ErrorCode") == [("step", 0, 17), ("step", 17, 0)], str(of("ErrorCode")))
+        check("a declared INT16 holding two step numbers steps too",
+              of("seStep") == [("step", 0, 10)], str(of("seStep")))
+        check("a declared BIT still transitions",
+              of("bFlag") and all(k == "transition" for k, _, _ in of("bFlag")),
+              str(of("bFlag")[:3]))
+
+
 def integer_sequence_checks(cycles=60, period=300, seed=13):
     """Field round 49a8e9b, K4: a PLC step-sequence variable changes through
     the same states every cycle, but by different amounts, so the size test
@@ -2898,6 +2949,7 @@ def main():
     recurring_spike_checks()
     sharp_pulse_checks()
     integer_sequence_checks()
+    declared_integer_checks()
     long_correlate_checks()
     parquet_memory_checks()
     two_rate_checks()
