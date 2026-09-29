@@ -56,8 +56,16 @@ requesting twenty channels does not produce twenty traces sharing one axis. See
 
 ## Verification status
 
-**Neither template has been opened in TwinCAT as shipped.** Files `newscope` generates from
-`axis-diagnosis.tcscopex` have: they open and record NC axis and PLC channels unedited
-(`evals/field-review-fe9b487.md`). If you load a template directly, whether it works or
-fails, that is worth reporting back — and open it by adding it to an existing Measurement
-project, not by double-clicking it.
+**Both templates open in TwinCAT as shipped** (Scope View 3.4, `evals/field-review-49a8e9b.md`):
+one tab each, and `axis-diagnosis` with the four stacked bands described above. Neither records
+unedited, by design. Scope first refuses the unset NetId (`0.0.0.0.0.0`), and with only the
+NetId set, the `MAIN.fbAxis…` symbols a project does not have. Set both, or generate a file
+with `newscope`, whose output opens and records NC axis and PLC channels unedited
+(`evals/field-review-fe9b487.md`).
+
+Two things to know when loading one directly:
+
+- Add it to an existing Measurement project (*Add Existing Item*), not by double-clicking it.
+  Scope copies the file into the project's own folder and saves that copy.
+- On the first save after an edit, Scope upgrades `Version` 1.0.0.0 to 1.0.0.3 and rewrites
+  parts of the file in its own form. An unedited file is not rewritten.

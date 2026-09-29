@@ -176,9 +176,13 @@ came from field sessions on real machines (`evals/field-review-*.md`).
 `BIT`/`INT16`/`REAL64` on 851 — and the whole path ran once end to end: trigger, real export
 tool, `ingest`, `manifest`. The CSV reader handled 19 genuine exports and every CSV option in
 Scope View's dialog, reading each layout or refusing it by name. `checkscope` has read 25 real
-project files, including eight trigger actions and ring-buffer mode.
+project files, including eight trigger actions and ring-buffer mode; a ring buffer keeps
+exactly its record time, ending at the stop. Both templates open as shipped. `--tmc` caught
+every planted error against a real `.tmc`. An NC `UINT32` channel
+(`Axes.<axis>.ToPlc.ErrorCode`) records as integers.
 
-**Not verified:** the analysis verbs across many real recordings (two shapes so far), the
-`--tmc` reader against a real `.tmc`, what a *Subsave* trigger or a ring buffer actually
-records, scaled channels, marker windows, and an axis parked at a limit. Rule 3 applies to
-this skill's own claims: report at exactly that precision.
+**Not verified:** the analysis verbs across many real recordings (most real data is from one
+machine), what a *Subsave* trigger records (it needs a Professional licence), the `ToPlc`/
+`FromPlc` members beyond `ErrorCode` and `AxisState`, scaled channels, marker windows,
+Timelines *All*, and an axis parked at a limit. Rule 3 applies to this skill's own claims:
+report at exactly that precision.

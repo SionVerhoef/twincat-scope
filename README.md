@@ -1,8 +1,8 @@
 # twincat-scope
 
 An agent skill for **TwinCAT 3 Scope**: build scope projects that actually record, and read
-the recordings they produce without drowning in samples. Works with Claude Code and with
-GitHub Copilot in VS Code, from the same files.
+the recordings they produce without drowning in samples. Built and tested with Claude Code;
+the same files follow the skill layout GitHub Copilot in VS Code reads, which is untested.
 
 Companion skill: **[twincat-st](https://github.com/SionVerhoef/twincat-st)** writes and reviews
 the Structured Text. This one measures what that code does on the machine. Install either
@@ -29,6 +29,15 @@ can come out reversed.
 
 This skill gives the agent the Scope-specific facts and a small tool that answers questions
 about a recording in a few hundred bytes or one picture, instead of returning samples.
+
+**What it has shown so far.** In the latest blinded evals (`evals/results-iteration-4.md`:
+five evals, three runs each, the same model with and without the skill) answers with the skill
+scored 28.3 of 29 against 20.7 without, and an independent judge ranked the two the same way on
+every eval. The widest gap was a hand-written `.tcscopex` that would record nothing: all three
+answers without the skill called it sound. On a planted-fault recording both scored full marks.
+The skill does not save tokens; it used about 9% more. On real machines, files it generates
+open and record unedited, and `checkscope --tmc` caught every planted symbol error against a
+real compiled program (see *Status*).
 
 ## Features
 
@@ -150,16 +159,27 @@ on real machines in field sessions, written up in `evals/field-review-*.md`.
   the real export tool, `ingest`, `manifest`.
 - The CSV reader against 19 genuine export-tool CSVs and every CSV option in Scope View's
   export dialog. Each layout either reads correctly or is refused by name.
-- `checkscope` against 25 real project files, and eight of Scope View's eleven trigger actions
-  plus ring-buffer mode.
+- `checkscope` against 25 real project files, and eight of Scope View's eleven trigger actions.
+  A ring-buffer recording keeps exactly its record time, ending at the stop.
+- Both templates, loaded as shipped: they open with the documented layout, and refuse to
+  record until the NetId and symbols are set, as intended.
+- `--tmc` against a real 862-symbol `.tmc`: known-good symbols resolve, a misspelled symbol
+  and a wrongly-sized type are both caught.
+- An NC `UINT32` status channel (`Axes.<axis>.ToPlc.ErrorCode`, `AxisState`) records and
+  reads back as integers.
+- `events` on a real 600 s, 33-channel recording, over several rounds of fixes.
 - The test suite on Windows and Linux.
 
 **Not yet verified**
 
-- The analysis verbs across a wide variety of real recordings (two real shapes so far).
-- `--tmc` against a real `.tmc` file.
-- Scaled channels, marker windows, what a *Subsave* trigger records, and an axis parked
-  exactly at a limit.
+- The analysis verbs across a wide variety of real recordings — most real data so far comes
+  from one machine.
+- Scaled channels, marker windows, Timelines *All* on a multi-channel group, an axis parked
+  exactly at a limit, and a genuine saturation.
+- What a *Subsave* trigger records: it needs a Scope View Professional licence, which no test
+  machine had.
+- The `ToPlc`/`FromPlc` members other than `ErrorCode` and `AxisState`, typed from Beckhoff's
+  struct definitions but not yet recorded.
 - Installation through GitHub Copilot in VS Code.
 
 `SKILL.md` rule 3 tells the agent never to claim something is verified when it is not. The

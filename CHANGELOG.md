@@ -58,10 +58,9 @@ First public release. The development history before it is in git and in `evals/
 
 ### Known gaps
 
-- The analysis verbs have run against two real recording shapes, not the variety of real
-  exports.
-- The `--tmc` reader has not been run against a real `.tmc` file.
+- The analysis verbs have run against real recordings mostly from one machine, not the variety
+  of real exports.
 - Untested: scaled channels, marker windows, what a *Subsave* trigger records (it needs a
-  Professional licence),
-  Timelines *All* on a multi-channel group, and an axis parked exactly at a limit.
+  Professional licence), Timelines *All* on a multi-channel group, an axis parked exactly at a
+  limit, and the NC `ToPlc`/`FromPlc` members beyond `ErrorCode` and `AxisState`.
 - Installation through GitHub Copilot in VS Code has not been tried.
