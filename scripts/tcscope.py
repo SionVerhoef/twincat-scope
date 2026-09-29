@@ -20,7 +20,7 @@ Subcommands, analysis side (needs numpy; run under `uv run`):
   ingest      Convert an export (.svdx / CSV) to Parquet, once
   manifest    Channels, units, sample rate, duration, gaps
   stats       Per-channel distribution and health numbers
-  events      Steps, ramps, spikes, transitions, flatlines, holds, clipping,
+  events      Steps, ramps, spikes, transitions, flatlines, holds, wraps, clipping,
               threshold crossings
   plot        PNG using a min/max envelope, so transients survive
   window      Real rows, for a narrow time range only
@@ -1484,7 +1484,56 @@ COMMAND_MIN_MOVING = 20
 
 # What a detector reports about a signal behaving normally, rather than a
 # defect. They are returned only once the defects have their slots.
-DESCRIPTIVE_KINDS = frozenset({"ramp", "transition", "hold", "crossing"})
+DESCRIPTIVE_KINDS = frozenset({"ramp", "transition", "hold", "crossing", "wrap"})
+
+# An NC feedback field and the setpoint it follows. A simulated axis's feedback
+# is as clean as its setpoint, so it behaves as a command and rests as `hold`s -
+# 332 on one real ActPosModulo. What tells a frozen sensor from a rest there is
+# the setpoint moving at the same time.
+_FEEDBACK_LEAF = re.compile(r"Act(Pos(?:Modulo)?|Velo|Acc)$", re.IGNORECASE)
+
+
+def _setpoint_of(rec, channel):
+    """The recorded Set* channel of the same axis as this Act* one, or None."""
+    symbol = channel["symbol_name"]
+    match = _FEEDBACK_LEAF.search(symbol)
+    if not match:
+        return None
+    stem, field = symbol[:match.start()], match.group(1)
+    # ActPosModulo follows SetPosModulo, or SetPos when only that was recorded.
+    for want in (stem + "Set" + field, stem + "Set" + re.sub("(?i)modulo$", "", field)):
+        hits = [ch for ch in rec.channels if ch["symbol_name"].lower() == want.lower()]
+        hits.sort(key=lambda ch: ch.get("group") != channel.get("group"))
+        if hits:
+            return hits[0]
+    return None
+
+
+def _hits_at_speed(np, col, d, value):
+    """Does a clean signal reach `value` still moving, as a saturated one does?
+
+    A setpoint decelerates into its rest: its last change before the plateau
+    is a small fraction of its speed. A signal cut off at a limit arrives at
+    the speed it was moving.
+    """
+    moving = np.abs(d[np.isfinite(d) & (d != 0)])
+    entries = np.flatnonzero((col[1:] == value) & (col[:-1] != value))
+    if not moving.size or not entries.size:
+        return False
+    arrival = np.abs(d[entries])
+    return float(np.median(arrival)) > 0.25 * float(np.median(moving))
+
+
+def _moves_between(np, t, col, t0, t1, least):
+    """Does `col` change by more than `least` in the middle of t0..t1?
+
+    Only the middle 80%: feedback lags its setpoint by a few cycles, so the
+    setpoint is already leaving as a rest on the feedback ends.
+    """
+    t0, t1 = t0 + 0.1 * (t1 - t0), t1 - 0.1 * (t1 - t0)
+    inside = col[np.searchsorted(t, t0):np.searchsorted(t, t1, side="right")]
+    inside = inside[np.isfinite(inside)]
+    return bool(inside.size and float(np.max(inside) - np.min(inside)) > least)
 
 
 def _is_command(np, finite_d):
@@ -1557,6 +1606,12 @@ def cmd_events(args):
         command = not (digital or integer or still) and _is_command(np, finite_d)
         if command:
             command_channels.append(name)
+        setpoint = _setpoint_of(rec, channel) if command else None
+        if setpoint:
+            sp_t, sp_col = rec.samples(setpoint)
+            sp_finite = sp_col[np.isfinite(sp_col)]
+            sp_least = args.min_step * float(np.ptp(sp_finite)) if sp_finite.size else 0.0
+        modulo = channel["symbol_name"].lower().endswith("modulo")
         reported = []  # (start, end) of this channel's excursion events
 
         if thresh > 0 and not still:
@@ -1585,7 +1640,11 @@ def cmd_events(args):
                 horizon = min(e + args.spike_width + 1, col.size)
                 back = np.flatnonzero(np.abs(col[e:horizon] - base) <= 0.5 * abs(net))
                 width = e - s
-                if back.size:
+                # A modulo position jumping most of its range at once has
+                # wrapped round - 650 of them were "steps" on one real axis.
+                if modulo and abs(net) > 0.5 * (hi - lo):
+                    kind = "wrap"
+                elif back.size:
                     kind, width = "spike", int(width + back[0])
                     consumed = e + int(back[0])
                 elif digital:
@@ -1600,7 +1659,7 @@ def cmd_events(args):
                 reported.append((s, s + int(width)))
                 found.append(event(
                     kind,
-                    1.0 if kind in ("ramp", "transition") else abs(net) / thresh,
+                    1.0 if kind in DESCRIPTIVE_KINDS else abs(net) / thresh,
                     time=float(t[min(s + 1, t.size - 1)]),
                     index=int(s + 1),
                     delta=net,
@@ -1633,9 +1692,13 @@ def cmd_events(args):
         # as long as the machine needs it. Clipping and flatline describe neither
         # - `transition` already reports every change a digital channel makes.
         if not (digital or integer):
+            # A command's extreme is where it rests, not a rail: SetPos sat at
+            # its minimum 63% of one real recording, beside 655 holds. A clean
+            # signal that saturates hits its limit at speed instead.
             for edge, value in (("max", hi), ("min", lo)):
                 frac = float(np.mean(col[ok] == value))
-                if frac > args.clip_fraction and not still:
+                if (frac > args.clip_fraction and not still
+                        and not (command and not _hits_at_speed(np, col, d, value))):
                     found.append(event("clipping", frac / args.clip_fraction,
                                        edge=edge, value=value, fraction=frac))
 
@@ -1646,11 +1709,16 @@ def cmd_events(args):
             flat_starts, flat_ends = _runs(np, np.abs(d) == 0)
             for s, e in zip(flat_starts.tolist(), flat_ends.tolist()):
                 run = e - s
-                if run >= args.flat_samples:
-                    found.append(event("hold", 1.0, time=float(t[s]), samples=run)
-                                 if command else
-                                 event("flatline", run / args.flat_samples,
-                                       time=float(t[s]), samples=run))
+                if run < args.flat_samples:
+                    continue
+                if command and not (setpoint and _moves_between(
+                        np, sp_t, sp_col, float(t[s]), float(t[e]), sp_least)):
+                    found.append(event("hold", 1.0, time=float(t[s]), samples=run))
+                else:
+                    found.append(event("flatline", run / args.flat_samples,
+                                       time=float(t[s]), samples=run,
+                                       **({"while_moving": setpoint["name"]}
+                                          if command else {})))
 
         if args.threshold is not None:
             # NaN compares False, so a gap would read as "below" and cross
@@ -1676,12 +1744,13 @@ def cmd_events(args):
           "command_channels": command_channels,
           "command_note": (f"These move without noise, as a setpoint does, so a "
                            "move is a `ramp` and standing exactly still is a "
-                           "`hold`, not a `flatline`. A hold on a feedback "
-                           "channel while its command moves is a frozen sensor: "
-                           "compare the two."
+                           "`hold`, not a `flatline`. An NC Act* channel standing "
+                           "still while its axis's Set* channel moves is a frozen "
+                           "sensor, reported as a `flatline` with `while_moving`; "
+                           "with no Set* channel recorded, compare by hand."
                            if command_channels else None),
           "severity": "multiple of each detector's own threshold; ramp, "
-                      "transition, hold and crossing are descriptive, always 1.0",
+                      "transition, hold, wrap and crossing are descriptive, always 1.0",
           "ranking": "defects (spike, step, flatline, clipping) before the "
                      "descriptive kinds; worst first within each tenth of the "
                      "recording, so a truncated answer still spans the whole of it"})
@@ -3605,7 +3674,7 @@ def build_parser():
     q.set_defaults(func=cmd_stats)
 
     q = sub.add_parser("events", help="steps, ramps, spikes, transitions, flatlines, "
-                                      "holds, clipping, crossings")
+                                      "holds, wraps, clipping, crossings")
     q.add_argument("input")
     q.add_argument("--channels", help=select_help)
     q.add_argument("--sigma", type=float, default=6.0,

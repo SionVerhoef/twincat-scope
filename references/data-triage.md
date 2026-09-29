@@ -161,6 +161,7 @@ Detectors, and what each one actually means on a machine:
 | `transition` | A digital channel changed state |
 | `flatline` | A signal that is noisy whenever it moves stopped updating for a sustained run: a frozen sensor, a stalled update |
 | `hold` | A command channel stood exactly still — a setpoint at rest between moves, a velocity setpoint at cruise. Normal, not a fault |
+| `wrap` | A `*Modulo` position jumped most of its range at once: it went round, not a fault |
 | `clipping` | The signal hit a rail; the true value is unknown beyond it |
 | `crossing` | A user-supplied threshold was crossed |
 
@@ -179,14 +180,20 @@ Treated like any other signal, a real axis with 656 moves gave 0 ramps and 655 `
 ranked above the real faults. So a channel whose third difference is under 1% of its first
 while it moves is treated as a **command**, and `command_channels` names each one. On it,
 each run of change covering at least `--min-step` of its travel is one `ramp`, and each exact
-standstill is a `hold`. A noisy signal that freezes is still a `flatline`. Two cautions: a
-feedback channel with a fine encoder and little noise can pass as a command too, so a `hold`
-on a feedback channel while its command moves is a frozen sensor, and worth comparing; and a
-clean command dwelling at the ends of its travel still reports `clipping`.
+standstill is a `hold`. A noisy signal that freezes is still a `flatline`.
+
+A feedback channel can pass as a command too: a simulated axis's `ActPos` is its `SetPos`, and
+a fine encoder may show no noise. So on an NC `Act*` channel (`ActPos`, `ActPosModulo`,
+`ActVelo`, `ActAcc`) a standstill while the same axis's `Set*` channel moves is a `flatline`
+with `while_moving` naming the setpoint: a frozen sensor. When no setpoint of that axis was
+recorded, the tool cannot tell, and the `hold` is worth checking by hand.
+
+A command resting at the end of its travel is not `clipping`: it decelerates into its rest. A
+clean signal that arrives at its extreme still moving has hit a limit, and still reports it.
 
 **Ranking.** When there are more events than `--max-events`, the defect kinds (`spike`, `step`,
 `flatline`, `clipping`) take the slots first and the descriptive ones (`ramp`, `transition`,
-`hold`, `crossing`) fill what is left, each tier spread across the recording worst-first. The
+`hold`, `wrap`, `crossing`) fill what is left, each tier spread across the recording worst-first. The
 summary still counts everything.
 Both names matter — filtering for `step` is how you find the jumps worth explaining, and a
 commanded move is not one of them.
