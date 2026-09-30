@@ -1357,6 +1357,43 @@ def state_rarity_checks(cycles=60, period=300, seed=17):
               str([(e["channel"], e["kind"], e.get("to")) for e in cut]))
 
 
+def theme_auto_checks():
+    """Bead 8ln, field round v1.0.0 Part D: the XAE Shell keeps its colour
+    theme in one HKCU value, '0*System.String*<GUID>' (ColorThemeNew wraps the
+    GUID in braces). --theme auto reads it; anything unreadable is the default.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("tcscope", TCSCOPE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    read = mod.theme_from_registry_value
+    check("the XAE theme value reads as dark, light or unknown",
+          read("0*System.String*1ded0138-47ce-435e-84ef-9ec1f439b749") == "dark"
+          and read("0*System.String*{DE3DBBCD-F642-433C-8353-8F1DF4370ABA}") == "light"
+          and read("0*System.String*a4d6a176-b948-4b29-8c66-53c97a1ed7d0") == "light"
+          and read("0*System.String*00000000-0000-0000-0000-000000000000") is None
+          and read("") is None and read(None) is None,
+          "")
+    tpl = ROOT / "templates" / "axis-diagnosis.tcscopex"
+    if not tpl.exists():
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        auto = run("newscope", tpl, "-o", Path(tmp) / "auto.tcscopex",
+                   "--netid", "1.2.3.4.1.1")
+        # Off Windows nothing can be read; on a workstation XAE may answer.
+        want = {"default", "xae-registry"} if os.name == "nt" else {"default"}
+        check("newscope defaults to --theme auto, and says where the theme came from",
+              auto.get("theme_source") in want
+              and (auto.get("theme") == "dark" if auto.get("theme_source") == "default"
+                   else auto.get("theme") in ("dark", "light")),
+              f"{auto.get('theme')} from {auto.get('theme_source')}")
+        light = run("newscope", tpl, "-o", Path(tmp) / "light.tcscopex",
+                    "--netid", "1.2.3.4.1.1", "--theme", "light")
+        check("a declared --theme wins and is reported as declared",
+              light.get("theme") == "light" and light.get("theme_source") == "declared",
+              f"{light.get('theme')} from {light.get('theme_source')}")
+
+
 def command_turnaround_checks(cycles=6, rest=20, ease=35):
     """Bead mez, field round v1.0.0 Part C: an acceleration setpoint turning
     round just short of zero came back as a `spike`. Its step into the apex
@@ -3099,6 +3136,7 @@ def main():
     recurring_spike_checks()
     sharp_pulse_checks()
     command_turnaround_checks()
+    theme_auto_checks()
     integer_sequence_checks()
     state_rarity_checks()
     declared_integer_checks()

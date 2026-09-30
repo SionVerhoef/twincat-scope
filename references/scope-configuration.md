@@ -151,13 +151,20 @@ dark theme was seen working as a whole, not checked element by element**:
 | `Channel` and its `ChannelStyle` | the trace. Which of the two Scope draws with is not established, so `newscope` writes both |
 
 Real projects carry an `AxisStyle` on **every** axis, time and value alike, and `checkscope`
-warns about an axis without one. `newscope --theme dark` (default)
+warns about an axis without one. `newscope --theme dark`
 writes a `#252526` background with `#F1F1F1` axis text — the values a real dark-styled project
 uses — and `--theme light` a near-white one. The trace palette is stepped per background and
 checked for contrast against it; its first four are also checked for colour-blind separation
 between every pair, because every trace in a band shares one axis. With five or more in a band
-some pairs are close, and the channel name is what separates them. Dark is the default
-because a light chart in a dark IDE glares, while a dark chart reads well in both IDE themes.
+some pairs are close, and the channel name is what separates them.
+
+The default, `--theme auto`, follows the TwinCAT XAE Shell: it reads `ColorTheme` under
+`HKCU\Software\Beckhoff\TcXaeShell\<version>\ApplicationPrivateSettings\Microsoft\VisualStudio`
+(`0*System.String*<GUID>`), which changes the moment the IDE's theme does — Dark gives `dark`,
+Light and Blue give `light`. The IDE's `.vssettings` file is not used: it lags until the IDE
+exits. Where the value cannot be read — TwinCAT inside a full Visual Studio, a custom theme,
+another OS — it falls back to `dark`, because a light chart in a dark IDE glares while a dark
+chart reads well in both. `theme_source` says which happened. Found on TcXaeShell 15.0.
 
 ## `AdsAcquisition` fields that matter
 

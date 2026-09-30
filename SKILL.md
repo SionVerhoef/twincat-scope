@@ -132,8 +132,9 @@ at most eight traces per band, flags on 0/1 — because everything sharing an ax
 auto-scaled range, and a following error of microns disappears under a position of a metre.
 It prints the layout it chose: check it before handing the file over. `--layout flat` is for
 channels that genuinely share a scale, and a layout is changed by regenerating, not by
-editing the XML. Colours are written absolutely (`--theme dark` default, or `light`); a
-dark-styled file read well with the IDE in both themes. `references/scope-configuration.md`.
+editing the XML. Colours are written absolutely: `--theme auto` (default) follows the TwinCAT
+XAE Shell's theme where it can read it, else `dark`, which read well with the IDE in both
+themes; `--theme dark|light` forces one. `references/scope-configuration.md`.
 
 **Always `checkscope` before handing a file over.** It catches the failures that look like
 success — a display channel wired to nothing opens perfectly and plots an empty chart, a
