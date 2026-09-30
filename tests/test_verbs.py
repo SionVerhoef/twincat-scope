@@ -2221,6 +2221,19 @@ def layout_checks():
         check("newscope gives each device its own chart tab",
               titles == ["fbAxis1", "fbAxis2", "Axes[3]"], str(titles))
 
+        # Field review 74dd86d §2: Axes.axis1.ToPlc.AxisState got a tab of its
+        # own called "ToPlc" - the NC's struct name taken for the device.
+        nc = run("newscope", tpl, "-o", Path(tmp) / "nc.tcscopex", "--netid", "1.2.3.4.1.1",
+                 "--channels", "Axes.axis1.ActPos,Axes.axis1.ToPlc.AxisState,"
+                 "Axes.axis1.FromPlc.ControlDWord,Axes.axis2.ActPos,Axes.axis2.ToPlc.AxisState")
+        nc_tabs = {c["chart"]: sorted(ch for b in c["bands"] for ch in b["channels"])
+                   for c in nc.get("charts") or []}
+        check("an NC axis's ToPlc and FromPlc members share the axis's own tab",
+              nc_tabs == {"axis1": ["Axes.axis1.ActPos", "Axes.axis1.FromPlc.ControlDWord",
+                                    "Axes.axis1.ToPlc.AxisState"],
+                          "axis2": ["Axes.axis2.ActPos", "Axes.axis2.ToPlc.AxisState"]},
+              str(nc_tabs))
+
         bands = {c["chart"]: [b["band"] for b in c["bands"]] for c in charts}
         check("bands are stacked in reading order, position first",
               bands.get("fbAxis1") == ["Position", "Following error",
