@@ -22,6 +22,9 @@
 
 ### Fixed
 
+- `events`: a following error decaying after the axis arrives is no longer a `standing` one. On
+  a real axis parked at a software limit, the loop's 2.3 s settling tail was reported; a run whose
+  last quarter is at half its first quarter or less is now left out (`evals/field-review-74dd86d.md`, §3).
 - `events`: a real channel with 16 or fewer distinct values no longer reports `clipping`; a
   filtered rate sitting at two of its six values had taken two capped slots.
 

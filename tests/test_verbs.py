@@ -10,6 +10,7 @@ Usage:  uv run tests/test_verbs.py
 """
 
 import json
+import math
 import os
 import re
 import shutil
@@ -1419,13 +1420,15 @@ def few_value_checks(rows=6000):
                    if e["kind"] == "clipping"]))
 
 
-def write_axis_export(path, blocked, seed=19):
+def write_axis_export(path, blocked, seed=19, settling=False):
     """SetPos rests, cruises to 100 over 3 s, and rests again for 10 s.
 
     PosDiff lags in proportion to the velocity, 0.5 at cruise - a steady
     following error for three seconds that is normal. Healthy, it settles to
     noise when the setpoint stops. Blocked on an end stop, the axis stays 10
-    short and PosDiff stands at 10 for the whole rest.
+    short and PosDiff stands at 10 for the whole rest. Settling, the loop
+    catches up over a few seconds instead: PosDiff starts the rest at 0.4 and
+    decays with a 1.1 s time constant, above a tenth of its peak for ~2.3 s.
     """
     import random
     rng = random.Random(seed)
@@ -1440,6 +1443,8 @@ def write_axis_export(path, blocked, seed=19):
         if blocked and i >= stop:
             # It builds up as the axis presses into the stop, as on the real one.
             lag = 10.0 * min(1.0, (i - stop) / 300)
+        if settling and i >= stop:
+            lag = 0.4 * math.exp(-(i - stop) / 1100)
         rows.append(f"{i:.1f},{pos:.6f},{lag + rng.gauss(0, 0.001):.6f}")
     path.write_text("\n".join(["TwinCAT Scope Export", "", "Name,SetPos,PosDiff"] + rows)
                     + "\n", encoding="utf-8", newline="")
@@ -1460,6 +1465,12 @@ def standing_error_checks():
         check("a steady lag while the setpoint moves is not a standing following error",
               not [e for e in ok if e["kind"] == "standing"],
               str([(e["time"], e.get("samples")) for e in ok if e["kind"] == "standing"]))
+        settle = Path(tmp) / "settling.csv"
+        write_axis_export(settle, blocked=False, settling=True)
+        tail = [e for e in run("events", settle, "--max-events", 1000).get("events", [])
+                if e["kind"] == "standing"]
+        check("a following error decaying after arrival is settling, not standing",
+              not tail, str([(e["time"], e.get("samples")) for e in tail]))
         got = run("events", blocked, "--max-events", 1000)
         stood = [e for e in got.get("events", []) if e["kind"] == "standing"]
         check("a following error that stays while the setpoint rests is reported",
