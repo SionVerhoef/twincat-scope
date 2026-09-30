@@ -40,15 +40,25 @@ Write-Host "Looking up $Version release of $Repo..."
 try {
     $release = Invoke-RestMethod -Uri $uri -Headers @{ "User-Agent" = "update-skill" }
 } catch {
-    Write-Error @"
+    # Write-Error under ErrorActionPreference Stop would throw before `exit 1`,
+    # and PowerShell 7 wraps its text in a source-line frame; print plainly.
+    $status = $null
+    if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+    if ($status -eq 404) {
+        $Host.UI.WriteErrorLine(@"
+No release '$Version' in $Repo (GitHub answered 404).
+Check the tag name against https://github.com/$Repo/releases - tags start with 'v', as in v1.0.0.
+If the repository has no releases yet, use the git submodule install from README.md instead.
+"@)
+    } else {
+        $Host.UI.WriteErrorLine(@"
 Could not reach the GitHub API: $($_.Exception.Message)
 
 Behind a corporate proxy you may need:
     [System.Net.WebRequest]::DefaultWebProxy.Credentials = [System.Net.CredentialCache]::DefaultCredentials
-
-If the repository has no releases yet, this script has nothing to download -
-use the git submodule install from README.md instead.
-"@
+"@)
+    }
+    Write-Host "Nothing was changed in $Target."
     exit 1
 }
 

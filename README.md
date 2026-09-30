@@ -109,7 +109,14 @@ afterwards needs `git clone --recurse-submodules <your-repo>`, or `git submodule
 in an existing clone.
 
 If your team would rather not use submodules, `tools/update-skill.ps1` downloads a release zip
-into the same location instead (`-Version v1.0.0`, or the latest release by default).
+instead (`-Version v1.0.0`, or the latest release by default). Its default target is the
+Copilot folder, so for Claude Code pass `-Target .claude\skills\twincat-scope`. A copy of the
+script saved from a browser is blocked by the usual `RemoteSigned` policy until you unblock it:
+
+```powershell
+Unblock-File .\update-skill.ps1
+.\update-skill.ps1 -Target .claude\skills\twincat-scope
+```
 
 ### Requirements
 

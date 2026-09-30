@@ -10,6 +10,14 @@
   at 0 at least 90% of the time). Rare but normal state pairs had taken 14 of 20 capped slots
   on a real recording (`evals/field-review-333b6c6.md`).
 
+### Fixed
+
+- `tools/update-skill.ps1`: a `-Version` that does not exist says so (GitHub's 404) instead of
+  "Could not reach the GitHub API" with proxy advice. Every failure prints plainly, says nothing
+  was changed, and exits 1 (`evals/field-review-v1.0.0.md`).
+- README: the zip install defaults to the Copilot folder, so Claude Code needs `-Target
+  .claude\skills\twincat-scope`; a copy of the script saved from a browser needs `Unblock-File`.
+
 ## 1.0.0 — 2026-09-29
 
 First public release. The development history before it is in git and in `evals/`.
