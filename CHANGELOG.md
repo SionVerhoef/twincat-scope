@@ -7,6 +7,10 @@
 - `newscope --theme auto`, now the default: follows the TwinCAT XAE Shell's colour theme, read
   from one `HKCU` registry value (Dark → `dark`, Light/Blue → `light`), else `dark`. The output
   reports `theme_source` (`evals/field-review-v1.0.0.md`, Part D).
+- `events` reports a `standing` following error: `PosDiff` staying beyond 10% of its largest
+  value for at least 1 s while the axis's `SetPos` rests. On a real axis driven onto an end
+  stop it stood a tenth of the stroke short for 27 s and was reported only as two ramps
+  (`evals/field-review-v1.0.0.md`, B1b).
 
 ### Changed
 
@@ -17,6 +21,9 @@
   on a real recording (`evals/field-review-333b6c6.md`).
 
 ### Fixed
+
+- `events`: a real channel with 16 or fewer distinct values no longer reports `clipping`; a
+  filtered rate sitting at two of its six values had taken two capped slots.
 
 - The sample-time rule no longer claims more than was measured. `SKILL.md`,
   `references/scope-configuration.md` and `newscope`'s note said Scope "snaps" a sample time to

@@ -21,7 +21,7 @@ Subcommands, analysis side (needs numpy; run under `uv run`):
   manifest    Channels, units, sample rate, duration, gaps
   stats       Per-channel distribution and health numbers
   events      Steps, ramps, spikes, transitions, flatlines, holds, wraps, clipping,
-              threshold crossings
+              standing following errors, threshold crossings
   plot        PNG using a min/max envelope, so transients survive
   window      Real rows, for a narrow time range only
   correlate   Cross-channel correlation and lag
@@ -1552,6 +1552,33 @@ def _setpoint_of(rec, channel):
     return None
 
 
+# A following error that stays beyond this share of its own largest value, for
+# at least STANDING_SECONDS while its axis's setpoint rests, is `standing`: the
+# axis is not getting where it was sent. On one real axis driven onto an end
+# stop it stood a tenth of the stroke short for 27 s, and `events` said only
+# "2 ramps". Kept apart from _setpoint_of: a simulated axis's PosDiff is
+# exactly 0, and pairing it there would turn its rests into frozen sensors.
+_FOLLOWING_ERROR_LEAF = re.compile(r"PosDiff$", re.IGNORECASE)
+STANDING_FRACTION = 0.1
+STANDING_SECONDS = 1.0
+
+# A real channel that takes no more than this many distinct values sits at them;
+# it is not cut off at a rail, which leaves a continuous signal with thousands.
+FEW_VALUES = 16
+
+
+def _position_setpoint_of(rec, channel):
+    """The recorded SetPos of the same axis as this PosDiff, or None."""
+    symbol = channel["symbol_name"]
+    match = _FOLLOWING_ERROR_LEAF.search(symbol)
+    if not match:
+        return None
+    want = (symbol[:match.start()] + "SetPos").lower()
+    hits = [ch for ch in rec.channels if ch["symbol_name"].lower() == want]
+    hits.sort(key=lambda ch: ch.get("group") != channel.get("group"))
+    return hits[0] if hits else None
+
+
 def _hits_at_speed(np, col, d, value):
     """Does a clean signal reach `value` still moving, as a saturated one does?
 
@@ -1796,9 +1823,12 @@ def cmd_events(args):
             # position has no rail at all: its ends are where it wraps, and an
             # indexing axis wraps onto its minimum at full speed and rests there
             # - 56% of one real recording, reported as clipping.
+            # A filtered rate with six values, two of them 98.7% of the time,
+            # clipped at both on one real recording: few values are not a rail.
+            few = np.unique(finite).size <= FEW_VALUES
             for edge, value in (("max", hi), ("min", lo)):
                 frac = float(np.mean(col[ok] == value))
-                if (frac > args.clip_fraction and not still and not modulo
+                if (frac > args.clip_fraction and not still and not modulo and not few
                         and not (command and not _hits_at_speed(np, col, d, value))):
                     found.append(event("clipping", frac / args.clip_fraction,
                                        edge=edge, value=value, fraction=frac))
@@ -1820,6 +1850,25 @@ def cmd_events(args):
                                        time=float(t[s]), samples=run,
                                        **({"while_moving": setpoint["name"]}
                                           if command else {})))
+
+        # A following error standing away from zero while its setpoint rests.
+        # A steady lag during a long move is normal and is excluded, because
+        # the setpoint is moving then.
+        position = None if (digital or integer) else _position_setpoint_of(rec, channel)
+        if position is not None and t.size > 1:
+            pt, pcol = rec.samples(position)
+            at = pcol[np.clip(np.searchsorted(pt, t, side="right") - 1, 0, pcol.size - 1)]
+            resting = np.concatenate(([False], np.diff(at) == 0))
+            peak = float(np.max(np.abs(finite)))
+            far = ok & (np.abs(np.where(ok, col, 0.0)) >= STANDING_FRACTION * peak)
+            least_samples = max(args.flat_samples,
+                                int(round(STANDING_SECONDS / float(np.median(np.diff(t))))))
+            for s, e in zip(*(r.tolist() for r in _runs(np, resting & far))):
+                if peak and e - s >= least_samples:
+                    found.append(event("standing", (e - s) / least_samples, time=float(t[s]),
+                                       samples=int(e - s),
+                                       value=float(np.median(col[s:e])),
+                                       setpoint=position["name"]))
 
         if args.threshold is not None:
             # NaN compares False, so a gap would read as "below" and cross
@@ -1853,7 +1902,7 @@ def cmd_events(args):
                            if command_channels else None),
           "severity": "multiple of each detector's own threshold; ramp, "
                       "transition, hold, wrap and crossing are descriptive, always 1.0",
-          "ranking": "defects (spike, step, flatline, clipping) before the "
+          "ranking": "defects (spike, step, flatline, clipping, standing) before the "
                      "descriptive kinds, and among defects a one-off before a "
                      f"`recurring` one (one of {RECURRING_MIN}+ alike on its "
                      "channel); worst first within each tenth of the recording, "
@@ -3944,7 +3993,7 @@ def build_parser():
     q.set_defaults(func=cmd_stats)
 
     q = sub.add_parser("events", help="steps, ramps, spikes, transitions, flatlines, "
-                                      "holds, wraps, clipping, crossings")
+                                      "holds, wraps, clipping, standing, crossings")
     q.add_argument("input")
     q.add_argument("--channels", help=select_help)
     q.add_argument("--sigma", type=float, default=6.0,
