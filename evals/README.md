@@ -47,8 +47,9 @@ Each eval below is built around a specific wrong answer that is easy to reach an
 | Eval | The trap |
 |---|---|
 | `broken-cross-group` | Read as one table, the export says torque spiked *before* the following error. Its own clock says *after*. Neither is defensible — the export is broken. The naive read inverts cause and effect. |
-| `overnight-ring-buffer` | A `.svdx` left running all night on the jam sensor and stopped at 07:40. Its `StopMode` is `ClientStop` — Scope View's *Ringbuffer* — so it kept only the last 600 s before the stop, and its trigger is *Set Mark*, which stopped nothing. "ClientStop" reads as "recorded until you stopped it"; the 03:12 jam was overwritten hours before. |
-| `second-site-config` | A hand-written `.tcscopex` for "everything every 1 ms": `BaseSampleTime` 1 on every channel (100 ns — 1 ms is 10000) and the PLC channels on 801, TwinCAT 2's PLC port. The NC channels on 501 are right. |
+| `export-batch-script` | A scheduled `TC3ScopeExportTool.exe` call, every parameter spelled as the tool's list spells it. No `silent`, so it opens a window and waits; `channellist=` split by `,`, which is ignored — every channel exported; `start=`/`end=` in milliseconds, which are ignored — full range. The last two exit 0, so the script logs "export OK" every morning. |
+| `scaled-export` | A hand-made CSV whose torque channel carries ScaleFactor 2 and Offset 10, asked "did it pass 150 %?". Read as it stands, 79 %; scaled, 168 %. The header is the same whether *Scale values before export* was on, so the file cannot say — and each confident answer is wrong half the time. |
+| `tc2-port-config` | A hand-written `.tcscopex` with the PLC channels on 801, TwinCAT 2's PLC port. The NC channels on 501 and the 1 ms sample time are right, so only one thing is wrong and it looks right to anyone who learned the ports from older documentation. |
 | `hand-written-config` | A hand-written `.tcscopex` with the NC axis channels on 851 and typed `LREAL`. Both look right to anyone who knows the PLC side — 851 is the PLC's port, `LREAL` its type — and neither records: NC symbols live on 501, and Scope reads `LREAL` as VOID. |
 | `needle-in-the-haystack` | The glitch is 3 samples in 20,000, among uneven moves, dwells, drift and friction that look like events too. Kept as a cheap regression check, not as a discriminator. |
 | `out-of-scope-authoring` | The diagnosis is done and the fix is obviously a few lines of ST. Writing it is the natural next move and the wrong one — and declining on the merits while offering to write it anyway is not declining. |
@@ -62,12 +63,12 @@ python3 evals/make_eval_fixture.py           # writes evals/fixtures/
 ```
 
 For the live evals it writes `clamp_station_export.csv`, `axis1_run_20260722.csv`,
-`filler_overnight.svdx`, `Commissioning_Axis1.tcscopex` and `Line2_Clamp_Scope.tcscopex`, and then
-`stages/<eval>/data/` holding each eval's own files — nothing else. The three Scope files are built
-from this skill's own `newscope` output with the trap written in, so they are as well-formed as the
-generator — only the trap is wrong. The `.svdx` sample bytes are random, sized like ten minutes of
-its four channels: the answer is in the project at its tail, and without `TC3ScopeExportTool.exe`
-nobody can read samples anyway. `--scale` still writes the retired 127 MB fixture.
+`Commissioning_Axis1.tcscopex`, `Line2_Clamp_Scope.tcscopex`, `nightly_export.cmd` and
+`press_axis3_export.csv`, and then `stages/<eval>/data/` holding each eval's own files — nothing
+else. The two Scope files are built from this skill's own `newscope` output with the trap written
+in, so they are as well-formed as the generator — only the trap is wrong; the scaled CSV comes from
+the same dialect writer as the tests. It still writes the retired `filler_overnight.svdx`, and
+`--scale` the retired 127 MB fixture.
 
 Regenerable and gitignored, like every other fixture in this repo. Ground truth is written to
 `evals/ground_truth.json` — one directory *up* from the data, never beside it.
@@ -114,7 +115,7 @@ measure contention rather than the arm.
 **4. Grade.**
 
 ```bash
-python3 evals/grade.py evals/runs/iteration-4
+python3 evals/grade.py evals/runs/iteration-6
 ```
 
 Scores are means over the runs in a cell, and the mean tokens and seconds per arm are printed
@@ -187,6 +188,17 @@ and will eventually be wrong about something.
 Read the answers. The score is a summary of the reading, not a substitute for it.
 
 ## History: retired evals
+
+**Retired in iteration 6**: `overnight-ring-buffer` and `second-site-config`. Both could be
+decoded from the file itself. Every baseline sized the `.svdx` sample block (12 MB at 19 bytes a
+sample is ten minutes) and read `RecordTime` as 600 s; a real ring buffer's file leaks the same
+way, so the fixture cannot be hardened without making it less real. `BaseSampleTime` 1 read as
+100 ns once `RecordTime` 600000000 read as 60 s in the same ticks. Its port half separated the
+arms and continues as `tc2-port-config`. The two new evals are built the other way round: the
+answer is how `TC3ScopeExportTool.exe` treats its arguments, or that a CSV header is the same
+whether Scope scaled the values — facts no field of the file states. `needle-in-the-haystack`
+now accepts either first-ranked defect with a reason that holds: in iteration 5 all six runs put
+the 6.0 s step first, and they were right to.
 
 **Retired in iteration 5**: `armed-but-not-recording`. Its baselines found the XML at the end of
 the `.svdx` and read `TriggerAction NONE`, a 60 s `RecordTime` and `AutoStop`, which say "stops

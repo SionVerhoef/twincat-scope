@@ -45,6 +45,21 @@ Written here:
   Commissioning_Axis1.tcscopex   A hand-written project with the NC axis
                       channels on port 851 and typed LREAL.
 
+  Line2_Clamp_Scope.tcscopex A hand-written project with the PLC channels on
+                      801, TwinCAT 2's PLC port. Since iteration 6 the sample
+                      time is right: iteration 5 wrote 1 for 1 ms, and baselines
+                      decoded it from RecordTime in the same file.
+
+  nightly_export.cmd         A batch file that runs TC3ScopeExportTool.exe every
+                      morning: no `silent`, channellist= separated by ',' and
+                      start=/end= in milliseconds. The tool answers all three
+                      with exit 0, and none of them is visible in the file.
+
+  press_axis3_export.csv     A Scope View export by hand whose torque channel
+                      carries ScaleFactor 2 and Offset 10. The header is the
+                      same whether 'Scale values before export' was on or off,
+                      and the two readings straddle the 150 % in the question.
+
   AxisDiagnosis.tcscopex     A scope project whose display channel reaches for
                       an AcquisitionGUID that no acquisition node carries. It
                       opens perfectly in Scope View and records nothing. The
@@ -576,30 +591,161 @@ SECOND_SITE_CHANNELS = ("Axes.Axis2.ActPos,Axes.Axis2.PosDiff,"
 
 
 def write_second_site(out):
-    """A second hand-written config: 1 ms meant, 100 ns written, and a TC2 port.
+    """A hand-written config whose PLC channels are on a TwinCAT 2 port.
 
-    BaseSampleTime is in 100 ns ticks - 10000 is 1 ms, as every real file shows -
-    and someone asked for "everything every 1 ms" writes 1. And 801 is where the
-    PLC runtime answered in TwinCAT 2; a TwinCAT 3 PLC starts at 851, so the
-    PLC channels find nothing. Both look right to anyone who knows the PLC side
-    or older documentation. The NC channels on 501 are correct, so the file is
-    not uniformly wrong.
+    801 is where the PLC runtime answered in TwinCAT 2; a TwinCAT 3 PLC starts
+    at 851, so the PLC channels find nothing. It looks right to anyone who
+    learned the ports from older documentation. The NC channels on 501 are
+    correct, so the file is not uniformly wrong.
+
+    Iteration 5 also wrote BaseSampleTime 1 (100 ns, meant as 1 ms). Baselines
+    decoded it from RecordTime, which the same file writes in the same ticks,
+    so that half measured nothing and is gone.
     """
     src = generated_project(out / SECOND_SITE, SECOND_SITE_CHANNELS)
-    if src.count("<BaseSampleTime>10000</BaseSampleTime>") != 4:
-        raise SystemExit("expected four channels at 1 ms to rewrite")
-    src = src.replace("<BaseSampleTime>10000</BaseSampleTime>",
-                      "<BaseSampleTime>1</BaseSampleTime>")
+    if src.count("<TargetPort>851</TargetPort>") != 2:
+        raise SystemExit("expected two PLC channels on 851 to rewrite")
     src = src.replace("<TargetPort>851</TargetPort>", "<TargetPort>801</TargetPort>")
     (out / SECOND_SITE).write_text(src, encoding="utf-8-sig")
     return {
-        "why": "BaseSampleTime 1 on all four channels is 100 ns, not 1 ms (1 ms is "
-               "10000); the two PLC channels are on 801, a TwinCAT 2 port - TC3 PLC "
-               "runtimes start at 851; the NC channels on 501 are correct",
-        "defects": {"sample_time": {"channels": 4, "written": 1, "correct": 10000},
-                    "port": {"channels": 2, "written": 801, "correct": 851}},
-        "the_trap": "the user asked for 1 ms and the file says 1; 801 is the PLC port in "
-                    "TwinCAT 2 documentation",
+        "why": "the two PLC channels are on 801, a TwinCAT 2 port - TC3 PLC runtimes "
+               "start at 851; the NC channels on 501 and the 1 ms sample time "
+               "(BaseSampleTime 10000) are correct",
+        "defects": {"port": {"channels": 2, "written": 801, "correct": 851}},
+        "the_trap": "801 is the PLC port in TwinCAT 2 documentation, and nothing else in "
+                    "the file is wrong",
+    }
+
+
+EXPORT_SCRIPT = "nightly_export.cmd"
+# Every line of it is something a careful engineer writes after reading the
+# tool's parameter list. Paths hold no spaces, so the one generic mistake a
+# reviewer would catch without knowing the tool is not there to catch.
+EXPORT_SCRIPT_TEXT = r"""@echo off
+rem Every morning at 07:00 (Task Scheduler, scope PC): export the jam window
+rem from last night's filler recording for the analysis PC.
+rem The recording starts at 00:00, so 03:00-03:10 is 10800000-11400000 ms in.
+
+set EXPORT=C:\TwinCAT\Functions\TF3300-Scope-Server\TC3ScopeExportTool.exe
+set REC=D:\ScopeData\filler_night.svdx
+set OUT=D:\Exports\filler_0300_0310.csv
+
+"%EXPORT%" svd=%REC% target=%OUT% channellist=ActPos,ActTorque,bJamSensor start=10800000 end=11400000
+
+if errorlevel 1 (
+    echo %date% %time% export FAILED >> D:\Exports\export.log
+) else (
+    echo %date% %time% export OK >> D:\Exports\export.log
+)
+"""
+
+
+def write_export_script(out):
+    """A scheduled export that runs, exits 0 and does none of what was meant.
+
+    Three things TC3ScopeExportTool.exe does, each verified against the real
+    tool (references/export-tool.md): without `silent` it opens a window and
+    waits, so a scheduled task never finishes; channellist= separates names
+    with ';', and ',' is ignored - every channel is exported; start= and end=
+    are absolute FILETIME ticks (UTC, 100 ns since 1601), and milliseconds are
+    ignored - the full range is exported. The last two exit 0, so the
+    errorlevel check logs 'export OK' every morning.
+    """
+    (out / EXPORT_SCRIPT).write_text(EXPORT_SCRIPT_TEXT.replace("\n", "\r\n"),
+                                     encoding="utf-8", newline="")
+    return {
+        "why": "no `silent`: the tool opens its window and waits; channellist= needs ';' "
+               "and ignores ','; start=/end= need absolute FILETIME ticks and ignore "
+               "milliseconds; the ignored options exit 0, so errorlevel logs OK",
+        "defects": {"silent": "missing - the tool waits on its window",
+                    "channellist": {"written": ",", "correct": ";",
+                                    "effect": "ignored, every channel exported"},
+                    "range": {"written": "ms from the start of the recording",
+                              "correct": "absolute FILETIME ticks, as the CSV header's "
+                                         "Starttime of export",
+                              "effect": "ignored, full range exported"},
+                    "errorlevel": "exit 0 in both ignored cases; only the output shows it"},
+        "the_trap": "every parameter is spelled as the tool's parameter list spells it; "
+                    "the three failures are silent and none is visible in the file",
+    }
+
+
+PRESS = "press_axis3_export.csv"
+PRESS_SIGNALS = ("ActVelo", "ActTorque", "PosDiff")
+PRESS_SCALE = (2.0, 10.0)        # factor, offset on ActTorque - as field-verified
+PRESS_PEAK = 79.0                # peak in the file: 79 read as is, 168 scaled
+
+
+def write_press_export(out):
+    """A hand-made export whose torque answer depends on an export setting.
+
+    Scope applies a channel's scaling to exported values only when 'Scale
+    values before export' is on, and the CSV header is identical either way -
+    the ScaleFactor and Offset rows are the channel's scaling, not a record of
+    whether it was applied (field-verified with factor 2 and offset 10). So
+    ActTorque peaking at 79 reads as 79 % if the values were scaled, or
+    2 x 79 + 10 = 168 % if they are raw, and the question is whether it passed
+    150 %. The file cannot settle it; the export setting or a fresh export of
+    the .svdx can.
+    """
+    rate, seconds = 1000, 10
+    rng = random.Random(20260904)
+    setpos, vel, acc = point_to_point(rng, seconds, rate)
+    peak_acc = max(abs(a) for a in acc)
+    # One hard acceleration, as the drive's warning describes.
+    hard = max(range(len(acc)), key=lambda i: acc[i])
+    rows = len(setpos)
+    columns = [[f"{i * 1000.0 / rate:.6f}" for i in range(rows)]] + [[] for _ in PRESS_SIGNALS]
+    raw_torque = []
+    for i in range(rows):
+        friction = 4.0 * (1 if vel[i] > 0.5 else -1 if vel[i] < -0.5 else 0)
+        torque = 18.0 + friction + 30.0 * acc[i] / peak_acc + rng.gauss(0, 0.6)
+        if abs(i - hard) < 60:
+            torque += 26.0 * math.exp(-((i - hard) / 25.0) ** 2)
+        raw_torque.append(torque)
+        lag = 0.00012 * acc[i] + 0.0004 * vel[i] + rng.gauss(0, 0.002)
+        for col, value in zip(columns[1:], (vel[i] + rng.gauss(0, 0.08), torque, lag)):
+            col.append(f"{value:.6f}")
+    peak = max(raw_torque)
+    if not PRESS_PEAK - 3 < peak < PRESS_PEAK + 3:
+        raise SystemExit(f"torque peak {peak:.1f} is not near {PRESS_PEAK}")
+
+    groups = [spec(len(PRESS_SIGNALS), 1, 1, port=501)]
+    symbols = [[f"Axes.Axis3.{s}" for s in PRESS_SIGNALS]]
+    path = out / PRESS
+    write_tab(path, groups, columns, [], rows, symbols=symbols)
+    # The shared writer types channels by position and stamps unscaled rows;
+    # this file is three REAL64 channels, and ActTorque carries the scaling.
+    with open(path, encoding="utf-8", newline="") as f:
+        lines = f.read().split("\r\n")
+    torque_col = 1 + PRESS_SIGNALS.index("ActTorque")
+    for n, line in enumerate(lines):
+        cells = line.split("\t")
+        if cells[0] == "Data-Type":
+            cells[1:] = ["REAL64"] * len(PRESS_SIGNALS)
+        elif cells[0] == "SymbolComment":
+            cells[1:] = [""] * len(PRESS_SIGNALS)
+        elif cells[0] == "ScaleFactor":
+            cells[torque_col] = f"{PRESS_SCALE[0]:.6f}".replace(".", ",")
+        elif cells[0] == "Offset":
+            cells[torque_col] = f"{PRESS_SCALE[1]:g}"
+        elif cells[0] == "EndTime" and len(cells) == 2:
+            cells[1] = "22-7-2026 09:14:13"
+        lines[n] = "\t".join(cells)
+    path.write_text("\r\n".join(lines), encoding="utf-8", newline="")
+    scaled = PRESS_SCALE[0] * peak + PRESS_SCALE[1]
+    return {
+        "rows": rows, "rate_hz": rate, "duration_s": seconds,
+        "channel": "ActTorque", "scale_factor": PRESS_SCALE[0], "offset": PRESS_SCALE[1],
+        "peak_in_file": round(peak, 1), "peak_time_s": round(hard / rate, 3),
+        "peak_if_raw": round(scaled, 1),
+        "why": "the header's ScaleFactor/Offset rows are written whether or not 'Scale "
+               "values before export' was on, so the file cannot say whether "
+               f"{peak:.1f} is already scaled ({peak:.1f} %) or raw "
+               f"({scaled:.1f} % once scaled)",
+        "the_trap": "a ScaleFactor row reads as 'multiply to get engineering units', or "
+                    "the column is read as it stands - either way one number, and the two "
+                    "straddle 150 %",
     }
 
 
@@ -645,6 +791,8 @@ def main():
     handwritten = write_handwritten(out)
     armed = write_ring_buffer(out)
     second_site = write_second_site(out)
+    export_script = write_export_script(out)
+    press = write_press_export(out)
     scaled = write_scaled(out, args.scale_rows) if args.scale else None
 
     truth = {
@@ -680,6 +828,8 @@ def main():
         HANDWRITTEN: handwritten,
         ARMED: armed,
         SECOND_SITE: second_site,
+        EXPORT_SCRIPT: export_script,
+        PRESS: press,
     }
     if scaled is not None:
         truth[SCALED] = scaled
