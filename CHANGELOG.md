@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- `events`: on an integer state channel, a change between states the channel visits anyway is
+  a `transition`, descriptive, instead of a `step`. A jump into a state entered only once (an
+  abort, a fault state) stays a `step`, and so does every change on an error code (a channel
+  at 0 at least 90% of the time). Rare but normal state pairs had taken 14 of 20 capped slots
+  on a real recording (`evals/field-review-333b6c6.md`).
+
 ## 1.0.0 — 2026-09-29
 
 First public release. The development history before it is in git and in `evals/`.
