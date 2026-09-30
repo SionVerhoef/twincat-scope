@@ -1517,6 +1517,9 @@ def _is_still(np, finite, finite_d):
 # A measured signal is noisy whenever it moves: 0.2 and up.
 COMMAND_ROUGHNESS = 0.01
 COMMAND_MIN_MOVING = 20
+# On a command, a "spike" whose first step is at most this multiple of the step
+# before it, in the same direction, is the command continuing - a turnaround.
+COMMAND_TURN_RATIO = 2.0
 
 # What a detector reports about a signal behaving normally, rather than a
 # defect. They are returned only once the defects have their slots.
@@ -1740,6 +1743,14 @@ def cmd_events(args):
                     kind = "ramp"
                 else:
                     kind = "step"
+                # A setpoint turning round at its own rate is not a spike: an
+                # acceleration command reversing just short of zero stepped
+                # into its apex at 1.04x the step before. A real spike jumps
+                # out of whatever came before it. The ramps either side, not
+                # this, describe the turn.
+                if (command and kind == "spike" and s > 0 and d[s - 1] * d[s] > 0
+                        and abs(d[s]) <= COMMAND_TURN_RATIO * abs(d[s - 1])):
+                    continue
                 reported.append((s, s + int(width)))
                 found.append(event(
                     kind,
@@ -2696,6 +2707,53 @@ THEMES = {
                          0xFF1BAF7A, 0xFFEB6834, 0xFF4A3AA7, 0xFFE34948)},
 }
 DEFAULT_THEME = "dark"
+
+# `--theme auto` follows the TwinCAT XAE Shell. It keeps its colour theme in
+# HKCU\Software\Beckhoff\TcXaeShell\<version>\ApplicationPrivateSettings\
+# Microsoft\VisualStudio, value ColorTheme, as '0*System.String*<GUID>' - the
+# one place that changed the moment the theme did (field round v1.0.0, on
+# TcXaeShell 15.0; its .vssettings file lags until the IDE exits). The GUIDs
+# are Visual Studio's own; Blue has a light background. TwinCAT inside a full
+# Visual Studio, and a custom theme, fall back to DEFAULT_THEME.
+IDE_THEME_GUIDS = {
+    "1ded0138-47ce-435e-84ef-9ec1f439b749": "dark",
+    "de3dbbcd-f642-433c-8353-8f1df4370aba": "light",
+    "a4d6a176-b948-4b29-8c66-53c97a1ed7d0": "light",
+}
+XAE_SHELL_KEY = r"Software\Beckhoff\TcXaeShell"
+XAE_THEME_KEY = r"ApplicationPrivateSettings\Microsoft\VisualStudio"
+
+
+def theme_from_registry_value(value):
+    """'0*System.String*<guid>' or '…{<guid>}' -> 'dark' or 'light', else None."""
+    guid = str(value or "").rsplit("*", 1)[-1].strip().strip("{}").lower()
+    return IDE_THEME_GUIDS.get(guid)
+
+
+def xae_theme():
+    """The XAE Shell's current colour theme, or None where it cannot be read."""
+    try:
+        import winreg
+    except ImportError:
+        return None
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, XAE_SHELL_KEY) as shell:
+            versions = [winreg.EnumKey(shell, i)
+                        for i in range(winreg.QueryInfoKey(shell)[0])]
+    except OSError:
+        return None
+    # Newest version first; the _Config twin has no theme and is skipped.
+    for version in sorted(versions, reverse=True):
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                rf"{XAE_SHELL_KEY}\{version}\{XAE_THEME_KEY}") as key:
+                value, _ = winreg.QueryValueEx(key, "ColorTheme")
+        except OSError:
+            continue
+        theme = theme_from_registry_value(value)
+        if theme:
+            return theme
+    return None
 MODEL_ASSEMBLY = "TwinCAT.Measurement.Scope.API.Model"
 
 
@@ -3126,7 +3184,12 @@ def cmd_newscope(args):
 
     # After the layout, and on the template's own charts when --channels is
     # left out, so every file this writes is styled for one background.
-    apply_theme(root, args.theme)
+    if args.theme == "auto":
+        detected = xae_theme()
+        theme, theme_source = (detected, "xae-registry") if detected else (DEFAULT_THEME, "default")
+    else:
+        theme, theme_source = args.theme, "declared"
+    apply_theme(root, theme)
     guids = refresh_guids(root)
     write_tcscopex(root, args.output)
     defaulted = [s for s, spec in specs.items() if spec["type_source"] == "default"]
@@ -3142,7 +3205,8 @@ def cmd_newscope(args):
                       "type_source": spec["type_source"]}
                      for s, spec in specs.items()] or "unchanged from template",
         "charts": layout if layout is not None else "unchanged from template",
-        "theme": args.theme,
+        "theme": theme,
+        "theme_source": theme_source,
         "guids": guids,
         "ams_net_id": (netid if channels or args.netid is not None
                        else "unchanged from template"),
@@ -3963,9 +4027,11 @@ def build_parser():
                    help="auto: one chart tab per device, stacked bands per "
                         "quantity. flat: every channel on one axis, readable "
                         "only when they share a scale")
-    q.add_argument("--theme", choices=tuple(THEMES), default=DEFAULT_THEME,
+    q.add_argument("--theme", choices=("auto",) + tuple(THEMES), default="auto",
                    help="chart background the colours are chosen for; Scope "
-                        "stores fixed colours that do not follow the IDE theme")
+                        "stores fixed colours that do not follow the IDE theme. "
+                        f"auto (default) reads the TwinCAT XAE Shell's theme, "
+                        f"else {DEFAULT_THEME}")
     q.set_defaults(func=cmd_newscope)
 
     q = sub.add_parser("checkscope", help="validate a .tcscopex")
