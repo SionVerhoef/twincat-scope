@@ -35,6 +35,7 @@ and reports seconds everywhere - `manifest` says so via "time_unit": "ms" and
 """
 
 import argparse
+import collections
 import copy
 import hashlib
 import json
@@ -1521,6 +1522,10 @@ COMMAND_MIN_MOVING = 20
 # defect. They are returned only once the defects have their slots.
 DESCRIPTIVE_KINDS = frozenset({"ramp", "transition", "hold", "crossing", "wrap"})
 
+# An integer state channel that rests at 0 at least this share of the time is
+# an error code: its every change is a defect, not a routine transition.
+ERROR_CODE_REST = 0.9
+
 # An NC feedback field and the setpoint it follows. A simulated axis's feedback
 # is as clean as its setpoint, so it behaves as a command and rests as `hold`s -
 # 332 on one real ActPosModulo. What tells a frozen sensor from a rest there is
@@ -1672,10 +1677,23 @@ def cmd_events(args):
             # spike - 100 -> 101 -> 140 became a ramp 100 -> 140, the state
             # between was lost, and 72 alike on one real sequence were never
             # recurring, because a ramp is descriptive.
-            for j in np.flatnonzero(np.isfinite(d) & (d != 0)).tolist():
+            #
+            # Moving between its own states is what a sequence does, so it is a
+            # `transition`, as a BOOL's is. Scored as steps, rare but normal
+            # pairs - a start after power-up, a branch taken 10 times - took 14
+            # of 20 capped slots at 180-1 280 against ~3 for an analogue fault.
+            # Two stay defects: a jump into a state entered only once (an
+            # abort), and any change on a channel that rests at 0 at least
+            # 90% of the time - an error code, whose every change matters.
+            changes = np.flatnonzero(np.isfinite(d) & (d != 0))
+            entered = collections.Counter(col[changes + 1].tolist())
+            error_code = float(np.mean(finite == 0)) >= ERROR_CODE_REST
+            for j in changes.tolist():
                 reported.append((j, j + 1))
+                defect = error_code or entered[col[j + 1]] == 1
                 found.append(event(
-                    "step", abs(float(d[j])) / thresh,
+                    "step" if defect else "transition",
+                    abs(float(d[j])) / thresh if defect else 1.0,
                     time=float(t[min(j + 1, t.size - 1)]), index=int(j + 1),
                     delta=float(d[j]), width_samples=1,
                     **{"from": int(col[j]), "to": int(col[j + 1])},

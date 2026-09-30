@@ -158,7 +158,7 @@ Detectors, and what each one actually means on a machine:
 | `step` | A discontinuity that stayed — a setpoint jump, a mode switch, an encoder jump, a re-home |
 | `ramp` | A commanded move: the signal travelled, but it took many samples to get there |
 | `spike` | Something transient — a torque impulse, EMI on an analogue input, a single bad ADC read |
-| `transition` | A digital channel changed state: a `BIT`, or an untyped channel with two values. A declared integer with two values (an error code that shows 0 and one code) reports `step`s |
+| `transition` | A digital channel changed state (a `BIT`, or an untyped channel with two values), or an integer state channel moved between states it visits routinely. See *Integer states* below for when a state change is a `step` instead |
 | `flatline` | A signal that is noisy whenever it moves stopped updating for a sustained run: a frozen sensor, a stalled update |
 | `hold` | A command channel stood exactly still — a setpoint at rest between moves, a velocity setpoint at cruise. Normal, not a fault |
 | `wrap` | A `*Modulo` position jumped most of its range at once: it went round, not a fault |
@@ -204,11 +204,19 @@ repeats identically on every cycle is recurring too, so read what the summary co
 
 **Integer states.** An integer channel that stands still most of the time is a state: a step
 number, a mode, an error code. It has no noise to set a threshold against, so every change is
-an event, and each carries `from` and `to`. It is `recurring` when the same pair of states
-occurs 20 or more times: a sequence goes 10 → 20 → 35 every cycle by different amounts, and on
-one real recording its steps took 9 of 20 capped slots. An error code going 0 → 17 once stays a
-one-off. An integer that moves all the time, such as raw ADC counts, is treated like any other
-signal.
+an event, and each carries `from` and `to`.
+
+- Moving between states it visits anyway is what a sequence does: a **`transition`**,
+  descriptive. Scored as steps, a sequence starting after power-up and a branch taken ten times
+  took 14 of 20 capped slots on one real recording, at a severity a hundred times an analogue
+  fault's.
+- A jump **into a state entered only once** in the recording is a **`step`**, a one-off defect —
+  an abort, a fault state, a mode set once.
+- On an **error code** — a channel that rests at 0 at least 90% of the time — every change is a
+  `step`. One that fires often is `recurring` when the same pair of states occurs 20 or more
+  times, and still ranks above routine motion.
+
+An integer that moves all the time, such as raw ADC counts, is treated like any other signal.
 Both names matter — filtering for `step` is how you find the jumps worth explaining, and a
 commanded move is not one of them.
 

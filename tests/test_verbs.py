@@ -1274,16 +1274,17 @@ def integer_sequence_checks(cycles=60, period=300, seed=13):
         fault = [e for e in full if e["channel"] == "Torque" and e["kind"] == "step"]
         # Every change of state, the steps of 10 too: a threshold taken from a
         # channel with no noise hid them under the steps of 35.
-        check("every change of a state channel is an event, and some outrank the faults",
-              len(seq) == 4 * cycles - 1 and len(fault) == 1 and len(err) == 4
-              and max(e["severity"] for e in seq)
-              > max(e["severity"] for e in err + fault),
+        check("every change of a state channel is an event",
+              len(seq) == 4 * cycles - 1 and len(fault) == 1 and len(err) == 4,
               f"seq={len(seq)} err={len(err)} fault={len(fault)}")
-        check("a step sequence's transitions are recurring, a one-off error code is not",
-              all(e.get("recurring") for e in seq)
+        # Bead 99j: a routine state change is a transition, descriptive, as a
+        # BOOL's is - scored as a step it outranked an analogue fault 100:1.
+        # An error-code channel (at 0 almost all the time) keeps its steps.
+        check("a step sequence's routine changes are transitions, an error code's are steps",
+              {e["kind"] for e in seq} == {"transition"}
+              and {e["kind"] for e in err} == {"step"}
               and not any(e.get("recurring") for e in err + fault),
-              f"{sum(bool(e.get('recurring')) for e in seq)} of {len(seq)} recurring; "
-              f"err={[e.get('recurring') for e in err]}")
+              f"seq={sorted({e['kind'] for e in seq})} err={sorted({e['kind'] for e in err})}")
         check("an integer change says what it changed from and to",
               [(e.get("from"), e.get("to")) for e in err] == [(0, 17), (17, 0), (0, 42), (42, 0)],
               str([(e.get("from"), e.get("to")) for e in err]))
@@ -1293,19 +1294,67 @@ def integer_sequence_checks(cycles=60, period=300, seed=13):
         # on one real sequence variable, all one-offs.
         burst = [e for e in full if e["channel"] == "Burst"]
         pairs = {(e.get("from"), e.get("to")) for e in burst}
-        check("every change of state is its own step, however close the next one is",
+        check("every change of state is its own event, however close the next one is",
               pairs == {(100, 101), (101, 140), (140, 100)}
-              and {e["kind"] for e in burst} == {"step"}
+              and {e["kind"] for e in burst} == {"transition"}
               and len(burst) == 3 * cycles - 1,
               f"{len(burst)} events, kinds={sorted({e['kind'] for e in burst})}, "
               f"pairs={sorted(pairs, key=str)}")
-        check("each of those state pairs recurs",
-              burst and all(e.get("recurring") for e in burst),
-              f"{sum(bool(e.get('recurring')) for e in burst)} of {len(burst)} recurring")
         cut = run("events", csv, "--max-events", 5).get("events", [])
         check("a capped answer returns the faults before the sequence",
               sorted(e["channel"] for e in cut) == ["ErrCode"] * 4 + ["Torque"],
               str([(e["channel"], e["kind"], e["severity"]) for e in cut]))
+
+
+def state_rarity_checks(cycles=60, period=300, seed=17):
+    """Bead 99j: field round 333b6c6 found 14 of 20 capped slots on rare but
+    normal state pairs - a sequence starting after power-up, a branch taken
+    10 times - scored at 180-1 280 against about 3 for an analogue fault.
+
+    Seq idles at 0, starts once (0 -> 10), cycles 10 -> 20 -> 35, and once
+    jumps to an abort state 999 it never otherwise visits. ErrRep is an error
+    code: 0 almost always, 17 or 23 thirty times. Torque has one modest step.
+    """
+    import random
+    rng = random.Random(seed)
+    idle, abort_at = 2000, (2 * cycles // 3) * period + 150
+    fault_at, rows = (cycles // 3) * period + 37, []
+    for i in range(idle + cycles * period):
+        seq = 0 if i < idle else (10, 20, 35)[((i - idle) % period) * 3 // period]
+        if abort_at <= i < abort_at + 50:
+            seq = 999
+        # Two codes: with only 0 and 17 an untyped column reads as digital.
+        err = (23 if i // 600 % 5 == 0 else 17) if i % 600 < 10 and i >= 600 else 0
+        torque = 1.0 + rng.gauss(0, 0.02) + (0.5 if i >= fault_at else 0.0)
+        rows.append(f"{i:.1f},{seq},{err},{torque:.6f}")
+    with tempfile.TemporaryDirectory() as tmp:
+        csv = Path(tmp) / "rarity.csv"
+        csv.write_text("\n".join(["TwinCAT Scope Export", "", "Name,Seq,ErrRep,Torque"]
+                                 + rows) + "\n", encoding="utf-8", newline="")
+        full = run("events", csv, "--max-events", 5000).get("events", [])
+        seq = [e for e in full if e["channel"] == "Seq"]
+        steps = [(e.get("from"), e.get("to")) for e in seq if e["kind"] == "step"]
+        check("a jump into a state entered only once is a one-off step",
+              len(steps) == 1 and steps[0][1] == 999
+              and not any(e.get("recurring") for e in seq if e["kind"] == "step")
+              and all(e["kind"] == "transition" for e in seq if e.get("to") != 999),
+              f"steps={steps}")
+        start = [e for e in seq if (e.get("from"), e.get("to")) == (0, 10)]
+        check("a sequence starting once, into a state it visits every cycle, is a transition",
+              len(start) == 1 and start[0]["kind"] == "transition",
+              str([(e["kind"], e.get("from"), e.get("to")) for e in start]))
+        err = [e for e in full if e["channel"] == "ErrRep"]
+        check("an error code firing thirty times keeps its steps, and they recur",
+              len(err) >= 58 and {e["kind"] for e in err} == {"step"}
+              and all(e.get("recurring") for e in err
+                      if (e.get("from"), e.get("to")) in ((0, 17), (17, 0))),
+              f"{len(err)} events, kinds={sorted({e['kind'] for e in err})}, "
+              f"{sum(bool(e.get('recurring')) for e in err)} recurring")
+        cut = run("events", csv, "--max-events", 2).get("events", [])
+        check("a capped answer returns the abort and the analogue fault first",
+              sorted((e["channel"], e["kind"], e.get("to", 0)) for e in cut)
+              == [("Seq", "step", 999), ("Torque", "step", 0)],
+              str([(e["channel"], e["kind"], e.get("to")) for e in cut]))
 
 
 def sharp_pulse_checks():
@@ -3011,6 +3060,7 @@ def main():
     recurring_spike_checks()
     sharp_pulse_checks()
     integer_sequence_checks()
+    state_rarity_checks()
     declared_integer_checks()
     long_correlate_checks()
     parquet_memory_checks()
