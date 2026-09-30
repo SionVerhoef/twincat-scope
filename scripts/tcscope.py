@@ -1517,6 +1517,9 @@ def _is_still(np, finite, finite_d):
 # A measured signal is noisy whenever it moves: 0.2 and up.
 COMMAND_ROUGHNESS = 0.01
 COMMAND_MIN_MOVING = 20
+# On a command, a "spike" whose first step is at most this multiple of the step
+# before it, in the same direction, is the command continuing - a turnaround.
+COMMAND_TURN_RATIO = 2.0
 
 # What a detector reports about a signal behaving normally, rather than a
 # defect. They are returned only once the defects have their slots.
@@ -1740,6 +1743,14 @@ def cmd_events(args):
                     kind = "ramp"
                 else:
                     kind = "step"
+                # A setpoint turning round at its own rate is not a spike: an
+                # acceleration command reversing just short of zero stepped
+                # into its apex at 1.04x the step before. A real spike jumps
+                # out of whatever came before it. The ramps either side, not
+                # this, describe the turn.
+                if (command and kind == "spike" and s > 0 and d[s - 1] * d[s] > 0
+                        and abs(d[s]) <= COMMAND_TURN_RATIO * abs(d[s - 1])):
+                    continue
                 reported.append((s, s + int(width)))
                 found.append(event(
                     kind,

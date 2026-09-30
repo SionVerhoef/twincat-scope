@@ -1357,6 +1357,45 @@ def state_rarity_checks(cycles=60, period=300, seed=17):
               str([(e["channel"], e["kind"], e.get("to")) for e in cut]))
 
 
+def command_turnaround_checks(cycles=6, rest=20, ease=35):
+    """Bead mez, field round v1.0.0 Part C: an acceleration setpoint turning
+    round just short of zero came back as a `spike`. Its step into the apex
+    was 1.04 times the step before it - the command carrying on at its own
+    rate - where a real spike jumps out of whatever came before.
+
+    The V is the field's own normalised shape; each cycle eases into it and
+    back to rest. One cycle's rest carries a one-sample glitch, a real spike.
+    """
+    turn = [-0.707, -0.749, -0.787, -0.822, -0.854, -0.883, -0.907, -0.929, -0.946, -0.959,
+            -0.968, -0.974, -0.975, -0.951, -0.892, -0.801, -0.679, -0.533, -0.367, -0.188,
+            -0.001, -0.185, -0.365, -0.531, -0.678, -0.799, -0.892, -0.951, -0.975, -0.974,
+            -0.968, -0.959, -0.946, -0.929, -0.908, -0.883, -0.855, -0.823, -0.788, -0.749,
+            -0.708, -0.663]
+    values, glitch = [], None
+    for c in range(cycles):
+        values += [0.0] * rest
+        if c == cycles // 2:
+            glitch = len(values) - rest // 2
+        values += [-0.707 * (k + 1) / ease for k in range(ease)] + turn
+        values += [-0.663 * (1 - (k + 1) / ease) for k in range(ease)]
+    values += [0.0] * rest
+    values[glitch] = 0.5
+    with tempfile.TemporaryDirectory() as tmp:
+        csv = Path(tmp) / "turn.csv"
+        csv.write_text("\n".join(["TwinCAT Scope Export", "", "Name,SetAcc"]
+                                 + [f"{i:.1f},{v:.6f}" for i, v in enumerate(values)]) + "\n",
+                       encoding="utf-8", newline="")
+        ev = run("events", csv, "--max-events", 1000)
+        spikes = [e for e in ev.get("events", []) if e["kind"] == "spike"]
+        check("an acceleration setpoint turning round is not a spike",
+              "SetAcc" in (ev.get("command_channels") or [])
+              and len(spikes) == 1 and near(spikes[0]["time"], glitch / 1000.0, 0.003),
+              str([(e["time"], round(e["delta"], 3), e["width_samples"]) for e in spikes]))
+        check("the turnarounds are still described, by the ramps either side",
+              sum(e["kind"] == "ramp" for e in ev.get("events", [])) >= 2 * cycles,
+              str(sum(e["kind"] == "ramp" for e in ev.get("events", []))))
+
+
 def sharp_pulse_checks():
     """Bead ky7: a pulse with no plateau is one run of over-threshold change.
 
@@ -3059,6 +3098,7 @@ def main():
     clean_feedback_checks()
     recurring_spike_checks()
     sharp_pulse_checks()
+    command_turnaround_checks()
     integer_sequence_checks()
     state_rarity_checks()
     declared_integer_checks()
