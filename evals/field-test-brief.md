@@ -516,12 +516,9 @@ First, every item of Part A you did not reach — name them. Beyond Part A:
 
 ## 11. Rules for your report — please read, this one bit us
 
-**This repository is public, and it was recently scrubbed of customer machine data.** It had
-been carrying a real AMS net ID as the copy-paste example in `SKILL.md` and three other files,
-along with real NC symbol paths, hardware tags, TwinCAT project names and PLC variable names.
-All of it has been anonymised, in the working tree and in every commit of the published
-history, and a test now enforces that no tracked file contains an AMS net ID outside four
-allowed placeholders.
+**This repository is public.** Nothing that identifies a customer, site, machine or controller
+may land in it, and a test enforces that no tracked file contains an AMS net ID outside a short
+list of allowed placeholders.
 
 So, when reporting:
 

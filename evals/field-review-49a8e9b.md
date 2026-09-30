@@ -1,7 +1,7 @@
 # Field review -- main @ 49a8e9b
 
 Run by an agent on the same commissioning workstation as the three rounds before (Windows 10,
-Dutch locale, TwinCAT 3.1 build 4024.55, **Scope 3.4.3147.18**, the version Scope writes into
+decimal-comma locale, TwinCAT 3.1 build 4024.55, **Scope 3.4.3147.18**, the version Scope writes into
 `ServerVersions` on save; Python 3.12.10). The subject: PRs #37-#40 on main at `49a8e9b`. The
 skill was reinstalled from that commit.
 

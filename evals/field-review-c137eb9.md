@@ -1,7 +1,7 @@
 # Field review -- main @ c137eb9
 
 Run by an agent on the same commissioning workstation as the 8bf9230 and 79660f4 rounds
-(Windows 10, Dutch locale, TwinCAT 3.1 build 4024.55, Scope 3.4.3147.18 incl. the TF3300
+(Windows 10, decimal-comma locale, TwinCAT 3.1 build 4024.55, Scope 3.4.3147.18 incl. the TF3300
 export tool, Python 3.12.10). The subject: #34 (command channels, `hold`, defects ranked
 first), with #29/#30/#32/#33 riding along. The skill was reinstalled from `c137eb9`.
 

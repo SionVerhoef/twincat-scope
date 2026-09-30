@@ -32,7 +32,7 @@ A `.svdx` carries two export configurations: `<AutoSaveExportConfigurationString
 `CSVProperties` empty in both real files seen) and `<ExportConfigurationString>` (full
 `CSVProperties`). Editing either one — the separator, the decimal mark, `ContainEOF` — left
 the tool's CSV unchanged, byte for byte apart from the file path it writes into line 2. Only
-`config=` changes the output. On one Dutch-locale
+`config=` changes the output. On one decimal-comma-locale
 workstation, with no `config=`, the tool wrote TAB, decimal `,`, the full header and a
 trailing `EOF`.
 
@@ -89,7 +89,7 @@ check the file, not the user's memory of the dialog.
 | `ExcludeDoubleTimestamp` | — | — | No effect on the tool's output for this recording. |
 
 So Scope View's defaults give the `,`/`.` dialect with a Name-only header, and the tool (on a
-Dutch-locale PC) gives TAB/`,` with the full header. Both read; only the second says which
+decimal-comma-locale PC) gives TAB/`,` with the full header. Both read; only the second says which
 symbol, type and port each column is. The one change worth asking a user for is the header.
 Report any other layout with `manifest --dump-header`, redacted per `examples/README.md`.
 
