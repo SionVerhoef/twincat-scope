@@ -12,6 +12,12 @@
 
 ### Fixed
 
+- The sample-time rule no longer claims more than was measured. `SKILL.md`,
+  `references/scope-configuration.md` and `newscope`'s note said Scope "snaps" a sample time to
+  the task cycle, with no bound; one case was seen (10 ms on a 4 ms task saved as 8 ms). They
+  now say which way it rounds, and what happens below one cycle, are not measured. In eval
+  iteration 5 every skill run predicted that 100 ns would record at the task rate
+  (`evals/results-iteration-5.md`).
 - `tools/update-skill.ps1`: a `-Version` that does not exist says so (GitHub's 404) instead of
   "Could not reach the GitHub API" with proxy advice. Every failure prints plainly, says nothing
   was changed, and exits 1 (`evals/field-review-v1.0.0.md`).

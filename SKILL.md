@@ -124,8 +124,10 @@ Four things decide whether the file records at all — detail and field history 
   nothing usable.
 - **The window must contain the event.** `--record-time <seconds>`; the templates ship 60 s,
   and a homing sequence alone can outrun that.
-- **The sample time snaps to the task cycle.** Pick a multiple of the cycle of the task that
-  owns the channels, and read the rate that was recorded back from `manifest`.
+- **Keep the sample time a multiple of the task cycle.** Seen once: 10 ms on a 4 ms task was
+  saved and recorded as 8 ms, while 8 ms stayed 8 ms. Which way Scope rounds, and what it does
+  with a time shorter than one cycle, are not measured — so never predict the rate a wrong
+  value will give. Correct the value, and read the recorded rate back from `manifest`.
 
 `newscope` also lays the file out — one chart tab per device, one stacked band per quantity,
 at most eight traces per band, flags on 0/1 — because everything sharing an axis shares one

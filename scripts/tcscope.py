@@ -3157,13 +3157,15 @@ def cmd_newscope(args):
     if not channels:
         out["retargeted"] = retargeted
     if args.sample_time_ms is not None:
-        # Measured in the field: 10 ms on a 4 ms task was saved as 8 ms. This
-        # tool does not know the task cycle, so it says so instead of guessing.
+        # Measured in the field: 10 ms on a 4 ms task was saved as 8 ms, and 8 ms
+        # stayed 8 ms. The rounding direction and anything below one cycle are
+        # not. This tool does not know the task cycle, so it says so instead of
+        # guessing.
         out["sample_time_note"] = (
-            "Scope snaps a sample time to a multiple of the cycle of the task "
-            "that owns the channel - 10 ms was saved as 8 ms on a 4 ms task. "
-            "Choose a multiple of that cycle, and read the recorded rate from "
-            "manifest rather than from this file.")
+            "Choose a multiple of the cycle of the task that owns the channel - "
+            "10 ms was saved as 8 ms on a 4 ms task. Which way Scope rounds, and "
+            "what it does below one cycle, are not measured, so read the recorded "
+            "rate from manifest rather than from this file.")
     suspect_ports = [s for s, spec in specs.items()
                      if unlikely_plc_port(s, spec["port"])]
     if suspect_ports:
