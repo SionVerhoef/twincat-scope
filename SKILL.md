@@ -124,10 +124,11 @@ Four things decide whether the file records at all — detail and field history 
   nothing usable.
 - **The window must contain the event.** `--record-time <seconds>`; the templates ship 60 s,
   and a homing sequence alone can outrun that.
-- **Keep the sample time a multiple of the task cycle.** Seen once: 10 ms on a 4 ms task was
-  saved and recorded as 8 ms, while 8 ms stayed 8 ms. Which way Scope rounds, and what it does
-  with a time shorter than one cycle, are not measured — so never predict the rate a wrong
-  value will give. Correct the value, and read the recorded rate back from `manifest`.
+- **Keep the sample time a multiple of the task cycle.** When recording starts, Scope rounds
+  each acquisition's sample time **down** to a whole multiple of its own task's cycle, and a
+  time below one cycle becomes one cycle — silently. 7.5 ms recorded at 4 ms on a 4 ms PLC task
+  and at 6 ms on a 2 ms NC task in the same file. The `.tcscopex` keeps the written value until
+  a save after a recording, so read the recorded rate from `manifest`, not from the file.
 
 `newscope` also lays the file out — one chart tab per device, one stacked band per quantity,
 at most eight traces per band, flags on 0/1 — because everything sharing an axis shares one
@@ -156,7 +157,8 @@ a finding about the reader. `references/scope-configuration.md`.
 Then stop: opening the file in Scope View and pressing Record is the human's move (rule 4).
 Tell them to **add it to an existing TwinCAT Measurement project** — double-clicked on its
 own, one hung in the new-project wizard. Generated files carry fresh GUIDs, so two can share
-a project; a hand-copied file cannot.
+a project; a hand-copied file cannot. Have them save the `.svdx` before changing any setting:
+a change after Record discards the unsaved recording.
 
 ## Task routing
 

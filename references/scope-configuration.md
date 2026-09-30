@@ -44,6 +44,11 @@ raising `Version` to match a project your installation writes is the first thing
 its own, one started a new-scope-project wizard and hung; added to a project, it opened at
 once.
 
+**Save the recording before changing any setting.** Changing a scope's settings after Record
+discards the unsaved recording. And Save only writes a `.tcscopex` Scope regards as modified:
+pressed on an unchanged scope it leaves the file untouched, so a file's timestamp does not say
+Scope has re-serialised it.
+
 ## Structure
 
 ```
@@ -178,7 +183,7 @@ chart reads well in both. `theme_source` says which happened. Found on TcXaeShel
 | `DataType` | Scope's own vocabulary, **not IEC's**: `BIT` for a `BOOL`, `INT16` for an `INT`, `REAL64` for an `LREAL`. Seen in real project files: `BIT`, `INT8`, `INT16`, `UINT32`, `REAL64`; the others follow the same naming. Scope read `LREAL` as `VOID`, **wrote `VOID` back when the project was saved**, and refused the channel: "The datatype is not supported: 'VOID'". Other IEC names are expected to go the same way; only `LREAL` has been tried. A `VOID` in a file is that failure's fingerprint. |
 | `VariableSize` | Bytes, and it must match `DataType`: 1 for `BIT`/`INT8`, 2 for `INT16`, 4 for `UINT32`, 8 for `REAL64`. Scope reads that many bytes from the target whatever the variable actually is, so 8 bytes off a `BOOL` is a recording of its neighbours. |
 | `Name` | The label in the Scope tree **and the column header when the recording is exported to CSV**. `minimal-single-channel.tcscopex` ships the placeholder `Signal`; left alone, fifty-three channels exported as fifty-three columns called `Signal`, which is what happened on a machine. `newscope` derives a short unique name per channel and keeps the full path in `Title`. |
-| `BaseSampleTime` | **100 ns ticks.** 10000 = 1 ms, 1000 = 100 µs — confirmed a second way when Scope saved 80000 and the recording ran at 125 Hz. Only honoured when `UseTaskSampleTime` is `false`. **Keep it a multiple of the owning task's cycle**: 100000 (10 ms) on a 4 ms task was saved as 80000 (8 ms) and recorded at 125 Hz, and 80000 on the same task recorded unchanged. That is all that has been seen. Whether Scope rounds down or to the nearest multiple (10 ms is 2.5 cycles, so both give 8), and what it does with a sample time shorter than one cycle, are **not measured** — do not predict the rate a wrong value would record. |
+| `BaseSampleTime` | **100 ns ticks.** 10000 = 1 ms, 1000 = 100 µs — confirmed a second way when Scope saved 80000 and the recording ran at 125 Hz. Only honoured when `UseTaskSampleTime` is `false`. **Keep it a multiple of the owning task's cycle.** Measured: Scope snaps it **when recording starts** — not on load or Save — to the cycle of **each acquisition's own task**, **rounding down** to a whole multiple, and a value **below one cycle becomes one cycle**. No message is shown. 75000 (7.5 ms) recorded at 4 ms on a 4 ms PLC task and 6 ms on a 2 ms NC task in one file; 1, 5000 and 30000 all recorded at one cycle; 80000 on the 4 ms task stayed 80000. The Properties grid and the `.tcscopex` show the written value until the next save after a recording; the `.svdx` carries the value used. |
 | `UseTaskSampleTime` | `true` samples at the owning task's rate — usually what you want. See `recording-load.md`. |
 | `Oversample` | For oversampling terminals. `0` unless the hardware supports it. |
 
