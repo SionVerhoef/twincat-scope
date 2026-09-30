@@ -23,10 +23,9 @@ Two halves, different costs:
 | `field-test-brief.md` | The checklist for a session on a real TwinCAT machine | yes |
 | `field-review-*.md` | Write-ups of those sessions, named after the commit tested | record |
 
-**Latest result** (`results-iteration-4.md`, n=3 per cell, Opus 5.5): the skill arm scored
-28.3/29 against 20.7/29 for the baseline, and a blinded judge ranked the arms the same way on
-every eval. The widest gap is `hand-written-config`: every baseline called a file that cannot
-record "sound".
+**Latest result** (`results-iteration-5.md`, n=3 per cell, Opus 5.5): the skill arm scored
+32.3/34 against 26.0/34 for the baseline, and the blinded judge ranked the skill arm ahead on all
+six evals. The two new evals barely separate the arms: both can be decoded from the file itself.
 
 Anything real in the field reviews is anonymised by substitution — names are stand-ins,
 numbers are as measured. `field-review-af54888.md` is the worked example.
