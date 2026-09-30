@@ -3072,6 +3072,22 @@ def main():
             check("a dense-but-buildable recording is still not a problem",
                   heavy.get("ok") is True, str(heavy.get("problems"))[:70])
 
+            # Field review 74dd86d §1: 1 tick (100 ns) recorded at one task
+            # cycle, but checkscope called it "~20000000 samples/s".
+            tick = Path(tmp) / "tick.tcscopex"
+            run("newscope", tpl, "-o", tick, "--netid", "1.2.3.4.1.1",
+                "--sample-time-ms", "1", "--channels", "MAIN.fbAxis.Ch0,MAIN.fbAxis.Ch1")
+            tick.write_bytes(tick.read_bytes().replace(
+                b"<BaseSampleTime>10000</BaseSampleTime>", b"<BaseSampleTime>1</BaseSampleTime>"))
+            sub = run("checkscope", tick)
+            check("a sub-cycle sample time is named, not counted as a literal load",
+                  sub.get("ok") is True
+                  and sub.get("total_samples_per_second") == 0
+                  and any("one cycle of" in w and "2 acquisition" in w
+                          for w in sub.get("warnings", []))
+                  and not any("samples/s" in w for w in sub.get("warnings", [])),
+                  f"rate={sub.get('total_samples_per_second')} {sub.get('warnings')}"[:200])
+
             # The negative case, or the check above is just a string that is
             # always present. Re-arming after each window is a different plan
             # and must not draw the same warning.
