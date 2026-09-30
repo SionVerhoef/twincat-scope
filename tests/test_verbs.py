@@ -1357,6 +1357,82 @@ def state_rarity_checks(cycles=60, period=300, seed=17):
               str([(e["channel"], e["kind"], e.get("to")) for e in cut]))
 
 
+def theme_auto_checks():
+    """Bead 8ln, field round v1.0.0 Part D: the XAE Shell keeps its colour
+    theme in one HKCU value, '0*System.String*<GUID>' (ColorThemeNew wraps the
+    GUID in braces). --theme auto reads it; anything unreadable is the default.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("tcscope", TCSCOPE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    read = mod.theme_from_registry_value
+    check("the XAE theme value reads as dark, light or unknown",
+          read("0*System.String*1ded0138-47ce-435e-84ef-9ec1f439b749") == "dark"
+          and read("0*System.String*{DE3DBBCD-F642-433C-8353-8F1DF4370ABA}") == "light"
+          and read("0*System.String*a4d6a176-b948-4b29-8c66-53c97a1ed7d0") == "light"
+          and read("0*System.String*00000000-0000-0000-0000-000000000000") is None
+          and read("") is None and read(None) is None,
+          "")
+    tpl = ROOT / "templates" / "axis-diagnosis.tcscopex"
+    if not tpl.exists():
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        auto = run("newscope", tpl, "-o", Path(tmp) / "auto.tcscopex",
+                   "--netid", "1.2.3.4.1.1")
+        # Off Windows nothing can be read; on a workstation XAE may answer.
+        want = {"default", "xae-registry"} if os.name == "nt" else {"default"}
+        check("newscope defaults to --theme auto, and says where the theme came from",
+              auto.get("theme_source") in want
+              and (auto.get("theme") == "dark" if auto.get("theme_source") == "default"
+                   else auto.get("theme") in ("dark", "light")),
+              f"{auto.get('theme')} from {auto.get('theme_source')}")
+        light = run("newscope", tpl, "-o", Path(tmp) / "light.tcscopex",
+                    "--netid", "1.2.3.4.1.1", "--theme", "light")
+        check("a declared --theme wins and is reported as declared",
+              light.get("theme") == "light" and light.get("theme_source") == "declared",
+              f"{light.get('theme')} from {light.get('theme_source')}")
+
+
+def command_turnaround_checks(cycles=6, rest=20, ease=35):
+    """Bead mez, field round v1.0.0 Part C: an acceleration setpoint turning
+    round just short of zero came back as a `spike`. Its step into the apex
+    was 1.04 times the step before it - the command carrying on at its own
+    rate - where a real spike jumps out of whatever came before.
+
+    The V is the field's own normalised shape; each cycle eases into it and
+    back to rest. One cycle's rest carries a one-sample glitch, a real spike.
+    """
+    turn = [-0.707, -0.749, -0.787, -0.822, -0.854, -0.883, -0.907, -0.929, -0.946, -0.959,
+            -0.968, -0.974, -0.975, -0.951, -0.892, -0.801, -0.679, -0.533, -0.367, -0.188,
+            -0.001, -0.185, -0.365, -0.531, -0.678, -0.799, -0.892, -0.951, -0.975, -0.974,
+            -0.968, -0.959, -0.946, -0.929, -0.908, -0.883, -0.855, -0.823, -0.788, -0.749,
+            -0.708, -0.663]
+    values, glitch = [], None
+    for c in range(cycles):
+        values += [0.0] * rest
+        if c == cycles // 2:
+            glitch = len(values) - rest // 2
+        values += [-0.707 * (k + 1) / ease for k in range(ease)] + turn
+        values += [-0.663 * (1 - (k + 1) / ease) for k in range(ease)]
+    values += [0.0] * rest
+    values[glitch] = 0.5
+    with tempfile.TemporaryDirectory() as tmp:
+        csv = Path(tmp) / "turn.csv"
+        csv.write_text("\n".join(["TwinCAT Scope Export", "", "Name,SetAcc"]
+                                 + [f"{i:.1f},{v:.6f}" for i, v in enumerate(values)]) + "\n",
+                       encoding="utf-8", newline="")
+        ev = run("events", csv, "--max-events", 1000)
+        spikes = [e for e in ev.get("events", []) if e["kind"] == "spike"]
+        check("an acceleration setpoint turning round is not a spike",
+              "SetAcc" in (ev.get("command_channels") or [])
+              and len(spikes) == 1 and near(spikes[0]["time"], glitch / 1000.0, 0.003),
+              str([(e["time"], round(e["delta"], 3), e["width_samples"]) for e in spikes]))
+        check("the turnarounds are still described, by the ramps either side",
+              sum(e["kind"] == "ramp" for e in ev.get("events", [])) >= 2 * cycles,
+              str(sum(e["kind"] == "ramp" for e in ev.get("events", []))))
+
+
 def sharp_pulse_checks():
     """Bead ky7: a pulse with no plateau is one run of over-threshold change.
 
@@ -3059,6 +3135,8 @@ def main():
     clean_feedback_checks()
     recurring_spike_checks()
     sharp_pulse_checks()
+    command_turnaround_checks()
+    theme_auto_checks()
     integer_sequence_checks()
     state_rarity_checks()
     declared_integer_checks()

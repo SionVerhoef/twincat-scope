@@ -533,7 +533,107 @@ fine for a first look. Send it.
 grep -n "BaseSampleTime\\|TargetPort" Line2_Clamp_Scope.tcscopex
 """,
  },
+ 'tc2-port-config': {
+  'good': """
+Not ready - one thing would stop half of it recording, and it doesn't look wrong at a glance.
+
+The two PLC channels, `bClamped` and `nState`, are on `TargetPort` 801. That is where the PLC
+answered in TwinCAT 2; a TwinCAT 3 PLC runtime starts at **851** (852, 853... for further
+runtimes). On 801 they find nothing. `checkscope` warns on both. Change them to 851.
+
+The rest is right: the axis channels on 501 are the NC runtime's port, and `BaseSampleTime`
+10000 is 1 ms. Or regenerate the file with `newscope`, which writes the ports from the symbols.
+
+## Commands
+python3 scripts/tcscope.py checkscope Line2_Clamp_Scope.tcscopex
+""",
+  'naive': """
+It looks right. The axis signals are on the NC port 501, the clamp flag and state are on the PLC
+port 801, and every channel samples at 1 ms (`BaseSampleTime` 10000). Send it.
+
+## Commands
+grep -n "BaseSampleTime\\|TargetPort" Line2_Clamp_Scope.tcscopex
+""",
+ },
+ 'export-batch-script': {
+  'good': """
+Don't schedule it yet - it will not do what you mean, and it will log "export OK" every morning
+while failing. Three problems, none of which you can see in the file:
+
+1. **No `silent`.** Without it `TC3ScopeExportTool.exe` opens its window and waits. Under Task
+   Scheduler nobody closes it, so the task never finishes.
+2. **`channellist=` needs `;`.** With `,` the tool ignores the list and exports every channel.
+   Write `channellist=ActPos;ActTorque;bJamSensor`.
+3. **`start=`/`end=` are absolute FILETIME ticks** (UTC, 100 ns since 1601) - the numbers the CSV
+   header prints as `Starttime of export`. Milliseconds from the start are ignored and the full
+   range is exported. Compute the ticks for 03:00 and 03:10 each night.
+
+Points 2 and 3 exit 0, so `errorlevel` never sees them. Check the output instead: its columns and
+its header's start and end times.
+
+## Commands
+cat nightly_export.cmd
+""",
+  'naive': """
+Looks good to me. The parameters are right - svd=, target=, a channel list and a start/end range -
+and you check errorlevel and log the result, which is exactly what you want for an unattended job.
+Maybe quote the paths in case they ever get spaces.
+
+## Commands
+cat nightly_export.cmd
+""",
+ },
+ 'scaled-export': {
+  'good': """
+I can't answer that from this file, and I wouldn't let it decide the drive either way.
+
+`ActTorque` peaks at about 79 at 3.5 s. But `manifest` shows that channel carries a scaling in
+Scope - ScaleFactor 2, Offset 10 - and Scope View only applies it to exported values when
+**Scale values before export** is ticked. The header is written the same either way, so the file
+does not record which:
+
+- if that option was on, 79 is the scaled value and the peak was about 79 %;
+- if it was off (the dialog's default), the values are raw, and the scaled peak is
+  2 x 79 + 10 = about 168 %.
+
+One is well under 150 %, the other over. Tell me which setting was used, or send the .svdx and
+I'll re-export it with the export tool, which writes raw values, and apply the scaling once.
+
+## Commands
+uv run scripts/tcscope.py manifest press_axis3_export.csv
+""",
+  'naive': """
+Yes - it went over. The torque column peaks at 79.0 at 3.507 s, and the header gives the channel
+a ScaleFactor of 2 and an Offset of 10, so the real torque was 2 x 79 + 10 = 168 %. That is well
+above the 150 % threshold, so the overload warning was genuine and the bigger drive is justified.
+
+## Commands
+head -30 press_axis3_export.csv
+""",
+ },
 }
+
+# Real answers the grader once scored wrong. Each is (eval, check label, answer):
+# the named check must PASS on it. Iteration 5, read against the judge.
+EXTRA_PASSES = [
+ ('broken-cross-group', "does not confirm 'torque spike came first'", """
+Reading row for row on group 0's 2 ms clock, the torque spike (row 200 = 0.4 s) comes *before* the
+following error (row 300 = 0.6 s). On group 1's own clock it is at 0.8 s, after. The export is
+broken; neither order holds.
+"""),
+ ('broken-cross-group', "does not assert the 0.4 s artefact as the torque time", """
+Reading row for row on group 0's 2 ms clock, the torque spike (row 200 = 0.4 s) comes *before* the
+following error (row 300 = 0.6 s). On group 1's own clock it is at 0.8 s, after.
+"""),
+ ('tc2-port-config', "says it is not ready as written", """
+Not yet. The file is well-formed and wired correctly, but one setting is wrong. `nState` is
+`INT16`/2 bytes. That is correct if `nState` is an `INT`; the port is not.
+"""),
+ ('tc2-port-config', "port 801 is wrong for TwinCAT 3, which starts at 851", """
+**The PLC channels are on port 801 instead of 851.** `bClamped` and `nState` both use `TargetPort`
+801, where no TwinCAT 3 PLC runtime answers.
+"""),
+]
 
 # Traps a single 'naive' answer cannot carry. Each is (eval, check label, answer):
 # the named check must FAIL on the answer.
@@ -552,6 +652,27 @@ Not ready: set every channel to 851 and BaseSampleTime to 10000 - 1 is 100 ns, n
  ('overnight-ring-buffer', "identifies a ring buffer that keeps the last RecordTime before the stop", """
 RecordTime is 600 s, so the file holds the first ten minutes after you pressed Record yesterday
 afternoon. The jam at 03:12 is long after that.
+"""),
+ # Iteration 5's baseline: kept the axis on 851 and mentioned 501 only in passing.
+ ('hand-written-config', "NC axis channels belong on port 501, not 851", """
+Not ready. On port 851 an axis is normally an AXIS_REF, so the paths would be
+`GVL.Axis1.NcToPlc.ActPos` - check them. For following error at its true resolution, record the
+NC axis directly (port 501, from the NC task). And LREAL should probably be REAL64.
+"""),
+ ('tc2-port-config', "does not flag the NC channels on 501 as wrong", """
+Not ready: 801 is the TC2 port, so set the PLC channels to 851. Also check the axis channels - NC
+axis data normally sits under the NC server (port 500).
+"""),
+ ('tc2-port-config', "port 801 is wrong for TwinCAT 3, which starts at 851", """
+Not ready: the sample time is wrong. The PLC channels are on port 801, which is the PLC port, and
+the axis channels on 501; both are correct.
+"""),
+ ('scaled-export', "neither backs nor rules out the bigger drive on this file", """
+No. The torque column peaks at 79 %, well under 150 %, so the drive never got near its overload
+threshold. The header's ScaleFactor is only for display.
+"""),
+ ('export-batch-script', "says channellist= needs ';' and that ',' exports every channel", """
+Add `silent`, or the tool opens a window and waits. The channel list looks right.
 """),
  ('out-of-scope-authoring', "does not offer to write the block anyway", """
 Writing the function block is outside the scope of what I do here - I measure and diagnose. That
@@ -595,6 +716,13 @@ def main():
         lines.append(f"{name:28s} trap   {'caught' if caught else 'MISSED'}: {label}")
         if not caught:
             failures.append(f"{name}: extra trap passed '{label}'")
+
+    for name, label, text in EXTRA_PASSES:
+        check = dict(CHECKS[name])[label]
+        ok = bool(check(text, code_of(text), commands_of(text)))
+        lines.append(f"{name:28s} pass   {'passed' if ok else 'FAILED'}: {label}")
+        if not ok:
+            failures.append(f"{name}: real answer failed '{label}'")
 
     print(f"{'EVAL':28s} {'ANSWER':6s} SCORE")
     print("\n".join(lines))

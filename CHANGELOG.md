@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+
+- `newscope --theme auto`, now the default: follows the TwinCAT XAE Shell's colour theme, read
+  from one `HKCU` registry value (Dark → `dark`, Light/Blue → `light`), else `dark`. The output
+  reports `theme_source` (`evals/field-review-v1.0.0.md`, Part D).
+
 ### Changed
 
 - `events`: on an integer state channel, a change between states the channel visits anyway is
@@ -18,6 +24,9 @@
   now say which way it rounds, and what happens below one cycle, are not measured. In eval
   iteration 5 every skill run predicted that 100 ns would record at the task rate
   (`evals/results-iteration-5.md`).
+- `events`: a setpoint turning round at its own rate (an acceleration command reversing just
+  short of zero) is no longer a `spike`; a spike on a command must jump out of the motion before
+  it (`evals/field-review-v1.0.0.md`, Part C).
 - `tools/update-skill.ps1`: a `-Version` that does not exist says so (GitHub's 404) instead of
   "Could not reach the GitHub API" with proxy advice. Every failure prints plainly, says nothing
   was changed, and exits 1 (`evals/field-review-v1.0.0.md`).

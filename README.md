@@ -48,7 +48,7 @@ real compiled program (see *Status*).
   symbols routed to port 501, sample and record time set.
 - **Readable layout by default** — one chart tab per device, one stacked band per quantity,
   at most eight traces per band, so a following error of microns is not flattened by a
-  position of a metre. Dark or light theme.
+  position of a metre. Dark or light charts, following the TwinCAT IDE's theme by default.
 - **`checkscope`** — catches the files that open fine and record nothing: unwired or dangling
   channels, duplicate GUIDs, wrong ports, IEC type names, size/type mismatches, placeholder
   names and NetIDs. Also reads the project stored inside a `.svdx`.

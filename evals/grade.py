@@ -98,10 +98,57 @@ def asserts(t, *pats):
                        r"\b(doesn'?t|didn'?t|isn'?t|wasn'?t|wouldn'?t)\b",
                        r'\b(basis|evidence|support|refus\w*|declin\w*|hold off|unable)\b',
                        r'row-?wise|naive|naïve|excel|artefact|artifact|opposite|contradict',
+                       # Iteration 5: "Reading row for row on group 0's 2 ms clock, the
+                       # torque spike comes *before*..." - the reading being rejected.
+                       r'row[- ]for[- ]row|reading (it |the file )?(row|as one table)',
                        r'would (say|read|give|suggest|put)|appears?|one reading|if you (read|open)',
                        r'two (natural )?ways|either reading|first reading|second reading'):
                 return True
     return False
+
+
+def moves_to(t, port, other):
+    """True if the answer says channels go on `port` - not merely that it exists."""
+    return has(t, rf'(should|must|needs?|belongs?|move\w*|chang\w*|set|switch\w*|put)\b[^.\n]{{0,60}}\b{port}\b',
+               rf'\b{port}\b[^.\n]{{0,40}}\b(not|instead of|rather than)\s+(port\s+)?{other}\b',
+               rf'\b{other}\b[^.\n]{{0,20}}\b(not|instead of|rather than)\s+(port\s+)?\*{{0,2}}{port}\b',
+               rf'\b{other}\b\W{{0,6}}(->|→|to)\W{{0,6}}{port}\b',
+               rf'\bon\s+(port\s+)?\*{{0,2}}`?{port}\b')
+
+
+def verdict(t, *pats):
+    """True if a sentence makes one of these claims flat, with no condition on it.
+
+    'If the values are raw, the peak is 168 %, over 150' is the right answer;
+    'Yes, torque went over 150 %' and 'No, it stayed well under 150 %' are the
+    trap. The difference is the condition, so a sentence carrying one is skipped.
+    """
+    for s in re.split(r'(?<=[.!?])\s+|\n', t):
+        if s.lstrip().startswith('#') or not has(s, *pats):
+            continue
+        if not has(s, r'\bif\b', r'\beither\b', r'whether', r'\bwould\b', r'\bcould\b',
+                   r'\bmight\b', r'\bmay\b', r'depend', r'reading', r'\braw\b', r'assum',
+                   r'unless', r"can'?t|cannot|not (be )?(tell|settle|say|decid)", r'\?',
+                   r'\bthe other\b', r'\botherwise\b'):
+            return True
+    return False
+
+
+def looks_right(t):
+    """A flat verdict that the whole file or script is fine.
+
+    Not 'that is correct if nState is an INT' or 'that is fine if the engineer
+    can...', which iteration 5's answers said about one detail on the way to
+    saying the file was not ready.
+    """
+    return asserts(t, r"\b(it|this|the (file|config\w*|project|script|batch file)|everything)"
+                      r"\s+(looks|is|'s)\s+(all\s+)?(right|correct|good|fine|sound|ok)\b"
+                      r"(?![^.\n]{0,30}\b(except|if|but|once|as long)\b)")
+
+
+NOT_READY = (r'\bnot (right|ready|correct|yet)\b', r'will not record', r"won'?t record",
+             r"(don'?t|do not) send", r'(two|2|three|3) (problems|issues|defects|mistakes)',
+             r'\bno\b[,.]', r'record nothing', r'(problem|issue|wrong)')
 
 
 def refuted(t, number):
@@ -112,7 +159,7 @@ def refuted(t, number):
                    r'not the (real|true|actual|peak)', r'appears? to|would (say|read|put|suggest)',
                    r'clip|saturat|rail|limit|cap(ped)?\b', r'is not|isn.t|cannot|can.t|invalid',
                    r'seems|looks like|only because|do not|don.t|rather than',
-                   r'doesn.t|depends on which'):
+                   r'doesn.t|depends on which', r'row[- ]for[- ]row'):
             return False
     return True
 
@@ -421,8 +468,11 @@ CHECKS = {
                           r'(two|2) (problems|issues|defects|mistakes)', r'\bno\b[,.]',
                           r'record nothing', r'(problem|issue|wrong)')
                    and not asserts(t, r'(looks|is) (right|correct|good|fine)\b(?!.{0,30}except)')),
+  # A claim that the channels go on 501, not a mention of 501: iteration 5's
+  # baseline kept the axis on 851 with NcToPlc paths and passed on the aside
+  # "record the NC axis directly (port 501, from the NC task)".
   ("NC axis channels belong on port 501, not 851",
-   lambda t, c, m: has(t, r'\b501\b') and has(t, r'\b851\b') and has(t, r'\bnc\b', r'axes\.')),
+   lambda t, c, m: moves_to(t, 501, 851) and has(t, r'\b851\b') and has(t, r'\bnc\b', r'axes\.')),
   ("LREAL is the wrong name - Scope needs REAL64",
    lambda t, c, m: has(t, r'lreal') and has(t, r'real64')),
   ("does not flag the PLC state channel as wrong",
@@ -481,11 +531,78 @@ CHECKS = {
    lambda t, c, m: has(t, r'newscope', r'<basesampletime>10000', r'basesampletime.{0,40}10\s*000',
                           r'change.{0,60}(10\s*000|851)', r'set.{0,40}(10\s*000|851)')),
  ],
+ # second-site-config without its sample-time half: the PLC channels on 801,
+ # TwinCAT 2's PLC port, and nothing else wrong.
+ 'tc2-port-config': [
+  ("says it is not ready as written",
+   lambda t, c, m: has(t, *NOT_READY)
+                   and not looks_right(t)),
+  ("port 801 is wrong for TwinCAT 3, which starts at 851",
+   lambda t, c, m: has(t, r'\b801\b') and moves_to(t, 851, 801)),
+  # Iteration 5: "NC axis data normally sits under the NC server (port 500)".
+  ("does not flag the NC channels on 501 as wrong",
+   lambda t, c, m: not has(t, r'501[^.\n]{0,60}(is wrong|should be (on )?(port )?(851|500)|must be (851|500))',
+                              r'(all|every|each) (channel|acquisition)s?[^.\n]{0,40}\b851\b',
+                              r'\bnc\b[^.]{0,60}(sits?|lives?|is served|belongs?)[^.]{0,30}\b500\b')),
+  ("does not flag the sample time as wrong",
+   lambda t, c, m: not has(t, r'(basesampletime|sample time)[^.\n]{0,40}\b(is wrong|is incorrect|is too (fast|slow|high|low)|must be changed|should be changed)',
+                              r'100\s*ns')),
+  ("gives a concrete fix, or regenerates the file",
+   lambda t, c, m: has(t, r'newscope', r'<targetport>851', r'targetport.{0,40}851',
+                          r'change.{0,60}851', r'set.{0,40}851', r'801\W{0,6}(->|→|to)\W{0,6}851')),
+ ],
+ # A scheduled TC3ScopeExportTool.exe call with no `silent`, a ','-separated
+ # channellist= and start=/end= in milliseconds. The tool exits 0 on the last two.
+ 'export-batch-script': [
+  ("says the script will not do what it is meant to",
+   lambda t, c, m: has(t, *NOT_READY, r"(won'?t|will not|doesn'?t|does not) (do|work|export|finish)",
+                          r'never (finish|return|complete|exit)')
+                   and not looks_right(t)),
+  ("says it needs silent, or the tool opens a window and waits",
+   lambda t, c, m: has(t, r'\bsilent\b')
+                   and has(t, r'\bhangs?\b', r'\bwaits?\b', r'\bwindow\b', r'\bblocks?\b', r'dialog',
+                          r'\bui\b', r'interactive', r'never (finish|return|exit|complete)')),
+  ("says channellist= needs ';' and that ',' exports every channel",
+   lambda t, c, m: has(t, r'channellist')
+                   and has(t, r'semicolon', r'`;`', r"';'", r'"[^"\n]*;[^"\n]*"', r'\w+;\w+;\w+')
+                   and has(t, r'(all|every)\s+(the\s+)?(channels|columns)', r'ignor\w+')),
+  ("says start=/end= take absolute FILETIME ticks, not milliseconds",
+   lambda t, c, m: has(t, r'filetime', r'1601', r'100\s*ns')
+                   and has(t, r'\bstart=?', r'\bend=?')),
+  ("says the failures exit 0, so errorlevel logs OK - check the output",
+   lambda t, c, m: has(t, r'exit (code )?0', r'exits? (with )?(0|success|zero)', r'errorlevel',
+                          r'export ok', r'exit code')
+                   and has(t, r'(check|verify|look at|inspect|test|confirm)\b[^.\n]{0,80}(header|columns|output|file|csv|starttime)')),
+ ],
+ # A hand-made export whose torque channel carries ScaleFactor 2 / Offset 10:
+ # the header is the same whether 'Scale values before export' was on or off.
+ 'scaled-export': [
+  ("gives both readings, about 79 % and about 168 %",
+   lambda t, c, m: has(t, r'\b79(?:[.,]\d+)?\b') and has(t, r'\b16[78](?:[.,]\d+)?\b')),
+  ("says the header cannot show whether the scaling was applied",
+   lambda t, c, m: has(t, r"(can'?t|cannot|does ?n.t|doesn'?t|no way to|not) (tell|say|show|record|know|indicate)\w*[^.\n]{0,80}(scal|applied)",
+                          r'(same|identical)[^.\n]{0,60}(either way|on or off|whether)',
+                          r'does not record which')),
+  ("names Scope View's 'Scale values before export' option",
+   lambda t, c, m: has(t, r'scale values', r'scalevalues', r'scaled? (values )?before export')),
+  ("says how to settle it: the export setting, or a fresh export of the .svdx",
+   lambda t, c, m: has(t, r'\.svdx', r're-?export', r'export (dialog|setting)', r'which (export )?setting',
+                          r'\bingest\b')),
+  ("neither backs nor rules out the bigger drive on this file",
+   lambda t, c, m: not verdict(t, r'(exceed\w*|went|go(es)? over|above|over|passed|reach\w*|hit)\s[^.\n]{0,25}\b150\b',
+                                  r'(under|below|short of|less than|within)\s[^.\n]{0,15}\b150\b',
+                                  r'\b150\s*%?\s*(was|is) (exceeded|reached|passed)',
+                                  r'bigger drive (is|would be) (justified|needed|warranted|necessary|not needed|unnecessary)')),
+ ],
 }
 
 # Retired evals keep their checks so an old run can be regraded, but a run
 # directory without them is not reported as missing them.
 RETIRED = {
+    'overnight-ring-buffer': "iteration 5: baselines sized the sample block (12 MB is ~10 min) "
+                             "and read RecordTime as 600 s; the answer is in the file",
+    'second-site-config': "iteration 5: BaseSampleTime decoded from RecordTime in the same "
+                          "file; the port half continues as tc2-port-config",
     'armed-but-not-recording': "iteration 4: baselines read NONE, 60 s and AutoStop off the "
                                "plain XML; replaced by overnight-ring-buffer",
     'needle-at-scale': "tied at full marks in iteration 3, n=3",
