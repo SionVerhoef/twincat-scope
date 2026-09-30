@@ -1657,7 +1657,7 @@ def prefix_house_checks():
         timed = run("newscope", tpl, "-o", Path(tmp) / "timed.tcscopex",
                     "--netid", "1.2.3.4.1.1", "--sample-time-ms", "10",
                     "--channels", "GVL.fbA.bX:BOOL")
-        check("newscope says Scope snaps a sample time to the task cycle",
+        check("newscope says to choose a multiple of the task cycle",
               "multiple of the cycle" in timed.get("sample_time_note", "")
               and "sample_time_note" not in made,
               str(timed.get("sample_time_note"))[:60])
