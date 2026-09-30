@@ -198,9 +198,11 @@ clean signal that arrives at its extreme still moving has hit a limit, and still
 summary still counts everything.
 
 Among the defects, a **one-off ranks before a `recurring` one**. A defect is `recurring` when
-its channel reports 20 or more of its kind and it is no larger than 1.5× their median: a
-following error peaks alike on every stroke, and on one real axis those 1 027 spikes took 13 of
-20 slots. The flag says the channel always does this, not that it is harmless — a fault that
+its channel reports 20 or more of its kind and it is no larger than 1.5× their median, or when
+20 or more of them lie within a factor 1.5 of its own size: a following error peaks alike on
+every stroke, and on one real axis those 1 027 spikes took 13 of 20 slots. The second test
+catches a larger population beside a smaller one — 25 alike steps on a command channel beside
+32 smaller ones. The flag says the channel always does this, not that it is harmless — a fault that
 repeats identically on every cycle is recurring too, so read what the summary counts.
 
 **Integer states.** An integer channel that stands still most of the time is a state: a step
