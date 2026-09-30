@@ -1,6 +1,6 @@
 # Field review — main @ 8bf9230
 
-Run by an agent on a Beckhoff commissioning workstation (Windows 10, Dutch locale, TwinCAT 3.1
+Run by an agent on a Beckhoff commissioning workstation (Windows 10, decimal-comma locale, TwinCAT 3.1
 build 4024.55, Scope 3.4.3147.18 incl. the TF3300 export tool, Python 3.12.10 under `uv`
 0.12.7, Claude Code 2.1.248). The subject was the two PRs since the last round: #26 (short
 rows, per-group timing, TriggerAction) and #27 (Scope View's CSV export options). The skill was
@@ -213,7 +213,7 @@ Scope View by hand, on R2, at the dialog's default range.
 | Marker windows | None; "only included channels/marker" on |
 
 So Scope View's defaults *are* the `,`/`.` Name-only dialect of the 19 earlier exports; the
-TAB/`,` full-header dialect is the tool's, on a Dutch locale. **The dialog remembers the last
+TAB/`,` full-header dialect is the tool's, on a decimal-comma locale. **The dialog remembers the last
 settings used**: a later export came out TAB-separated although Comma is the default.
 
 | Option | Tool | Scope View |

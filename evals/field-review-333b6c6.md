@@ -1,6 +1,6 @@
 # Field review -- main @ 333b6c6 (last round before v1.0.0)
 
-Run by an agent on the same commissioning workstation as the rounds before (Windows 10, Dutch
+Run by an agent on the same commissioning workstation as the rounds before (Windows 10, decimal-comma
 locale, TwinCAT 3.1 build 4024.55, **TwinCAT Measurement / Scope View 3.4.3147.18** per its About
 box, Python 3.12.10). The subject: PRs #41-#44 on main at `333b6c6`. The skill was reinstalled from
 that commit.

@@ -1,6 +1,6 @@
 # Field review -- v1.0.0 (first round after the release)
 
-Run by an agent on the same commissioning workstation as the rounds before (Windows 10, Dutch
+Run by an agent on the same commissioning workstation as the rounds before (Windows 10, decimal-comma
 locale, TwinCAT 3.1 build 4024.55, TcXaeShell 15.0, Python 3.12.10, Windows PowerShell 5.1 and
 PowerShell 7.5). The subject: the `v1.0.0` tag (`a6cf947`), installed the way a user would.
 
@@ -318,10 +318,10 @@ one-off / handful (sequence start, stop, a branch taken twice) or routine (20+).
 | 4 | step | seq3 | 280 | no | no -- start, first branch |
 | 5 | step | seq2 | 210 | no | no -- start, first branch |
 | 6 | flatline (19 847 samples) | the PLC REAL64 rate | 396.9 | -- | no -- the same rate standing still |
-| 7 | step | PLC INT product count | 14 | no | no -- products leaving (9 → 2) |
+| 7 | step | PLC INT product count | 14 | no | no -- products leaving (the count drops) |
 | 8 | step | the same | 14 | no | no -- same |
 | 9 | step | the same | 14 | no | no -- same |
-| 10 | step | the same | 8 | no | no -- 9 → 5 |
+| 10 | step | the same | 8 | no | no -- a smaller drop |
 | 11 | step (2 wide) | axis1.SetAcc | 2.09 | no | no -- routine on a command channel |
 | 12 | step (2 wide) | axis1.SetAcc | 2.09 | no | no -- same |
 | 13 | flatline (114 062 samples) | axis1.PosDiff | 2 281 | -- | no -- the axis idle after the stop |
@@ -335,8 +335,8 @@ one-off / handful (sequence start, stop, a branch taken twice) or routine (20+).
 
 **None of the 20 is a machine defect.** The stop (14-16) and the frozen following error (13)
 are what a diagnosis of this recording wants to see first. New against last round's list: the
-**product count takes 4 slots** (7-10). It is a counter, not a state: 361 changes, 14 distinct
-pairs, and its `9 → 2` occurs 10 times, below the 20-alike line, so none is `recurring`. That is
+**product count takes 4 slots** (7-10). It is a counter, not a state: 14 distinct pairs, and
+its most common drop occurs 10 times, below the 20-alike line, so none is `recurring`. That is
 the risk the capped-20 design has to answer: the 5-19 band, empty on the state channels, is where
 a counter lives.
 

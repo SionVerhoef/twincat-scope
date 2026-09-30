@@ -1,7 +1,7 @@
 # Field review — main @ 79660f4
 
 Run by an agent on the same Beckhoff commissioning workstation as the 8bf9230 round
-(Windows 10, Dutch locale, TwinCAT 3.1 build 4024.55, Scope 3.4.3147.18 incl. the TF3300
+(Windows 10, decimal-comma locale, TwinCAT 3.1 build 4024.55, Scope 3.4.3147.18 incl. the TF3300
 export tool, Python 3.12.10, `uv` 0.12.7). The subject: the G1-G6 fixes that followed the
 8bf9230 review. The skill was reinstalled from `79660f4` first.
 
