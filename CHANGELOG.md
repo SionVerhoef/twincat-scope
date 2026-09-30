@@ -22,9 +22,6 @@
 
 ### Fixed
 
-- `newscope`: an NC axis's `Axes.<axis>.ToPlc.*` and `.FromPlc.*` members go on the axis's own
-  tab. They had a tab of their own, named after the struct, with the axis's lone `ActPos` copied
-  into it; two axes' members clashed into full-path titles (`evals/field-review-74dd86d.md`, §2).
 - `events`: a following error decaying after the axis arrives is no longer a `standing` one. On
   a real axis parked at a software limit, the loop's 2.3 s settling tail was reported; a run whose
   last quarter is at half its first quarter or less is now left out (`evals/field-review-74dd86d.md`, §3).
@@ -47,6 +44,9 @@
   was changed, and exits 1 (`evals/field-review-v1.0.0.md`).
 - README: the zip install defaults to the Copilot folder, so Claude Code needs `-Target
   .claude\skills\twincat-scope`; a copy of the script saved from a browser needs `Unblock-File`.
+- `newscope`: an NC axis's `Axes.<axis>.ToPlc.*` and `.FromPlc.*` members go on the axis's own
+  tab. They had a tab of their own, named after the struct, with the axis's lone `ActPos` copied
+  into it; two axes' members clashed into full-path titles (`evals/field-review-74dd86d.md`, §2).
 
 ## 1.0.0 — 2026-09-29
 
