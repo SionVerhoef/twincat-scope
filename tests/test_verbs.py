@@ -1394,6 +1394,85 @@ def theme_auto_checks():
               f"{light.get('theme')} from {light.get('theme_source')}")
 
 
+def few_value_checks(rows=6000):
+    """Bead 5we, field round v1.0.0 Part E: a filtered rate with six distinct
+    values, two of them 98.7% of the time, took two capped slots as clipping
+    at both. A signal cut off at a rail has thousands of values; this one just
+    sits at its few.
+    """
+    # Two of them close to the main values, so the channel spans thousands of
+    # its own quantisation steps and is not taken for an axis standing still.
+    others = [0.2501, 0.5, 0.6, 0.7499]
+    values = []
+    for i in range(rows):
+        values.append(others[i // 1000 % 4] if i % 1000 < 20 else
+                      (0.25 if i // 500 % 2 else 0.75))
+    with tempfile.TemporaryDirectory() as tmp:
+        csv = Path(tmp) / "rate.csv"
+        csv.write_text("\n".join(["TwinCAT Scope Export", "", "Name,Rate"]
+                                 + [f"{i:.1f},{v:.6f}" for i, v in enumerate(values)]) + "\n",
+                       encoding="utf-8", newline="")
+        events = run("events", csv, "--max-events", 1000).get("events", [])
+        check("a real channel sitting at a handful of values is not clipping",
+              not [e for e in events if e["kind"] == "clipping"],
+              str([(e["edge"], round(e["fraction"], 3)) for e in events
+                   if e["kind"] == "clipping"]))
+
+
+def write_axis_export(path, blocked, seed=19):
+    """SetPos rests, cruises to 100 over 3 s, and rests again for 10 s.
+
+    PosDiff lags in proportion to the velocity, 0.5 at cruise - a steady
+    following error for three seconds that is normal. Healthy, it settles to
+    noise when the setpoint stops. Blocked on an end stop, the axis stays 10
+    short and PosDiff stands at 10 for the whole rest.
+    """
+    import random
+    rng = random.Random(seed)
+    rest, ramp, cruise, after = 2000, 200, 2600, 10000
+    velo = ([0.0] * rest + [0.0333 * (k + 1) / ramp for k in range(ramp)]
+            + [0.0333] * cruise + [0.0333 * (ramp - 1 - k) / ramp for k in range(ramp)]
+            + [0.0] * after)
+    rows, pos, stop = [], 0.0, rest + 2 * ramp + cruise
+    for i, v in enumerate(velo):
+        pos += v
+        lag = 15.0 * v
+        if blocked and i >= stop:
+            # It builds up as the axis presses into the stop, as on the real one.
+            lag = 10.0 * min(1.0, (i - stop) / 300)
+        rows.append(f"{i:.1f},{pos:.6f},{lag + rng.gauss(0, 0.001):.6f}")
+    path.write_text("\n".join(["TwinCAT Scope Export", "", "Name,SetPos,PosDiff"] + rows)
+                    + "\n", encoding="utf-8", newline="")
+    return {"stop_s": stop / 1000.0, "after_s": after / 1000.0}
+
+
+def standing_error_checks():
+    """Bead k9v, field round v1.0.0 B1b: an axis driven onto an end stop stood
+    a tenth of its stroke short for 27 s after its setpoint had stopped, and
+    `events` said only "2 PosDiff ramps". A following error that stays while
+    the setpoint rests is the axis not getting there.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        healthy, blocked = Path(tmp) / "healthy.csv", Path(tmp) / "blocked.csv"
+        write_axis_export(healthy, blocked=False)
+        truth = write_axis_export(blocked, blocked=True)
+        ok = run("events", healthy, "--max-events", 1000).get("events", [])
+        check("a steady lag while the setpoint moves is not a standing following error",
+              not [e for e in ok if e["kind"] == "standing"],
+              str([(e["time"], e.get("samples")) for e in ok if e["kind"] == "standing"]))
+        got = run("events", blocked, "--max-events", 1000)
+        stood = [e for e in got.get("events", []) if e["kind"] == "standing"]
+        check("a following error that stays while the setpoint rests is reported",
+              len(stood) == 1 and stood[0]["channel"] == "PosDiff"
+              and near(stood[0]["time"], truth["stop_s"], 0.05)
+              and stood[0].get("samples", 0) >= 0.9 * truth["after_s"] * 1000
+              and stood[0].get("setpoint") == "SetPos",
+              str([(e["time"], e.get("samples"), e.get("setpoint")) for e in stood]))
+        cut = run("events", blocked, "--max-events", 1).get("events", [])
+        check("it is a defect: a capped answer returns it first",
+              [e["kind"] for e in cut] == ["standing"], str([e["kind"] for e in cut]))
+
+
 def command_turnaround_checks(cycles=6, rest=20, ease=35):
     """Bead mez, field round v1.0.0 Part C: an acceleration setpoint turning
     round just short of zero came back as a `spike`. Its step into the apex
@@ -2836,7 +2915,7 @@ def robustness_checks():
     check("every option carries help text", not bare, ", ".join(bare))
     events_help = next(a.help for a in verbs._choices_actions if a.dest == "events")
     kinds = ("step", "ramp", "spike", "transition", "flatline", "hold", "wrap", "clipping",
-             "crossing")
+             "standing", "crossing")
     check("events help lists every kind it reports",
           all(kind in events_help for kind in kinds), events_help)
 
@@ -3136,6 +3215,8 @@ def main():
     recurring_spike_checks()
     sharp_pulse_checks()
     command_turnaround_checks()
+    few_value_checks()
+    standing_error_checks()
     theme_auto_checks()
     integer_sequence_checks()
     state_rarity_checks()
