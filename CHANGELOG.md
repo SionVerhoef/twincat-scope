@@ -25,12 +25,14 @@
 - `events`: a real channel with 16 or fewer distinct values no longer reports `clipping`; a
   filtered rate sitting at two of its six values had taken two capped slots.
 
-- The sample-time rule no longer claims more than was measured. `SKILL.md`,
-  `references/scope-configuration.md` and `newscope`'s note said Scope "snaps" a sample time to
-  the task cycle, with no bound; one case was seen (10 ms on a 4 ms task saved as 8 ms). They
-  now say which way it rounds, and what happens below one cycle, are not measured. In eval
-  iteration 5 every skill run predicted that 100 ns would record at the task rate
-  (`evals/results-iteration-5.md`).
+- The sample-time rule is now the measured one. `SKILL.md`, `references/scope-configuration.md`
+  and `newscope`'s note said Scope "snaps" a sample time to the task cycle, from one case. On a
+  real target, Scope snaps when recording starts (not on load or Save), to each acquisition's own
+  task cycle, rounding down, with one cycle as the minimum and no message: 7.5 ms recorded at
+  4 ms on a PLC task and 6 ms on an NC task in the same file (`evals/field-review-74dd86d.md`).
+  In eval iteration 5 every skill run had guessed at the sub-cycle case.
+- Docs: save the recording before changing any setting (a change after Record discards it), and
+  Save does not write an unchanged scope.
 - `events`: a setpoint turning round at its own rate (an acceleration command reversing just
   short of zero) is no longer a `spike`; a spike on a command must jump out of the motion before
   it (`evals/field-review-v1.0.0.md`, Part C).
