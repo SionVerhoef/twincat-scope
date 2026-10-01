@@ -7,8 +7,8 @@ below can be verified from this repository except the one thing that matters mos
 why you are being asked.
 
 **Two parts.** **Part A (§4)** needs a machine running TwinCAT and is the priority. **Part B
-(§5–§9)** needs the 19 real exports from the earlier review; do it only if they are on the
-machine you are at. If there is time for one thing only, it is §4.1.
+(§5–§9) is closed**: it needed the 19 real exports from the earlier review, and they no longer
+exist. It is kept as a record; skip it. If there is time for one thing only, it is §4.1.
 
 ---
 
@@ -57,7 +57,9 @@ time-column behaviour — but they are 200 to 1500 rows of invented signal. The 
 carry customer machine behaviour and are not in this repo and never will be.
 
 So: this repo can prove the change is self-consistent. It cannot prove the reader still reads
-real files correctly. Only a machine holding those 19 exports can. That is Part B.
+real files correctly. Only a machine holding those 19 exports could, and that was Part B. The
+exports are gone, so that check will never be run against them; the real recordings read in the
+rounds since are the evidence instead.
 
 A second session (`evals/field-review-1fa0e9b.md`) then took the other half of the skill — the
 one that *builds* recordings — to a running machine. A generated project opened cleanly in
@@ -71,17 +73,19 @@ passed — NC axis and PLC bit, integer and real channels all recorded, `AxisSty
 and 4.2, 4.5 and 4.7 were answered. A fifth (`evals/field-review-3e4c44d.md`) closed 4.4,
 4.5, 4.6 and 4.8 and the omission test in 4.3, and a sixth (`evals/field-review-6872161.md`)
 answered `ColorMode` — no theme-following option exists. A seventh
-(`evals/field-review-44d4951.md`) recorded parked and still axes for 4.9. **Still open from
-Part A:** running the new `checkscope --tmc` against a real `.tmc` (4.7), whether Claude Code
-picks the skill up (4.10), and in 4.9 an axis parked exactly at a limit and a genuine
-saturation — and all of Part B.
+(`evals/field-review-44d4951.md`) recorded parked and still axes for 4.9. The rounds after the
+first release (`evals/field-review-v1.0.0.md`, `-74dd86d.md`, `-633a9bf.md`) parked an axis at
+a software limit and on an end stop, ran `checkscope --tmc` against a real `.tmc` (4.7), and
+measured what Scope does with a sample time that is not a multiple of the task cycle. **Still
+open from Part A:** whether Claude Code picks the skill up unprompted (4.10), and in 4.9 a
+genuine saturation — the machine these rounds ran on has no axis that reaches its limit.
 
 ## 3. Setting up
 
 ```bash
 git clone https://github.com/SionVerhoef/twincat-scope.git
 cd twincat-scope
-uv run tests/test_verbs.py          # expect every check to pass (158 at the time of writing)
+uv run tests/test_verbs.py          # expect every check to pass
 ```
 
 **On Windows, write `py -3` wherever this brief says `python3`.** There `python3` usually hits
@@ -299,10 +303,11 @@ Anything that failed, plus:
 
 Every open task waiting on a machine closes from those seven.
 
-# Part B — against the 19 real exports
+# Part B — against the 19 real exports (closed)
 
-Only if the exports from the earlier review (`evals/field-review-af54888.md`) are on this
-machine.
+**Closed: the exports from the earlier review (`evals/field-review-af54888.md`) no longer
+exist, so nothing in §5–§9 can be run.** The sections stay as the record of what that review
+found and what was changed because of it.
 
 ## 5. THE critical check
 
