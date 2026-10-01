@@ -70,6 +70,12 @@ LOAD_TYPICAL_SAMPLES_PER_S = 6_000     # the median of the seven
 LOAD_HIGH_SAMPLES_PER_S = 10_000       # only the densest two exceed this
 LOAD_WARN_SAMPLES_PER_S = 20_000       # denser than anything measured in practice
 
+# Scope records no faster than one sample per cycle of the task that owns an
+# acquisition: 100 ns, 0.5 ms and 3 ms all recorded at one 4 ms cycle on a real
+# target (evals/field-review-74dd86d.md). A sample time below this is taken as
+# shorter than the owning task's cycle, and 1/value is no load figure at all.
+SUB_CYCLE_TICKS = 500                  # 50 us
+
 # Template leftovers. Harmless in the project tree, useless as a column header.
 PLACEHOLDER_NAMES = {"signal", "channel", "untitled", "none"}
 
@@ -3515,6 +3521,7 @@ def cmd_checkscope(args):
     channels = []
     acq_guids = set()
     unrated = 0
+    sub_cycle = []
     acq_names = {}
     for node in acquisitions:
         symbol = (node.findtext("SymbolName") or "").strip()
@@ -3528,7 +3535,9 @@ def cmd_checkscope(args):
         acq_guids.add(guid)
         ticks = (node.findtext("BaseSampleTime") or "").strip()
         rate = None
-        if ticks.isdigit() and int(ticks) > 0:
+        if ticks.isdigit() and 0 < int(ticks) < SUB_CYCLE_TICKS:
+            sub_cycle.append(symbol or "(no symbol)")
+        elif ticks.isdigit() and int(ticks) > 0:
             rate = 1000.0 / (int(ticks) / TICKS_PER_MS)
             total_rate += rate
         elif ticks and (node.findtext("UseTaskSampleTime") or "").strip().lower() != "true":
@@ -3795,6 +3804,14 @@ def cmd_checkscope(args):
             f"{unrated} of {len(acquisitions)} acquisitions declare no "
             "BaseSampleTime - they run at the task rate, so the load figure "
             "below counts only the rest."
+        )
+    if sub_cycle:
+        warnings.append(
+            f"{len(sub_cycle)} acquisition(s) have a BaseSampleTime under "
+            f"{SUB_CYCLE_TICKS / TICKS_PER_MS * 1000:.0f} us ({', '.join(sub_cycle[:5])}). "
+            "Scope silently records these at one cycle of the task that owns "
+            "them, so they are left out of the load figure. BaseSampleTime is "
+            "in 100 ns ticks - if 1 ms was meant, that is 10000."
         )
 
     if total_rate > LOAD_WARN_SAMPLES_PER_S:

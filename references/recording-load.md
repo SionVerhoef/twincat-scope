@@ -31,6 +31,8 @@ differently from what their headline rates suggest.
 `checkscope` sums this across all acquisitions and reports which band it lands in. The bands
 are **empirical, not certified** — a prompt to think, not a limit. The real limit depends on
 the controller, the core assignment, what else runs on it, and the task cycle time.
+An acquisition never records faster than one sample per cycle of its task, so a sample time
+under 50 µs is named in a warning and left out of the sum rather than counted as 1/value.
 
 | Band | samples/s | Meaning |
 |---|---|---|

@@ -39,6 +39,9 @@
   In eval iteration 5 every skill run had guessed at the sub-cycle case.
 - Docs: save the recording before changing any setting (a change after Record discards it), and
   Save does not write an unchanged scope.
+- `checkscope`: a sample time under 50 µs is named in a warning and left out of the load figure.
+  Scope records it at one task cycle; 1 tick (100 ns) had been reported as ~20 000 000 samples/s
+  (`evals/field-review-74dd86d.md`, §1).
 - `events`: a setpoint turning round at its own rate (an acceleration command reversing just
   short of zero) is no longer a `spike`; a spike on a command must jump out of the motion before
   it (`evals/field-review-v1.0.0.md`, Part C).
