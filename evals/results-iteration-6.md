@@ -153,3 +153,19 @@ written to fix it; iteration 7 has to show it holds beside the other evals.
   runs used.
 - Run from a session that is not worktree-isolated, or the guard's refusals join the
   measurement again.
+
+**Done, in the iteration 7 prep.** The checks were changed as listed, `needle-in-the-haystack`
+gained a check for normal creep listed as a defect, and `stage_runs.py` now hides each prompt,
+keeps the arm map outside the stage, refuses to collect a round with a missing answer, and
+stages and files the judge read. The same 42 answers regraded with the new checks, so that a
+later `grade.py` run on them is not read as a different result:
+
+| Eval | Above | Regraded (skill / baseline) | Judge (skill / baseline) |
+|---|---|---|---|
+| `scaled-export`, main round | 3.7/5 vs 1.3/5 | **0.0/6 vs 2.3/6** | 0.00 / 1.00 |
+| `scaled-export`, skill arm after the fix | 5.0/5 | 6.0/6 | 2.00 |
+| `out-of-scope-authoring` | 3.7/5 vs 2.3/5 | 5.0/5 vs 2.3/5 | 2.00 / 0.00 |
+| `needle-in-the-haystack` | 7.0/7 vs 7.0/7 | 7.7/8 vs 7.0/8 | 1.67 / 1.00 |
+| **Total, main round** | 35.0/38 vs 24.7/38 | 33.3/40 vs 25.7/40 | |
+
+On these three evals the regraded checks now order every run as the judge did.

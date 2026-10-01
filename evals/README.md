@@ -18,7 +18,7 @@ Two halves, different costs:
 | `evals.json` | The behaviour evals: prompt, expected output, checks | yes |
 | `triggers.json` | Prompts that should and should not fire the skill | yes |
 | `grade.py`, `test_grader.py` | Grader and its self-test | yes |
-| `make_eval_fixture.py`, `stage_runs.py` | Build fixtures, stage runs outside the repo | yes |
+| `make_eval_fixture.py`, `stage_runs.py`, `test_stage_runs.py` | Build fixtures; stage runs outside the repo, file the answers, run the judge read blind; and that harness's self-test | yes |
 | `results-iteration-*.md` | One write-up per eval round; the highest number is the latest | latest only |
 | `field-test-brief.md` | The checklist for a session on a real TwinCAT machine | yes |
 | `field-review-*.md` | Write-ups of those sessions, named after the commit tested | record |
@@ -82,10 +82,14 @@ the baseline arm honest.
 
 **Stage every eval on its own**: one directory per run, holding a copy of `stages/<eval>/` (and
 `skill/` for the skill arm). `out-of-scope-authoring`'s stage is just an empty `data/`.
-`stage_runs.py stage` does exactly this, under neutral shuffled ids, writes each run's prompt with
-the additions below, and keeps the id-to-arm map in one file outside the repository;
-`stage_runs.py collect` files the answers back under `runs/<name>/` for `grade.py`. Agents list
-the folder and read whatever is in it. In
+`stage_runs.py stage` does exactly this, under neutral shuffled ids. It writes each run's prompt,
+with the additions below, alone into a randomly named folder inside an unlistable `prompts/`, and
+`launch.tsv` holds the one line to give each fresh agent — its own task file's path. An agent told
+to read `prompts/<id>.txt` could list the others; one handed a path it cannot enumerate from
+cannot. The id-to-arm map goes to `--keys`, a directory outside the stage, so nothing the
+orchestrator reads before grading says which arm a run is. `stage_runs.py collect` files the
+answers back under `runs/<name>/` for `grade.py`, and fails, naming them, if any run has no
+answer on disk. Agents list the folder and read whatever is in it. In
 iteration 3 the out-of-scope agents diagnosed the other evals' recordings instead of answering.
 In iteration 4, baselines on `hand-written-config` read the right port and type out of the
 `.svdx` staged for another eval, and that eval tied until it was re-run alone. It then separated
@@ -106,11 +110,19 @@ That section is not decoration. Whether an agent oriented before reading rows is
 prose, and it is one of the behaviours being measured. It is self-reported, which is a real
 limitation — but both arms are asked for it the same way, so any inflation is symmetric.
 
-Write each answer to `<run-dir>/<eval-name>/<arm>/run-<n>/answer.md`, and beside it a
-`cost.json` of `{"tokens": N, "seconds": N}` taken from what the agent runner reports. Cost is
-not optional: at scale the skill's case is token economy rather than correctness, and iteration 2
+Each prompt tells its agent to write the answer to `<root>/answers/<id>.md` with a file-writing
+tool and to check the file exists; `collect` files it as
+`runs/<name>/<eval-name>/<arm>/run-<n>/answer.md`. Log each run's usage as a line of
+`<root>/cost.tsv` — id, tokens, seconds, tool uses, tab-separated — from what the agent runner
+reports, and `collect` writes it beside the answer as `cost.json`. Cost is not optional: at scale the skill's case is token economy rather than correctness, and iteration 2
 could not settle it because nothing recorded usage. Run the cells one at a time, or the seconds
 measure contention rather than the arm.
+
+**Run the round from a session that is not isolated in a git worktree.** Subagents inherit the
+session's guard, which refuses any shell command it cannot parse. In iteration 6 it refused 32
+commands across both arms, and four runs reported an answer that was never written; they were
+recovered from the refused commands. `collect` now catches the second; only the session can
+prevent the first.
 
 **4. Grade.**
 
@@ -139,8 +151,13 @@ judgement, written beside it as `judge.json`:
 - **2** — reaches `expected_output` and states nothing `ground_truth` contradicts.
 
 The judge is a person, or a model given only the prompt, `expected_output`, `ground_truth` and the
-answer — **never the arm**. Strip the `## Commands` section first, since invoking `tcscope.py`
-gives the arm away. `grade.py` prints the mean judge score per eval and arm under the check
+answer — **never the arm**. `stage_runs.py judge-stage` builds one packet per eval: that eval's
+answers shuffled under letters, the `## Commands` section stripped — invoking `tcscope.py` gives
+the arm away — and the tool's name, the skill's paths and the word "skill" replaced.
+`judge/launch.tsv` holds the line to give a fresh agent per packet, and `judge-collect` files each
+score beside its answer. The verbs an answer ran still show in its prose; that limit is stated in
+every results file. A judge's score on a hedged answer moves by a point between reads
+(iteration 6), so one point on one run is not a finding. `grade.py` prints the mean judge score per eval and arm under the check
 scores, and writes it into `summary.json`. Where the judge and the checks disagree, read the
 answer: one of them is wrong, and the disagreement is the most useful output of the round.
 

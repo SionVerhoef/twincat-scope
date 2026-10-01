@@ -38,6 +38,9 @@ jobs:
       - name: eval grader tests
         run: python3 evals/test_grader.py
 
+      - name: eval harness carries a round from staging to judged answers
+        run: python3 evals/test_stage_runs.py
+
       - name: standalone contract
         # No reference may point outside this repository, and nothing here may
         # claim a certification that does not exist. The bracket around a first
