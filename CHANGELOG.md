@@ -22,6 +22,9 @@
 
 ### Fixed
 
+- `events`: 20 or more alike defects on a channel are `recurring` even when they are larger than
+  the channel's median one. On a real command channel, 25 alike two-sample steps beside 32
+  smaller ones were not flagged and took 5 of 20 capped slots (`evals/field-review-74dd86d.md`, §4).
 - `events`: a following error decaying after the axis arrives is no longer a `standing` one. On
   a real axis parked at a software limit, the loop's 2.3 s settling tail was reported; a run whose
   last quarter is at half its first quarter or less is now left out (`evals/field-review-74dd86d.md`, §3).

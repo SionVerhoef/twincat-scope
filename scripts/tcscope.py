@@ -35,6 +35,7 @@ and reports seconds everywhere - `manifest` says so via "time_unit": "ms" and
 """
 
 import argparse
+import bisect
 import collections
 import copy
 import hashlib
@@ -1946,7 +1947,9 @@ def _bin_of(event, t0, t1):
 # A defect is recurring when its channel reports at least this many of its
 # kind and it is no larger than RECURRING_SPREAD times their median size: the
 # following error's peak on every stroke, 1 027 spikes alike to a few percent
-# on one real axis, is what that channel does rather than a fault.
+# on one real axis, is what that channel does rather than a fault. So is one
+# where RECURRING_MIN of its kind, itself included, lie within a factor
+# RECURRING_SPREAD of its own size.
 RECURRING_MIN = 20
 RECURRING_SPREAD = 1.5
 
@@ -1968,8 +1971,8 @@ def _mark_recurring(found):
             pairs[pair] = pairs.get(pair, 0) + 1
         else:
             sizes.setdefault(key, []).append(abs(e["delta"]))
-    typical = {key: sorted(v)[len(v) // 2] for key, v in sizes.items()
-               if len(v) >= RECURRING_MIN}
+    ordered = {key: sorted(v) for key, v in sizes.items() if len(v) >= RECURRING_MIN}
+    typical = {key: v[len(v) // 2] for key, v in ordered.items()}
     for e in found:
         key = (e["symbol_name"], e.get("group"), e["kind"])
         if "from" in e:
@@ -1979,6 +1982,14 @@ def _mark_recurring(found):
         median = typical.get(key)
         if median is not None and abs(e["delta"]) <= RECURRING_SPREAD * median:
             e["recurring"] = True
+        elif key in ordered:
+            # A second population above the median: on one real command
+            # channel, 25 alike larger steps beside 32 small ones.
+            size, near = abs(e["delta"]), ordered[key]
+            alike = (bisect.bisect_right(near, size * RECURRING_SPREAD)
+                     - bisect.bisect_left(near, size / RECURRING_SPREAD))
+            if alike >= RECURRING_MIN:
+                e["recurring"] = True
 
 
 def _rank(found, t0, t1, cap):

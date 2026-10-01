@@ -1140,20 +1140,23 @@ def clean_feedback_checks():
                    if e["kind"] in ("clipping", "wrap")][:8]))
 
 
-def write_recurring_spike_export(path, strokes=60, period=200, height=3.3, seed=11):
+def write_recurring_spike_export(path, strokes=60, period=200, height=3.3, seed=11,
+                                 heights=None):
     """A following error that peaks alike on every stroke, and one real fault.
 
     PosDiff: noise, plus a 3-sample peak of `height` ±5% once a stroke - the
     routine peak of a reciprocating axis. Torque: noise, with one modest step
     two thirds of the way through - the fault, far smaller against its own
-    noise than the routine peaks are against theirs.
+    noise than the routine peaks are against theirs. `heights`, one per
+    stroke, replaces the single `height`.
     """
     import random
     rng = random.Random(seed)
     rows, fault_at = [], (2 * strokes // 3) * period + period // 2
     for i in range(strokes * period):
         if i % period == 0:
-            this = height * (1 + rng.uniform(-0.05, 0.05))
+            base = heights[i // period] if heights else height
+            this = base * (1 + rng.uniform(-0.05, 0.05))
         peak = this if i % period in (100, 101, 102) else 0
         diff = rng.gauss(0, 0.01) + peak
         torque = 1.0 + rng.gauss(0, 0.02) + (0.5 if i >= fault_at else 0.0)
@@ -1188,6 +1191,27 @@ def recurring_spike_checks():
         check("a capped answer returns the one-off fault before routine peaks",
               any(e["channel"] == "Torque" and e["kind"] == "step" for e in cut),
               str([(e["channel"], e["kind"], e["severity"]) for e in cut]))
+
+
+def two_sizes_recurring_checks():
+    """Bead edp.8, field review 74dd86d §4: a command channel's 32 small steps
+    were marked recurring and its 25 alike larger ones were not, because the
+    median of all 57 is a small one - and 5 of 20 capped slots went to them.
+    Twenty alike are routine whatever size the rest of the channel runs at.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        csv = Path(tmp) / "two-sizes.csv"
+        heights = [1.0] * 35 + [3.3] * 25 + [10.0]
+        truth = write_recurring_spike_export(csv, strokes=len(heights), heights=heights)
+        full = run("events", csv, "--max-events", 1000).get("events", [])
+        spikes = sorted((e for e in full if e["channel"] == "PosDiff" and e["kind"] == "spike"),
+                        key=lambda e: e["time"])
+        check("both sizes of routine spike are recurring, the lone outlier is not",
+              len(spikes) == truth["strokes"]
+              and all(s.get("recurring") for s in spikes[:-1])
+              and not spikes[-1].get("recurring"),
+              f"{len(spikes)} spikes, {sum(bool(s.get('recurring')) for s in spikes[:-1])} "
+              f"routine recurring; outlier {spikes[-1].get('recurring') if spikes else None}")
 
 
 def declared_integer_checks(rows=3000):
@@ -3226,6 +3250,7 @@ def main():
     command_channel_checks()
     clean_feedback_checks()
     recurring_spike_checks()
+    two_sizes_recurring_checks()
     sharp_pulse_checks()
     command_turnaround_checks()
     few_value_checks()
