@@ -122,6 +122,29 @@ takes no longer.
 - **Keep both new evals.** `export-batch-script` separates the arms on checks and judge alike;
   `scaled-export` found a defect on its first outing.
 
+## Re-run after the fix
+
+The scaling wording was changed in PR #65 (`f72de0f`): `manifest`'s warning,
+`references/export-tool.md` and `SKILL.md` ask for both readings until the export setting is
+known, and no longer call it display scaling. The skill arm of `scaled-export` was then run again,
+n = 3, staged the same way from that commit, and judged by a fresh blinded subagent beside the
+three baseline answers from the main round.
+
+| `scaled-export` | Checks | Judge |
+|---|---|---|
+| With skill, main round (`47373cb`) | 3.7/5 [4 3 4] | 0.00 |
+| With skill, after the fix (`f72de0f`) | **5.0/5 [5 5 5]** | **2.00** |
+| Baseline (same three answers both times) | 1.3/5 [2 1 1] | 1.00, then 0.67 |
+
+All three re-runs open by saying the export cannot settle it, give 79 and 168, name the export
+setting and ask for it or the `.svdx`. With that cell replaced the round totals 36.3/38 against
+24.7/38, and the judge ranks the skill arm ahead on all seven evals.
+
+Two cautions. The second judge scored one baseline answer 0 where the first gave it 1, on
+identical text: a judge's score on a hedged answer moves by a point between reads, so a gap of
+one point on one run is not a finding. And the re-run is three runs of one cell against text
+written to fix it; iteration 7 has to show it holds beside the other evals.
+
 ## Changes before iteration 7
 
 - `scaled-export`: add a check that fails a flat yes or no, so the check total cannot pass a
