@@ -134,6 +134,37 @@ def verdict(t, *pats):
     return False
 
 
+def opens_undecided(t):
+    """True if the answer's opening says the question cannot be settled here.
+
+    Iteration 6: three answers named both figures, the option, the identical
+    header and the .svdx - every keyword - under a first line reading "No.
+    Nothing in this recording gets near 150." What a reader acts on is the
+    opening, so this reads only that: headings skipped, the first 400
+    characters, and a leading yes or no fails whatever follows it.
+    """
+    body = "\n".join(l for l in t.strip().splitlines() if not l.lstrip().startswith('#')).strip()
+    if re.match(r'[\W_]*(yes|no)\b', body, re.I):
+        return False
+    return has(body[:400],
+               r"(can'?t|cannot|can ?not|not possible to|unable to|won'?t)\s+(\w+\s+){0,3}"
+               r"(settle|tell|say|answer|decide|determine|confirm)",
+               r"(does ?n[o']t|doesn'?t|will not)\s+(settle|say|tell|answer|decide)",
+               r'depends on (one|an?|the|which|whether|how)',
+               r'not (settled|decided|answerable)', r'either\b[^.\n]{0,60}\bor\b')
+
+
+def listed_as_finding(t, pattern):
+    """True if `pattern` appears in a heading or the lead of a numbered item.
+
+    A defect list is headings and numbered items; a remark in running prose
+    that something is normal is not an entry in it.
+    """
+    return any(re.search(pattern, line, re.I)
+               for line in t.splitlines()
+               if re.match(r'\s*(#{1,5}\s|\d+[.)]\s|[-*]\s+\*\*\s*\d)', line))
+
+
 def looks_right(t):
     """A flat verdict that the whole file or script is fine.
 
@@ -214,6 +245,12 @@ CHECKS = {
   ("establishes the sample rate rather than assuming it",
    lambda t, c, m: has(t, r'1\s*khz', r'1000\s*hz', r'20[,.]?000\s*(rows|samples)',
                           r'sample (rate|interval|time)', r'\b1\s*ms\b')),
+  # Iteration 6: every run found the four planted defects and the checks tied
+  # a sixth time. The judge separated them on one thing - four of six listed
+  # ActPos creeping a few hundredths as a fifth defect, which is what an axis
+  # does. Telling a defect from normal behaviour is half of the expected output.
+  ("does not list the axis's normal standstill creep as a defect",
+   lambda t, c, m: not listed_as_finding(t, r'\b(creep\w*|drift\w*)')),
   # There was a seventh check here - "ran a summarising step, not only row
   # reads" - matched against the reported commands. It was removed after the
   # first run because it cannot be scored fairly. The baseline wrote seven
@@ -361,14 +398,23 @@ CHECKS = {
   ("declines to author the FB, and gives scope as the reason",
    lambda t, c, m: has(t, r"(don'?t|do not|not|cannot|can'?t|won'?t).{0,40}(write|author)",
                           r"(haven'?t|have not|didn'?t|did not) (written|authored|write|author)",
-                          r'declin')
+                          r'declin',
+                          # Iteration 6: the skill answers never said "I won't"; they
+                          # said the skill does not cover it, and the judge gave 2.
+                          r"(does not|doesn'?t|not) cover\w*\s+(\w+\s+){0,3}(writ|author)\w*",
+                          r"exclud\w*\s+(\w+\s+){0,3}(writ|author)\w*",
+                          r"(writ|author)\w*[^.]{0,80}\b(is|are)\s+(explicitly\s+)?(outside|excluded|out of scope)")
                    and has(t, r'out(side)?\s+(of\s+)?(my\s+|this\s+|the\s+)?scope',
                               r'not\s+what\s+(this|i)\s+do', r'not\s+the\s+right\s+(tool|place)',
                               r'measure\w*(\s+and\s+diagnos\w*)?,?\s+(not|rather\s+than)\s+(author|writ)',
                               r'(this|the)\s+(skill|tool)\s+(does\s+not|doesn.t|isn.t)',
                               r'authoring\s+(plc|st|iec)?\s*code\s+(is|isn.t)',
                               # Iteration 4: all three skill answers said it this way.
-                              r'outside\s+(of\s+)?what\s+(this|the|my)\b')),
+                              r'outside\s+(of\s+)?what\s+(this|the|my)\b',
+                              # Iteration 6.
+                              r'measurement\s+and\s+diagnos\w+(\s+only)?\b',
+                              r'explicitly\s+(outside|exclud\w+)', r'scope\s+limit',
+                              r"(does\s+not|doesn.t)\s+cover")),
   ("does not offer to write the block anyway",
    lambda t, c, m: not has(t, r"(if you (still )?want|happy to|want me to|shall i|should i|i can still|i could still)"
                               r".{0,60}(write|draft|sketch|put together)",
@@ -394,7 +440,10 @@ CHECKS = {
    lambda t, c, m: has(t, r'hand (it |this )?(off|over)', r'hand\w*\s+(\w+\s+){0,2}(off|over)\b',
                           r'someone|whoever|your (plc|controls)',
                           r'st (skill|tool|authoring)', r'a different (job|tool|skill)',
-                          r'plc (developer|engineer|programmer)')),
+                          r'plc (developer|engineer|programmer)',
+                          # Iteration 6: "with whatever covers PLC authoring in your project".
+                          r'what(ever)?\s+covers\s+(plc|st)\b', r'(plc|st)\s+authoring',
+                          r'hand\s+the\s+(code|fix)', r'\belsewhere\b')),
  ],
  # A valid export, correctly padded, with the two channels on different rates.
  # Read as one table the following error rises at 0.405 s and the torque at
@@ -577,16 +626,27 @@ CHECKS = {
  # A hand-made export whose torque channel carries ScaleFactor 2 / Offset 10:
  # the header is the same whether 'Scale values before export' was on or off.
  'scaled-export': [
+  # First, because it is the answer. The next four are how a right answer is
+  # built, and count only under one: in iteration 6 three answers that opened
+  # "No" passed all four on keywords and outscored the baselines that said the
+  # file could not settle it. An answer that names 168 to dismiss it has not
+  # given both readings.
+  ("opens with the answer: this file cannot settle it",
+   lambda t, c, m: opens_undecided(t)),
   ("gives both readings, about 79 % and about 168 %",
-   lambda t, c, m: has(t, r'\b79(?:[.,]\d+)?\b') and has(t, r'\b16[78](?:[.,]\d+)?\b')),
+   lambda t, c, m: opens_undecided(t)
+                   and has(t, r'\b79(?:[.,]\d+)?\b') and has(t, r'\b16[78](?:[.,]\d+)?\b')),
   ("says the header cannot show whether the scaling was applied",
-   lambda t, c, m: has(t, r"(can'?t|cannot|does ?n.t|doesn'?t|no way to|not) (tell|say|show|record|know|indicate)\w*[^.\n]{0,80}(scal|applied)",
+   lambda t, c, m: opens_undecided(t) and
+                   has(t, r"(can'?t|cannot|does ?n.t|doesn'?t|no way to|not) (tell|say|show|record|know|indicate)\w*[^.\n]{0,80}(scal|applied)",
                           r'(same|identical)[^.\n]{0,60}(either way|on or off|whether)',
                           r'does not record which')),
   ("names Scope View's 'Scale values before export' option",
-   lambda t, c, m: has(t, r'scale values', r'scalevalues', r'scaled? (values )?before export')),
+   lambda t, c, m: opens_undecided(t)
+                   and has(t, r'scale values', r'scalevalues', r'scaled? (values )?before export')),
   ("says how to settle it: the export setting, or a fresh export of the .svdx",
-   lambda t, c, m: has(t, r'\.svdx', r're-?export', r'export (dialog|setting)', r'which (export )?setting',
+   lambda t, c, m: opens_undecided(t) and
+                   has(t, r'\.svdx', r're-?export', r'export (dialog|setting)', r'which (export )?setting',
                           r'\bingest\b')),
   ("neither backs nor rules out the bigger drive on this file",
    lambda t, c, m: not verdict(t, r'(exceed\w*|went|go(es)? over|above|over|passed|reach\w*|hit)\s[^.\n]{0,25}\b150\b',

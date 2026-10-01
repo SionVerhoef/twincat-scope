@@ -633,6 +633,40 @@ Not yet. The file is well-formed and wired correctly, but one setting is wrong. 
 **The PLC channels are on port 801 instead of 851.** `bClamped` and `nState` both use `TargetPort`
 801, where no TwinCAT 3 PLC runtime answers.
 """),
+ # Iteration 6: three skill answers the judge scored 2 and this check failed.
+ # None says "I won't write it"; each says the skill does not cover it.
+ ('out-of-scope-authoring', "declines to author the FB, and gives scope as the reason", """
+**Also:** the skill I was given for this covers measurement and diagnosis only; writing or reviewing
+Structured Text is explicitly outside it.
+"""),
+ ('out-of-scope-authoring', "declines to author the FB, and gives scope as the reason", """
+There is also a scope limit: the skill I was told to follow covers measurement and diagnosis and
+explicitly excludes authoring Structured Text.
+"""),
+ ('out-of-scope-authoring', "declines to author the FB, and gives scope as the reason", """
+- **The scope skill I was pointed at does not cover writing ST.** It is for measurement and
+  diagnosis only, and says to hand the code fix elsewhere.
+"""),
+ ('out-of-scope-authoring', "points the authoring work somewhere else", """
+Once the data has named the cause, the ST (if ST is the fix at all) should be written with whatever
+covers PLC authoring in your project.
+"""),
+ ('scaled-export', "opens with the answer: this file cannot settle it", """
+# Did the torque go over 150 %?
+
+**This export cannot settle it: the peak is either 79.0 % or 167.9 %, depending on one Scope View
+export setting.**
+"""),
+ ('scaled-export', "opens with the answer: this file cannot settle it", """
+**I can't tell you yes or no from this file alone: the answer depends on one export setting the CSV
+does not record.**
+"""),
+ ('needle-in-the-haystack', "does not list the axis's normal standstill creep as a defect", """
+### 1. Position step at 6.0 s
+
+`ActPos` jumps by 12 units. Apart from that, `ActPos` drifts a few hundredths away from `SetPos`
+over the run; that is what a real axis does and I have not listed it.
+"""),
 ]
 
 # Traps a single 'naive' answer cannot carry. Each is (eval, check label, answer):
@@ -677,6 +711,30 @@ Add `silent`, or the tool opens a window and waits. The channel list looks right
  ('out-of-scope-authoring', "does not offer to write the block anyway", """
 Writing the function block is outside the scope of what I do here - I measure and diagnose. That
 said, if you still want it I can put together a quick ramp FB for you to adapt.
+"""),
+ # Iteration 6: the skill arm's answer, three times. It names both figures, the
+ # option, the identical header and the .svdx - four keyword checks - and says no.
+ ('scaled-export', "opens with the answer: this file cannot settle it", """
+**No. Nothing in this recording gets near 150.** The highest torque value in the file is 78.96, and
+that conclusion holds whichever way the export was made. The header looks identical whether "Scale
+values before export" was on or off, so the file cannot say which; the only way to get above 150
+is 2 x 78.96 + 10 = 167.9, which is wrong in both cases. Send the .svdx to settle 79 or 34.
+"""),
+ ('scaled-export', "opens with the answer: this file cannot settle it", """
+The recording does not show torque above 150 %. The peak is 79; a scaled reading of 168 is possible
+but the column as it stands is the recorded figure.
+"""),
+ # Iteration 6: four of six answers, and the checks could not see it.
+ ('needle-in-the-haystack', "does not list the axis's normal standstill creep as a defect", """
+### 4. Clipped velocity
+
+### 5. Whole run - `ActPos` creeps away from `SetPos` while `PosDiff` says it does not
+"""),
+ ('needle-in-the-haystack', "does not list the axis's normal standstill creep as a defect", """
+5. **Whole run - the standstill offset between `SetPos` and `ActPos` creeps by about 0.07 units.**
+"""),
+ ('needle-in-the-haystack', "does not list the axis's normal standstill creep as a defect", """
+## 3. Slow drift of ActPos away from SetPos, 0.078 units over the run
 """),
 ]
 
