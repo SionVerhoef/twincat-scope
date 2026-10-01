@@ -33,6 +33,9 @@ are **empirical, not certified** — a prompt to think, not a limit. The real li
 the controller, the core assignment, what else runs on it, and the task cycle time.
 An acquisition never records faster than one sample per cycle of its task, so a sample time
 under 50 µs is named in a warning and left out of the sum rather than counted as 1/value.
+When no acquisition is left to sum — all of them that short, or on the task's own sample
+time — the band is `unknown`: the load is one sample per task cycle per channel, and the
+file does not say what that cycle is.
 
 | Band | samples/s | Meaning |
 |---|---|---|

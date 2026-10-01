@@ -3120,6 +3120,7 @@ def main():
             check("a sub-cycle sample time is named, not counted as a literal load",
                   sub.get("ok") is True
                   and sub.get("total_samples_per_second") == 0
+                  and sub.get("load_band") == "unknown"
                   and any("one cycle of" in w and "2 acquisition" in w
                           for w in sub.get("warnings", []))
                   and not any("samples/s" in w for w in sub.get("warnings", [])),
