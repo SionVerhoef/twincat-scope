@@ -23,9 +23,10 @@ Two halves, different costs:
 | `field-test-brief.md` | The checklist for a session on a real TwinCAT machine | yes |
 | `field-review-*.md` | Write-ups of those sessions, named after the commit tested | record |
 
-**Latest result** (`results-iteration-5.md`, n=3 per cell, Opus 5.5): the skill arm scored
-32.3/34 against 26.0/34 for the baseline, and the blinded judge ranked the skill arm ahead on all
-six evals. The two new evals barely separate the arms: both can be decoded from the file itself.
+**Latest result** (`results-iteration-6.md`, n=3 per cell, Opus 5.5): the skill arm scored
+35.0/38 against 24.7/38 for the baseline, and the blinded judge ranked the skill arm ahead on six
+of seven evals. On the seventh, `scaled-export`, the skill's own wording led all three runs into
+the eval's trap while the checks passed them: the judge read the conclusion, the checks did not.
 
 Anything real in the field reviews is anonymised by substitution — names are stand-ins,
 numbers are as measured. `field-review-af54888.md` is the worked example.
