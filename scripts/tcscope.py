@@ -2741,7 +2741,7 @@ BAND_ORDER = ("Position", "Following error", "Velocity", "Acceleration",
 # Path segments that describe a struct rather than a device. Stripping them
 # means MAIN.fbAxis1.NcToPlc.ActPos is grouped under fbAxis1, not NcToPlc,
 # which would otherwise collect every axis in the machine into one tab.
-WRAPPER_SEGMENTS = {"nctoplc", "plctonc", "nctoplcaxis", "plctoncaxis",
+WRAPPER_SEGMENTS = {"nctoplc", "plctonc", "nctoplcaxis", "plctoncaxis", "toplc", "fromplc",
                     "status", "state", "inputs", "outputs", "in", "out",
                     "data", "axisdata", "signals"}
 

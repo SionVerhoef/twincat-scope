@@ -245,8 +245,9 @@ template therefore yields four plotted traces, not four invisible acquisitions.
 It also lays them out, rather than piling every trace onto one axis:
 
 - **One tab per device.** The symbol path minus its leaf, minus the structs that describe a
-  wrapper rather than a device (`NcToPlc`, `PlcToNc`, `Status`, `Inputs`…), so
-  `MAIN.fbAxis1.NcToPlc.ActPos` is grouped under `fbAxis1`. Two devices whose paths end in
+  wrapper rather than a device (`NcToPlc`, `PlcToNc`, the NC's own `ToPlc` and `FromPlc`,
+  `Status`, `Inputs`…), so `MAIN.fbAxis1.NcToPlc.ActPos` is grouped under `fbAxis1` and
+  `Axes.Axis1.ToPlc.AxisState` under `Axis1`. Two devices whose paths end in
   the same segment keep their full paths as titles rather than merging into one tab.
 - **One band per quantity inside that tab**, ordered position, following error, velocity,
   acceleration, torque/current, pressure, temperature, digital state, step / count, other.
