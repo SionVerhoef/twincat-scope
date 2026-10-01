@@ -45,6 +45,11 @@
   Scope records it at one task cycle; 1 tick (100 ns) had been reported as ~20 000 000 samples/s
   (`evals/field-review-74dd86d.md`, §1). When no acquisition contributes a rate, `load_band` is
   `unknown` rather than `typical`.
+- A CSV with a scale factor set: `manifest`'s warning, `references/export-tool.md` and `SKILL.md`
+  ask for both readings — the value as it stands, and factor × value + offset — until the export
+  setting is known. They had called it "display scaling", which read as "raw is the real value":
+  in eval iteration 6 all three skill runs gave one confident number where the two readings
+  straddled the limit asked about (`evals/results-iteration-6.md`).
 - `events`: a setpoint turning round at its own rate (an acceleration command reversing just
   short of zero) is no longer a `spike`; a spike on a command must jump out of the motion before
   it (`evals/field-review-v1.0.0.md`, Part C).

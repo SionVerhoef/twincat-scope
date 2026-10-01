@@ -2733,6 +2733,14 @@ def scale_checks():
         check("a CSV with display scaling warns that its values may be scaled",
               len(warned) == 1 and "ActPos" in warned[0] and "bFlag" not in warned[0],
               str(man.get("warnings")))
+        # Evals iteration 6: "display scaling ... not raw" read as "raw is the
+        # real value", and three runs answered a flat no where the file cannot
+        # settle it. The warning has to ask for both readings.
+        check("the warning asks for both readings and does not call raw the real value",
+              len(warned) == 1 and "both readings" in warned[0]
+              and "factor * value + offset" in warned[0]
+              and "display scaling" not in warned[0],
+              str(warned)[:200])
         plain = run("manifest", REAL / "real_tab_2rate_truncated.csv")
         check("a CSV without scaling does not warn",
               not [w for w in plain.get("warnings", []) if "Scale values" in w],
