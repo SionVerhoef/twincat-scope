@@ -3835,6 +3835,10 @@ def cmd_checkscope(args):
         )
     elif total_rate > LOAD_TYPICAL_SAMPLES_PER_S:
         load_band = "moderate"
+    elif total_rate == 0 and (unrated or sub_cycle):
+        # Every acquisition runs at a task cycle this tool cannot see. The load
+        # is at least one sample per cycle per channel, not the 0 summed here.
+        load_band = "unknown"
     else:
         load_band = "typical"
 
