@@ -26,8 +26,10 @@
   the channel's median one. On a real command channel, 25 alike two-sample steps beside 32
   smaller ones were not flagged and took 5 of 20 capped slots (`evals/field-review-74dd86d.md`, §4).
 - `events`: a following error decaying after the axis arrives is no longer a `standing` one. On
-  a real axis parked at a software limit, the loop's 2.3 s settling tail was reported; a run whose
-  last quarter is at half its first quarter or less is now left out (`evals/field-review-74dd86d.md`, §3).
+  a real axis parked at a software limit, the loop's 2.3 s settling tail was reported. A run that
+  ends by the error easing under the floor while the setpoint still rests is now left out; one
+  that lasts to the end, or drops off a plateau, is still reported. A first rule, on how much the
+  error shrank inside the run, missed the real tail (`evals/field-review-633a9bf.md`, §1).
 - `events`: a real channel with 16 or fewer distinct values no longer reports `clipping`; a
   filtered rate sitting at two of its six values had taken two capped slots.
 

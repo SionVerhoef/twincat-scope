@@ -1444,15 +1444,16 @@ def few_value_checks(rows=6000):
                    if e["kind"] == "clipping"]))
 
 
-def write_axis_export(path, blocked, seed=19, settling=False):
+def write_axis_export(path, blocked, seed=19, settling=None, release=None):
     """SetPos rests, cruises to 100 over 3 s, and rests again for 10 s.
 
     PosDiff lags in proportion to the velocity, 0.5 at cruise - a steady
     following error for three seconds that is normal. Healthy, it settles to
     noise when the setpoint stops. Blocked on an end stop, the axis stays 10
-    short and PosDiff stands at 10 for the whole rest. Settling, the loop
-    catches up over a few seconds instead: PosDiff starts the rest at 0.4 and
-    decays with a 1.1 s time constant, above a tenth of its peak for ~2.3 s.
+    short and PosDiff stands at 10 for the whole rest - or, with `release`,
+    for that many samples, after which it drops to noise at once. Settling,
+    the loop catches up over a few seconds instead: `settling` is (start,
+    time constant in samples) of a PosDiff that decays from the stop on.
     """
     import random
     rng = random.Random(seed)
@@ -1467,8 +1468,10 @@ def write_axis_export(path, blocked, seed=19, settling=False):
         if blocked and i >= stop:
             # It builds up as the axis presses into the stop, as on the real one.
             lag = 10.0 * min(1.0, (i - stop) / 300)
+            if release is not None and i >= stop + release:
+                lag = 0.0
         if settling and i >= stop:
-            lag = 0.4 * math.exp(-(i - stop) / 1100)
+            lag = settling[0] * math.exp(-(i - stop) / settling[1])
         rows.append(f"{i:.1f},{pos:.6f},{lag + rng.gauss(0, 0.001):.6f}")
     path.write_text("\n".join(["TwinCAT Scope Export", "", "Name,SetPos,PosDiff"] + rows)
                     + "\n", encoding="utf-8", newline="")
@@ -1489,12 +1492,25 @@ def standing_error_checks():
         check("a steady lag while the setpoint moves is not a standing following error",
               not [e for e in ok if e["kind"] == "standing"],
               str([(e["time"], e.get("samples")) for e in ok if e["kind"] == "standing"]))
-        settle = Path(tmp) / "settling.csv"
-        write_axis_export(settle, blocked=False, settling=True)
-        tail = [e for e in run("events", settle, "--max-events", 1000).get("events", [])
+        # The peak is the cruise lag, 0.5, so a run lasts while PosDiff is at
+        # 0.05 or more. Both tails stay above that for ~2 s. The second is the
+        # real one's shape (field review 633a9bf): it starts 1.5 times above
+        # the floor, so across the run it shrinks by a quarter, not by half.
+        for label, shape in (("from well above the floor", (0.4, 1100)),
+                             ("from just above the floor", (0.075, 5600))):
+            settle = Path(tmp) / "settling.csv"
+            write_axis_export(settle, blocked=False, settling=shape)
+            tail = [e for e in run("events", settle, "--max-events", 1000).get("events", [])
+                    if e["kind"] == "standing"]
+            check(f"a following error decaying {label} is settling, not standing",
+                  not tail, str([(e["time"], e.get("samples")) for e in tail]))
+        freed = Path(tmp) / "freed.csv"
+        write_axis_export(freed, blocked=True, release=4000)
+        held = [e for e in run("events", freed, "--max-events", 1000).get("events", [])
                 if e["kind"] == "standing"]
-        check("a following error decaying after arrival is settling, not standing",
-              not tail, str([(e["time"], e.get("samples")) for e in tail]))
+        check("an axis held for 4 s and then let go did stand: the error dropped, it did not ease",
+              len(held) == 1 and 3500 <= held[0].get("samples", 0) <= 4000,
+              str([(e["time"], e.get("samples")) for e in held]))
         got = run("events", blocked, "--max-events", 1000)
         stood = [e for e in got.get("events", []) if e["kind"] == "standing"]
         check("a following error that stays while the setpoint rests is reported",
