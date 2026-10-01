@@ -190,5 +190,6 @@ Timelines *All* on a multi-channel group reads correctly.
 **Not verified:** the analysis verbs across many real recordings (most real data is from one
 machine), what a *Subsave* trigger records (it needs a Professional licence), marker tables in
 an export, and an axis parked at a limit. A CSV exported from Scope View with *Scale values* on
-cannot be told from a raw one — `manifest` warns when scaling is set; prefer `ingest` on the
-`.svdx`. Rule 3 applies to this skill's own claims: report at exactly that precision.
+cannot be told from a raw one — `manifest` warns when scaling is set. Until the export setting
+is known, give **both readings** (the value as it stands, and factor × value + offset) and do
+not treat raw as the real quantity; prefer `ingest` on the `.svdx`, then scale once. Rule 3 applies to this skill's own claims: report at exactly that precision.

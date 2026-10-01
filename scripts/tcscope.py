@@ -1335,11 +1335,15 @@ def cmd_manifest(args):
     # the option. Only the export tool is known to write raw (the .svdx route).
     if scaled and rec.info.get("origin") != "svdx":
         out["warnings"] = [
-            f"{', '.join(scaled)}: display scaling is set (scale_factor/scale_offset). "
-            "If this CSV was exported from Scope View with 'Scale values before "
-            "export' on, these values are factor * raw + offset, not raw - the file "
-            "does not record which. Re-export with that option off, or ingest the "
-            ".svdx, whose export tool writes raw values."]
+            f"{', '.join(scaled)}: a scale factor/offset is set (scale_factor/"
+            "scale_offset). Scope View charts such a channel scaled, and the file "
+            "does not record whether 'Scale values before export' was on. So each "
+            "value here is either already scaled, or raw and still to be scaled "
+            "(factor * value + offset). A scaling is often the conversion to the "
+            "unit the reader means, so raw is not the safer reading: give both "
+            "readings until the export setting is known. To settle it, ask which "
+            "setting was used, or ingest the .svdx - its export tool writes raw - "
+            "and apply the scaling once."]
     emit(out)
     return 0
 
