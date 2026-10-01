@@ -1568,11 +1568,15 @@ def _setpoint_of(rec, channel):
 _FOLLOWING_ERROR_LEAF = re.compile(r"PosDiff$", re.IGNORECASE)
 STANDING_FRACTION = 0.1
 STANDING_SECONDS = 1.0
-# A run whose last quarter lies at no more than this share of its first quarter
-# is the position loop catching up after arrival, not an axis held off target.
-# On a real axis arriving at a software limit PosDiff decayed from 0.03 to 0.008
-# over 2.3 s and was reported; held on an end stop, it did not shrink.
-SETTLING_RATIO = 0.5
+# A run that ends because the error fell under the floor while the setpoint
+# still rested, having eased down to within this factor of the floor, is the
+# position loop catching up after arrival, not an axis held off target. On a
+# real axis arriving at a software limit PosDiff decayed through the floor
+# 2.3 s after the stop and went on decaying; held on an end stop, the run
+# lasted to the end of the recording. A run cannot show much of its own decay -
+# it ends where the decay crosses the floor - so the test is how it ends. An
+# error that drops off a plateau instead was held, then let go: still standing.
+SETTLING_NEAR_FLOOR = 1.5
 
 # A real channel that takes no more than this many distinct values sits at them;
 # it is not cut off at a rail, which leaves a continuous signal with thousands.
@@ -1876,9 +1880,10 @@ def cmd_events(args):
             least_samples = max(args.flat_samples,
                                 int(round(STANDING_SECONDS / float(np.median(np.diff(t))))))
             for s, e in zip(*(r.tolist() for r in _runs(np, resting & far))):
-                quarter = max(1, (e - s) // 4)
-                settling = (np.median(np.abs(col[e - quarter:e]))
-                            <= SETTLING_RATIO * np.median(np.abs(col[s:s + quarter])))
+                tenth = max(1, (e - s) // 10)
+                settling = (e < col.size and bool(resting[e]) and bool(ok[e])
+                            and np.median(np.abs(col[e - tenth:e]))
+                            <= SETTLING_NEAR_FLOOR * STANDING_FRACTION * peak)
                 if peak and e - s >= least_samples and not settling:
                     found.append(event("standing", (e - s) / least_samples, time=float(t[s]),
                                        samples=int(e - s),

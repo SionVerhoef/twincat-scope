@@ -163,7 +163,7 @@ Detectors, and what each one actually means on a machine:
 | `hold` | A command channel stood exactly still — a setpoint at rest between moves, a velocity setpoint at cruise. Normal, not a fault |
 | `wrap` | A `*Modulo` position jumped most of its range at once: it went round, not a fault |
 | `clipping` | The signal hit a rail; the true value is unknown beyond it. Not reported for a real channel with 16 or fewer distinct values, which sits at them rather than being cut off |
-| `standing` | A following error (`PosDiff`) stayed beyond 10% of its own largest value for at least 1 s while its axis's `SetPos` rested: the axis is not getting where it was sent — blocked, on an end stop, or held by a load. Needs `SetPos` of the same axis in the recording. A steady lag during a long move is excluded, because the setpoint moves then, and so is an error that shrinks to half or less across the run: that is the position loop settling after arrival |
+| `standing` | A following error (`PosDiff`) stayed beyond 10% of its own largest value for at least 1 s while its axis's `SetPos` rested: the axis is not getting where it was sent — blocked, on an end stop, or held by a load. Needs `SetPos` of the same axis in the recording. A steady lag during a long move is excluded, because the setpoint moves then, and so is an error that eases down under that 10% while the setpoint still rests: that is the position loop settling after arrival. One that lasts until the setpoint moves or the recording ends, or that drops away at once (held, then let go), is reported |
 | `crossing` | A user-supplied threshold was crossed |
 
 An excursion is **one event however long it lasts**. Reported per sample, a single 2.4 s move
