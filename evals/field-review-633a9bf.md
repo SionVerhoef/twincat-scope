@@ -147,6 +147,8 @@ Not explained: the `.svdx`'s embedded `RecordTime` is 143 000 000 (14.3 s), whil
 written and still on disk has 150 000 000 (15 s), and the toolbar showed 15 s. Either Record
 Time was edited before this recording or it was stopped early; I did not see which.
 
+*Note added on the development machine:* the user stopped that recording by hand.
+
 ## §4 Sub-cycle load
 
 `ST-a.tcscopex` is no longer on disk (it went when the test scopes were moved out of the

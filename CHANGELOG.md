@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 — 2026-10-02
 
 ### Added
 
@@ -10,7 +10,13 @@
 - `events` reports a `standing` following error: `PosDiff` staying beyond 10% of its largest
   value for at least 1 s while the axis's `SetPos` rests. On a real axis driven onto an end
   stop it stood a tenth of the stroke short for 27 s and was reported only as two ramps
-  (`evals/field-review-v1.0.0.md`, B1b).
+  (`evals/field-review-v1.0.0.md`, B1b). A run that ends by the error easing under that 10%
+  while the setpoint still rests is the position loop settling after arrival, and is left out;
+  one that lasts until the setpoint moves or the recording ends, or drops off a plateau, is
+  reported. **The settling exclusion is not yet confirmed on a real recording.** It was built
+  from the measured shape of a real 2.3 s settling tail, after a first rule missed that tail
+  (`evals/field-review-633a9bf.md`, §1); if it misses too, the tail shows as one low-ranked
+  `standing`.
 
 ### Changed
 
@@ -25,14 +31,8 @@
 - `events`: 20 or more alike defects on a channel are `recurring` even when they are larger than
   the channel's median one. On a real command channel, 25 alike two-sample steps beside 32
   smaller ones were not flagged and took 5 of 20 capped slots (`evals/field-review-74dd86d.md`, §4).
-- `events`: a following error decaying after the axis arrives is no longer a `standing` one. On
-  a real axis parked at a software limit, the loop's 2.3 s settling tail was reported. A run that
-  ends by the error easing under the floor while the setpoint still rests is now left out; one
-  that lasts to the end, or drops off a plateau, is still reported. A first rule, on how much the
-  error shrank inside the run, missed the real tail (`evals/field-review-633a9bf.md`, §1).
 - `events`: a real channel with 16 or fewer distinct values no longer reports `clipping`; a
   filtered rate sitting at two of its six values had taken two capped slots.
-
 - The sample-time rule is now the measured one. `SKILL.md`, `references/scope-configuration.md`
   and `newscope`'s note said Scope "snaps" a sample time to the task cycle, from one case. On a
   real target, Scope snaps when recording starts (not on load or Save), to each acquisition's own
