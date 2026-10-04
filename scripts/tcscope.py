@@ -1155,13 +1155,22 @@ def cmd_ingest(args):
         # would then be read as this one.
         csv_out.unlink(missing_ok=True)
         cmd = [tool, f"svd={src}", f"target={csv_out}", "silent"]
-        try:
-            subprocess.run(cmd, check=True, capture_output=True)
-        except (subprocess.CalledProcessError, OSError) as exc:
-            fail(f"export tool failed: {exc}",
-                 f"Try running it by hand: {' '.join(cmd)}")
-        if not csv_out.is_file():
-            fail(f"the export tool exited cleanly but wrote no file for {src}",
+        # Seen once on a large recording: exit 0, no file, and an empty
+        # directory named after the target; the same command again worked.
+        # So one retry, and the empty directory goes either way.
+        stray = cache / cached
+        for attempt in (1, 2):
+            try:
+                subprocess.run(cmd, check=True, capture_output=True)
+            except (subprocess.CalledProcessError, OSError) as exc:
+                fail(f"export tool failed: {exc}",
+                     f"Try running it by hand: {' '.join(cmd)}")
+            if stray.is_dir() and not any(stray.iterdir()):
+                stray.rmdir()
+            if csv_out.is_file():
+                break
+        else:
+            fail(f"the export tool exited cleanly but wrote no file for {src}, twice",
                  f"Try running it by hand: {' '.join(cmd)}")
         src = csv_out
 

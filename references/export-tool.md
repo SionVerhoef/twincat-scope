@@ -24,7 +24,10 @@ fields. **Verified:** `svdx=` is an alias of `svd=`.
 `tcscope.py ingest` calls this for you when handed a `.svdx`, writing the CSV to its cache
 dir rather than beside the recording, then converts to Parquet. That exact command line has
 converted real recordings, with the tool found under the TwinCAT root in
-`Functions\TF3300-Scope-Server\`.
+`Functions\TF3300-Scope-Server\`. Once, on a large recording, the tool exited 0, wrote no CSV
+and left an empty directory named after the target; the same command again worked. So `ingest`
+tries once more when no file appears, removes that empty directory, and refuses only after the
+second empty run.
 
 ### The tool ignores the settings saved in the recording
 
