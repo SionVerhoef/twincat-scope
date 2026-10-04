@@ -2832,6 +2832,53 @@ def ingest_cache_checks():
               stale.get("ok") is False and "wrote no file" in (stale.get("error") or ""),
               str(stale.get("error"))[:160])
 
+        # Field review 633a9bf §0: the first ingest of a large .svdx found no
+        # file and an empty directory named after the target in the cache; the
+        # same command again worked. One retry, and no empty directory left.
+        count = tmp / "calls"
+        flaky = tmp / "flaky_export_tool"
+        flaky.write_text(
+            "#!/bin/sh\n"
+            'for a in "$@"; do case "$a" in target=*) t="${a#target=}";; esac; done\n'
+            f'n=$(cat "{count}" 2>/dev/null || echo 0); echo $((n+1)) > "{count}"\n'
+            'if [ "$n" = 0 ]; then mkdir -p "${t%.csv}"; exit 0; fi\n'
+            f'cp "{REAL / "real_tab_2group.csv"}" "$t"\n')
+        flaky.chmod(0o755)
+        proc = subprocess.run([*BASE_CMD, "ingest", str(svdx), "-o", str(tmp / "flaky.parquet")],
+                              capture_output=True, text=True,
+                              env={**env, "TCSCOPE_EXPORT_TOOL": str(flaky)})
+        try:
+            again = loads(proc.stdout)
+        except ValueError:
+            again = {"error": "non-JSON: " + proc.stdout[:200] + proc.stderr[:200]}
+        leftovers = [p.name for p in (tmp / "cache" / "tcscope").iterdir() if p.is_dir()]
+        check("an export that writes nothing once is retried, and leaves no empty directory",
+              again.get("ok") is True and count.read_text().strip() == "2" and not leftovers,
+              f"{again.get('error') or again.get('ok')} calls={count.read_text().strip()} "
+              f"dirs={leftovers}")
+
+        count.unlink()
+        never = tmp / "never_export_tool"
+        never.write_text(
+            "#!/bin/sh\n"
+            'for a in "$@"; do case "$a" in target=*) t="${a#target=}";; esac; done\n'
+            f'n=$(cat "{count}" 2>/dev/null || echo 0); echo $((n+1)) > "{count}"\n'
+            'mkdir -p "${t%.csv}"; exit 0\n')
+        never.chmod(0o755)
+        proc = subprocess.run([*BASE_CMD, "ingest", str(svdx), "-o", str(tmp / "never.parquet")],
+                              capture_output=True, text=True,
+                              env={**env, "TCSCOPE_EXPORT_TOOL": str(never)})
+        try:
+            gave_up = loads(proc.stdout)
+        except ValueError:
+            gave_up = {"error": "non-JSON: " + proc.stdout[:200] + proc.stderr[:200]}
+        leftovers = [p.name for p in (tmp / "cache" / "tcscope").iterdir() if p.is_dir()]
+        check("an export that never writes is tried twice, then refused with no empty directory",
+              gave_up.get("ok") is False and "wrote no file" in (gave_up.get("error") or "")
+              and count.read_text().strip() == "2" and not leftovers,
+              f"{(gave_up.get('error') or '')[:100]} calls={count.read_text().strip()} "
+              f"dirs={leftovers}")
+
 
 def write_shared_name_export(path, rows=50):
     """One TAB-dialect group holding two channels with the same short name."""

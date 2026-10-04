@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `ingest`: when the export tool exits 0 without writing the CSV, it is run once more before
+  `ingest` gives up, and the empty directory it can leave in the cache is removed. Seen once on
+  a real recording, where the same command worked straight after
+  (`evals/field-review-633a9bf.md`, §0).
+
 ## 1.1.0 — 2026-10-02
 
 ### Added
