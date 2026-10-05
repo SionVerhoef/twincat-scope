@@ -151,8 +151,8 @@ never a fixed window: it keeps the last `RecordTime` until someone stops it.
 
 With the PLC project at hand, add `--tmc <PLC>.tmc` — every PLC symbol is then checked
 against the compiled program: typos, renamed variables, whole blocks, and types read at the
-wrong width. The `.tmc` reader has not yet met a real file, so treat a surprising result as
-a finding about the reader. `references/scope-configuration.md`.
+wrong width. The `.tmc` reader has been run against one real 862-symbol program; on another,
+treat a surprising result as a finding about the reader. `references/scope-configuration.md`.
 
 Then stop: opening the file in Scope View and pressing Record is the human's move (rule 4).
 Tell them to **add it to an existing TwinCAT Measurement project** — double-clicked on its
@@ -186,7 +186,8 @@ exactly its record time, ending at the stop. Both templates open as shipped. `--
 every planted error against a real `.tmc`. NC channels by every path `newscope` types (direct
 axis fields, `ToPlc`/`FromPlc` members) record on a moving axis and keep their types.
 Timelines *All* on a multi-channel group reads correctly. `events` reports an axis on an end
-stop as one `standing` and leaves a real settling tail after arrival out.
+stop as one `standing` and leaves a real settling tail after arrival out. `manifest`'s
+scaling warning fires on a real Scope View export and names only the scaled channel.
 
 **Not verified:** the analysis verbs across many real recordings (most real data is from one
 machine), what a *Subsave* trigger records (it needs a Professional licence), marker tables in

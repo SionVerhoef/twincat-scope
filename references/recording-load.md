@@ -42,7 +42,8 @@ file does not say what that cycle is.
 | `typical` | ≤ 6,000 | The middle of observed practice |
 | `moderate` | ≤ 10,000 | Busier than most; no note |
 | `high` | ≤ 20,000 | Denser than five of the seven measured projects — worth re-checking before adding channels |
-| warn | > 20,000 | Denser than anything measured in practice; justify it |
+| `above anything measured in practice` | > 20,000 | Denser than anything measured; a warning asks you to justify it |
+| `unknown` | — | Nothing left to sum: every acquisition under 50 µs or on the task's own sample time |
 
 The numbers come from seven real Beckhoff-authored projects on one production machine, which
 measured **417, 2,750, 4,000, 5,750, 7,750, 11,667 and 16,250** samples/s. That spread is why

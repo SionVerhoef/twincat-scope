@@ -17,7 +17,8 @@ healthy produces advice about *your* machine.
   looks unlike the five layouts already reproduced — a different locale or tool version.
 - **A `.tcscopex` from a project that works**, so the templates can be checked against
   something Scope View has actually opened.
-- **A recording with a known fault**, plus a one-line note saying what the fault was. These
+- **A recording with a known fault**, as a CSV export (`.svdx`, `.parquet` and `.png` are
+  gitignored on purpose; do not force them in), plus a one-line note saying what the fault was. These
   are worth the most and are the rarest.
 
 ## Before you commit anything
@@ -27,9 +28,11 @@ A scope recording carries more identifying detail than people expect. Check for:
 - **`AmsNetId` values** — these appear in `.tcscopex` files and identify a specific
   controller on a specific network
 - **`IndexGroup` / `IndexOffset`** — memory addresses from a specific build
-- **Customer or site names, machine numbers, project codes** inside channel names, symbol
-  paths, file names and the CSV preamble
-- **Setpoints, recipes and cycle times** that are commercially sensitive
+- **Customer or site names, machine numbers, serial numbers, project codes** inside channel
+  names, symbol paths, file names and the CSV preamble
+- **Setpoints, recipes, cycle times and tuning parameters** that are commercially sensitive
+- **Wall-clock times and absolute positions** — give offsets and spans instead
+- **Screenshots and plots**, which carry all of the above in their labels and legends
 - **IP addresses and hostnames** in the export metadata
 - Anything under NDA
 

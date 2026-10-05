@@ -158,7 +158,7 @@ Detectors, and what each one actually means on a machine:
 | `step` | A discontinuity that stayed — a setpoint jump, a mode switch, an encoder jump, a re-home |
 | `ramp` | A commanded move: the signal travelled, but it took many samples to get there |
 | `spike` | Something transient — a torque impulse, EMI on an analogue input, a single bad ADC read |
-| `transition` | A digital channel changed state (a `BIT`, or an untyped channel with two values), or an integer state channel moved between states it visits routinely. See *Integer states* below for when a state change is a `step` instead |
+| `transition` | A digital channel changed state (a `BIT`, or any channel with exactly two values that is not declared an integer type), or an integer state channel moved between states it visits routinely. See *Integer states* below for when a state change is a `step` instead |
 | `flatline` | A signal that is noisy whenever it moves stopped updating for a sustained run: a frozen sensor, a stalled update |
 | `hold` | A command channel stood exactly still — a setpoint at rest between moves, a velocity setpoint at cruise. Normal, not a fault |
 | `wrap` | A `*Modulo` position jumped most of its range at once: it went round, not a fault |
@@ -193,7 +193,7 @@ A command resting at the end of its travel is not `clipping`: it decelerates int
 clean signal that arrives at its extreme still moving has hit a limit, and still reports it.
 
 **Ranking.** When there are more events than `--max-events`, the defect kinds (`spike`, `step`,
-`flatline`, `clipping`) take the slots first and the descriptive ones (`ramp`, `transition`,
+`flatline`, `clipping`, `standing`) take the slots first and the descriptive ones (`ramp`, `transition`,
 `hold`, `wrap`, `crossing`) fill what is left, each tier spread across the recording worst-first. The
 summary still counts everything.
 
@@ -248,8 +248,8 @@ count *every* event, including the ones not returned. Read the histogram before 
 with a bigger cap — it tells you which part of the recording to ask about instead.
 
 `severity` is a multiple of each detector's own threshold, so it is comparable within a kind
-and only roughly across kinds. `ramp`, `transition` and `crossing` are descriptive rather than
-anomalous and are always 1.0.
+and only roughly across kinds. `ramp`, `transition`, `hold`, `wrap` and `crossing` are descriptive
+rather than anomalous and are always 1.0.
 
 #### Rails that are not rails
 
@@ -268,8 +268,9 @@ Measured on a real recording:
 - **An axis moved and then parked did not clip.** It settled a few micrometres off its
   extreme and the dither never landed on it again.
 
-**Still unverified:** an axis parked exactly at a hard or software limit, and a genuine
-current-limit saturation — neither was available. Check `stats` → `pct_at_max` and the `plot`
+**Still unverified:** a genuine current-limit saturation — none was available. An axis
+parked at a software limit and one held on a mechanical end stop are verified: no
+`clipping`. Check `stats` → `pct_at_max` and the `plot`
 before repeating a clipping claim about a position channel.
 
 ### Rung 4 — `plot`, and the one rule that matters

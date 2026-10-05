@@ -50,7 +50,7 @@ hand, held 30 001 + 15 001 over 0-60 s. So **compare sample counts only between 
 the same range**, and read the range from the header's `Starttime of export` and
 `Endtime of export`.
 
-### Two things the export does that the recording did not
+### Three things the export does that the recording did not
 
 - **One column per display channel, not per acquisition.** A channel drawn in three tabs
   exports three times — `<name>`, `<name> (1)`, `<name> (2)`, each in a group of its own. The
@@ -64,7 +64,9 @@ the same range**, and read the range from the header's `Starttime of export` and
   give both readings until the export setting is known.
 - **Scope View's CSV can carry one leading sample more** than `ingest` of the same `.svdx`:
   5 101 rows against 5 100, with CSV row *i* equal to `.svdx` row *i − 1*. When comparing
-  the two, align on the values or the time column, never on the row number.
+  the two, align on the values or the time column, never on the row number. The two export
+  ranges were not compared, so this may be the range difference described above: read
+  `Starttime of export` before calling it a shift.
 
 ### Exporting from Scope View by hand: the settings
 
@@ -85,7 +87,7 @@ check the file, not the user's memory of the dialog.
 | Option (`CSVProperties` element) | Scope View default | Choose | Why, and how well it is known |
 |---|---|---|---|
 | **Header configuration** (`HeaderKonfiguration`, a bit mask) | **Name only** | ***Full*** (`All`, 16777215) — **change it**, the default is too thin | **Tool- and SV-verified.** `All` and `StandardBIN` (16383) keep `Data-Type`, `SymbolName` and `Port`. `Short` (1833) keeps `SymbolName`, `NetID` and `Port` but drops `Data-Type`; `Name` (1) keeps only names. All four read to the right groups; `manifest` shows `data_type: null` where the row is missing. A `Name`-only header leaves copies collapsed only on Scope's own `<name> (n)` naming (`matched_on: "name"`). **`None` (0) writes no header at all, and the reader refuses it**, with or without a trigger-info table above the data: nothing says where one group ends and the next begins. |
-| **Timelines** (`TimelineMode`: `All`, `OnePerSampleTime`, `None`) | For each sample time | *For each sample time* | One time column per group, the layout the reader is built around. *All* (one per channel) matched *For each sample time* on the tool and in Scope View, but every group in that recording held one channel, so it proved nothing. **Never *None***: from Scope View it writes no time column at all, and the reader refuses a time column that runs backwards; the tool, with interpolation off, wrote no file and still exited 0. |
+| **Timelines** (`TimelineMode`: `All`, `OnePerSampleTime`, `None`) | For each sample time | *For each sample time* | One time column per group, the layout the reader is built around. *All* (one per channel) matched *For each sample time* on the tool and in Scope View, and reads correctly on a 10-channel group (`evals/field-review-333b6c6.md`, C5). **Never *None***: from Scope View it writes no time column at all, and the reader refuses a time column that runs backwards; the tool, with interpolation off, wrote no file and still exited 0. |
 | **Interpolation** (`Interpolation`: `None`, `Shift`, `Stair`) | None | *None* or *Fill with previous value* | **SV-verified, all three.** *None* writes the slow group on the first rows and then shorter rows. *Fill with previous value* (`Stair`) repeats each slow sample (time `0,0,4,4…`, `repeat_factor` 2). *Shift value* puts each slow value only on the row whose time matches and leaves single-space cells between (`2,50, , `); it read to 29 999 + 15 000, the same as the tool at that range. **The tool ignores interpolation**: `Stair` and `Shift`, with any `TimelineMode`, gave its usual unpadded layout. |
 | **CSV separator / decimal mark** (`Seperator`: `Tab`, `Blank`, `Colon`, `Semicolon`, `Comma`; `DecimalMark`) | Comma / Point | TAB or `;` with `,`, or `,` with `.` | **Tool-verified**: TAB/`,`, `;`/`,` and `,`/`.` read identically; **SV-verified** for `;`/`,` and the `,`/`.` default. **`,` for both** is refused: fields and decimals can't be told apart. **Blank and Colon** are refused by name, because the header's paths, dates and clock times contain the same character. |
 | **Full Timestamp** (`FullTimeStamp`) | Off | Off | On writes absolute FILETIME (100 ns ticks since 1601) in every time column. **Tool-verified**: same counts and duration, `start_filetime` equal to the header's `Starttime of export` tick. **The ticks are UTC**: the header's readable date and time beside them is local time (2 h ahead, CEST). |
@@ -131,8 +133,9 @@ the raw first lines, and those beat the sniffer.
 
 ### Trap 1: the European locale
 
-On a Dutch or German Windows, Beckhoff tooling exports **`;` as the field delimiter and `,`
-as the decimal separator**:
+On a decimal-comma locale (Dutch, German) the decimal separator is **`,`**, and the field
+delimiter is then something else: the export tool wrote TAB, and Scope View writes **`;`**
+when its separator is set to Semicolon:
 
 ```
 Time;Axis1.ActPos;Axis1.ActVelo
@@ -159,7 +162,7 @@ duration of `NaN`. The reader tracks raw indices for this reason.
 There is one time column per acquisition group, not one per file, and each channel is
 timestamped from its own group's column. The reader finds them from the header's group layout.
 An export with no time column (Timelines *None*) is refused, because a value column read as
-time runs backwards; an implausible `sample_time_ms` in `manifest` is the symptom of anything
+time runs backwards; an implausible `sample_time_ms_measured` in `manifest` is the symptom of anything
 else going wrong here.
 
 ### Trap 4: size

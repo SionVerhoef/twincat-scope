@@ -361,12 +361,11 @@ def _parse_groups(meta, ncols, decimal):
                 short = qualified or f"col{col}"
             declared = cell("SampleTime[ms]", col)
             port = cell("Port", col)
-            # A display offset set in Scope View lands in this header while the
-            # values below it stay raw - measured in the field, a flag offset
-            # by 2 exported only 0 and 1. Report it; never add it.
+            # The channel's scaling offset, beside ScaleFactor (field review
+            # v1.1.0 §3b). With 'Scale values before export' off the values
+            # below stay raw - a flag offset by 2 exported only 0 and 1.
             offset = cell("Offset", col)
-            # The same Offset, with ScaleFactor, is Scope View's display
-            # scaling. With 'Scale values before export' on, the values below
+            # With 'Scale values before export' on, the values below
             # are factor * raw + offset - under a header identical to a raw
             # export's, so a CSV cannot say which it holds (field-tested).
             factor = cell("ScaleFactor", col)
