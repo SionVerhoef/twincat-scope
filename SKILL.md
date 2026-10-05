@@ -185,14 +185,13 @@ project files, including eight trigger actions and ring-buffer mode; a ring buff
 exactly its record time, ending at the stop. Both templates open as shipped. `--tmc` caught
 every planted error against a real `.tmc`. NC channels by every path `newscope` types (direct
 axis fields, `ToPlc`/`FromPlc` members) record on a moving axis and keep their types.
-Timelines *All* on a multi-channel group reads correctly.
+Timelines *All* on a multi-channel group reads correctly. `events` reports an axis on an end
+stop as one `standing` and leaves a real settling tail after arrival out.
 
 **Not verified:** the analysis verbs across many real recordings (most real data is from one
 machine), what a *Subsave* trigger records (it needs a Professional licence), marker tables in
 an export, and a channel that genuinely saturates (an axis parked at a software limit or on an
-end stop is verified: no `clipping`). That `events` leaves a settling tail out of `standing`:
-the rule was built from one real tail's measured shape and has not been re-run against the
-recording. A CSV exported from Scope View with *Scale values* on
+end stop is verified: no `clipping`). A CSV exported from Scope View with *Scale values* on
 cannot be told from a raw one — `manifest` warns when scaling is set. Until the export setting
 is known, give **both readings** (the value as it stands, and factor × value + offset) and do
 not treat raw as the real quantity; prefer `ingest` on the `.svdx`, then scale once. Rule 3 applies to this skill's own claims: report at exactly that precision.
