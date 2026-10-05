@@ -8,6 +8,9 @@
   `ingest` gives up, and the empty directory it can leave in the cache is removed. Seen once on
   a real recording, where the same command worked straight after
   (`evals/field-review-633a9bf.md`, §0).
+- `SKILL.md`: the settling exclusion in `standing` is now confirmed on real recordings, so its
+  caveat is gone. With v1.1.0 the settling tail is no longer reported, the end stop still is,
+  identically, and a 27 380-event recording is unchanged (`evals/field-review-v1.1.0.md`).
 
 ## 1.1.0 — 2026-10-02
 
