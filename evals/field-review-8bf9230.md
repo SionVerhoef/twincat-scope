@@ -8,13 +8,14 @@ reinstalled from `8bf9230` first (brief 4.0). No code was committed from the wor
 fixes F2-F5 travelled as a patch, and G1-G6 were fixed afterwards on a development machine.
 
 **Anonymised.** Symbol paths, channel names, NetIDs and file names are replaced; every number
-is the measured one. Recordings, projects and CSVs stayed on the machine.
+is the measured one, except wall-clock times and absolute positions, which were redacted on
+2026-10-05 and are given as offsets and spans. Recordings, projects and CSVs stayed on the machine.
 
 The material, all kept on the machine:
 
 - **R1, R2.** Two real 60 s `.svdx` recordings of the same shape. Each has a 2 ms group
   holding one NC axis position (`REAL64`, port 501) and a 4 ms group holding one PLC flag
-  (`BIT`, port 851). R2's axis moves (range 48.8-221); R1's stands still. Scope View CSV
+  (`BIT`, port 851). R2's axis moves (a span of about 172 units); R1's stands still. Scope View CSV
   exports of R2 from the last round were also there: interpolation *None* and repeat-padded.
 - **R3.** A real 600 s `.svdx` of 65.7 MB: 33 channels (10 `REAL64`, 10 `BIT`, 8 `INT16`,
   5 `UINT32`) in 5 time groups at 2, 2, 4, 4 and 12 ms, on ports 851 (three groups) and 501
@@ -171,7 +172,7 @@ public types:
 | Timelines `All` | 0 | same (each group holds one channel, so this proves nothing) |
 | Timelines `None` | **no file written, exit 0** | — |
 | Timelines `None` + `Stair` / `Shift` | 0 | same |
-| Full Timestamp | 59 998 | same counts and 59.996 s; `start_filetime` 134347139938090000 |
+| Full Timestamp | 59 998 | same counts and 59.996 s; `start_filetime` equal to the header tick |
 | Include trigger info | 5 (inserted) | same; the 5-line table is skipped, no `malformed_rows` |
 | Marker tables `All` | 0 | same (the recording has no markers) |
 | Scale values | 0 | same (no channel is scaled) |
@@ -189,8 +190,8 @@ public types:
 | Colon with `,` | every line | **F3**: same. Now refused by name |
 
 **Full Timestamp.** `start_filetime` equals the header's `Starttime of export` tick exactly.
-134347139938090000 decodes to 08:59:53.809 **UTC**. The header prints it beside that as
-10:59:53.809, which is local time (CEST). So the ticks are UTC.
+The tick decodes to a time exactly the PC's UTC offset earlier than the clock time the header
+prints beside it, which is local time. So the ticks are UTC.
 
 **Interpolation is ignored by the tool** in every combination tried. **Timelines `None` with
 interpolation `None` writes nothing and exits 0**: a script would find no file and no error.
@@ -245,7 +246,7 @@ Regression check: `export_option_checks`, built on the real two-rate fixture.
 
 ### F3 — Blank and Colon separators sent the user to the wrong setting
 
-Both are real options. Header lines contain spaces and `:` (the path, `10:59:53.809`), so
+Both are real options. Header lines contain spaces and `:` (the path, a clock time `hh:mm:ss.fff`), so
 neither can be read safely. **Done:** `_unsupported_separator` spots data rows split cleanly
 by either, before the delimiter vote, and the refusal names it and lists what works. Two
 regression checks. (A development-side review then found the first version also refused
@@ -333,8 +334,8 @@ index was printed where a word was meant. It now names both groups.
   properties — not in the chart, legend or tooltip. **Caution:** on a PLC channel, a marker
   written there overwrites the declaration comment. Whether the CSV's `SymbolComment` row
   then carries the marker is not verified.
-- **4.9 — parked axis.** R2's axis rests near 50 with dither (quantisation step 0.000122,
-  `pct_flat` 25.2%, p50 50.0004) and makes moves up to 221. `events`: 39, with 32 `ramp` on the
+- **4.9 — parked axis.** R2's axis rests at one position with dither (quantisation step 0.000122,
+  `pct_flat` 25.2%) and makes moves of up to about 171 units from it. `events`: 39, with 32 `ramp` on the
   axis and 7 `transition` on the flag. No `clipping`, `flatline` or `step`. An axis parked
   *at a limit* and a genuine saturation did not occur. **Still open.**
 - **4.10 — does the skill get picked up unnamed? Pass**, on the Claude desktop app 2.7032.0,

@@ -6,9 +6,11 @@ You are being asked to test a change on a machine that has data nobody else has.
 below can be verified from this repository except the one thing that matters most, which is
 why you are being asked.
 
-**Two parts.** **Part A (§4)** needs a machine running TwinCAT and is the priority. **Part B
-(§5–§9) is closed**: it needed the 19 real exports from the earlier review, and they no longer
-exist. It is kept as a record; skip it. If there is time for one thing only, it is §4.1.
+**Both parts are closed.** **Part A (§4)** needed a machine running TwinCAT; every item in it
+has a measured answer, apart from a genuine saturation in 4.9, which was dropped: no machine
+available has an axis that reaches its limit. **Part B (§5–§9)** needed the 19 real exports from
+the earlier review, and they no longer exist. Both are kept as the record and as the method
+for a new round: write a new handoff for what is open then, and follow §4 and §11.
 
 ---
 
@@ -76,9 +78,10 @@ answered `ColorMode` — no theme-following option exists. A seventh
 (`evals/field-review-44d4951.md`) recorded parked and still axes for 4.9. The rounds after the
 first release (`evals/field-review-v1.0.0.md`, `-74dd86d.md`, `-633a9bf.md`) parked an axis at
 a software limit and on an end stop, ran `checkscope --tmc` against a real `.tmc` (4.7), and
-measured what Scope does with a sample time that is not a multiple of the task cycle. **Still
-open from Part A:** whether Claude Code picks the skill up unprompted (4.10), and in 4.9 a
-genuine saturation — the machine these rounds ran on has no axis that reaches its limit.
+measured what Scope does with a sample time that is not a multiple of the task cycle. 4.10
+passed (`evals/field-review-8bf9230.md`), and the latest round (`evals/field-review-v1.1.0.md`)
+confirmed the last open fix. **Nothing in Part A is open**; a genuine saturation (4.9) was
+dropped, as no machine available has an axis that reaches its limit.
 
 ## 3. Setting up
 
@@ -118,10 +121,10 @@ the `typical` load band — and is kept that small on purpose.
 
 ### 4.0 First: is the skill on this machine current?
 
-The last session installed the skill globally (`~/.claude/skills/twincat-scope`) at commit
-`1fa0e9b`. That copy still has every generator defect listed above, and testing it re-finds
-them — the third session did exactly that. Pull it (or re-clone) and check that
-`py -3 scripts/tcscope.py newscope --help` lists `--theme`.
+An old installed copy re-finds defects that are long fixed — the third session did exactly
+that. Install the latest release with `tools/update-skill.ps1 -Target <the installed skill
+folder>` (no `-Version` means latest; it replaces the whole folder), then run
+`py -3 scripts/tcscope.py doctor` and `uv run tests/test_verbs.py` in the installed copy.
 
 ### 4.1 Does a generated file record? — the one that matters
 
@@ -177,8 +180,9 @@ names and values such as types, sizes, ports and flags; replace names and addres
 
 ### 4.3 Dark theme — do the new colours load, and look right?
 
-Generated files looked like near-white panels in TwinCAT's dark theme. `newscope` now writes a
-dark style by default (`--theme light` for the other): `#252526` on every `YTChart`,
+Generated files looked like near-white panels in TwinCAT's dark theme. `newscope --theme
+auto`, the default, follows the XAE Shell's theme; `dark` and `light` force one. The dark
+style is: `#252526` on every `YTChart`,
 `AxisGroup` and `OverviewChart`; an `AxisStyle` inside every axis's `SubMember`, as real files
 have, with `#F1F1F1` axis text and a quiet `#3E3E42` grid; and a palette colour on each
 `Channel` and its `ChannelStyle` alike. The `AxisStyle` is structure Scope has never been
@@ -221,7 +225,7 @@ uv run scripts/tcscope.py ingest <recording>.svdx -o rec.parquet
 
 `doctor` should find `TC3ScopeExportTool.exe`; note the folder it reports below the TwinCAT
 install root. `ingest` runs it as `TC3ScopeExportTool.exe svd=<file> target=<file.csv>
-silent` — an argument form taken from documentation and **never executed**.
+silent` — an argument form taken from documentation, since verified on real recordings.
 
 - **PASS:** a `.csv` appears next to the `.svdx`, and `rec.parquet` is written.
 - **If it fails:** get the tool to export by hand and write down the exact command line that
@@ -272,8 +276,9 @@ the saved file? Is it shown anywhere in the UI? Does the file still load?
 
 ### 4.9 A parked axis — if there is time
 
-`events` reports `clipping` on an axis parked at the end of its travel, because a rest
-position and a rail look the same in the data (§8). If there is time, record about 30 s with
+An axis parked at rest, at a software limit and on an end stop is verified: no `clipping`
+(`evals/field-review-v1.0.0.md`). What is still unseen is a channel that genuinely saturates.
+If there is time, record about 30 s with
 an axis parked and — if the machine has one — a channel that genuinely saturates. Keep the
 CSVs on the machine. Report `stats` and `events` for those channels, names replaced.
 
@@ -485,12 +490,11 @@ written for.
 
 ## 8. Known limitations — already understood, not bugs to re-report
 
-- **`clipping` fires on an axis parked at the end of its travel.** A rest position and a rail
-  are identical in the data. Requiring the signal to leave the rail and return was tried and
-  defeated by LSB dither — a parked channel produced 427 separate runs at its rail. Left as a
-  documented limitation rather than shipping an unvalidated heuristic. **If you can suggest a
-  discriminator that survives the real files, that is the single most useful thing you could
-  add.** A candidate is the speed at which the signal enters and leaves the rail.
+- **`clipping` and a parked axis — resolved.** A rest position and a rail look the same in
+  the data, and requiring the signal to leave the rail and return was defeated by LSB dither.
+  The detector now leaves still channels, few-valued channels and commands at rest out, and an
+  axis parked at rest, at a software limit and on an end stop gives no `clipping`
+  (`evals/field-review-v1.0.0.md`). A genuine saturation has not been seen.
 - **Peak RSS is still ~2 × the array**, because the parsed blocks and the array they are
   joined into are alive at once. Copying block by block and freeing each was tried and saved
   nothing: the allocator kept the memory.
@@ -512,12 +516,11 @@ was not checked rather than implying coverage.
 
 First, every item of Part A you did not reach — name them. Beyond Part A:
 
-- `ingest` to Parquet against a real *large* export; only the generated scale fixture has
-  been used.
 - Label readability on `plot`. The verb has now run on real exports and made a 40k-sample
   overview readable in one image; nobody reported on full symbol paths at fontsize 8.
-- `doctor` on a machine *without* `TC3ScopeExportTool.exe`. On the one machine it has run on
-  it found the tool and reported the path correctly.
+
+`ingest` on a real large export (65.7 MB `.svdx`) and `doctor` on a PC without TwinCAT have
+both since passed (`evals/field-review-8bf9230.md`).
 
 ## 11. Rules for your report — please read, this one bit us
 

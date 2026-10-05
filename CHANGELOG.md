@@ -12,10 +12,17 @@
   caveat is gone. With v1.1.0 the settling tail is no longer reported, the end stop still is,
   identically, and a 27 380-event recording is unchanged (`evals/field-review-v1.1.0.md`).
 - `manifest`: a CSV's `Offset` header row is reported once, as `scale_offset`, not also as
-  `display_offset`. The docs had called it a display offset never to be added, while the
+  `display_offset` — **the `display_offset` field is gone from `manifest`'s output**. The docs had called it a display offset never to be added, while the
   scaling warning said to apply factor × value + offset. On a real export it held the offset
   set as the channel's scaling (`evals/field-review-v1.1.0.md`, §3b). `export-tool.md` also
   notes that Scope View's CSV can start one sample earlier than `ingest` of the same `.svdx`.
+- Docs brought up to date with the field rounds. The `.tmc` reader and an axis parked at a
+  limit are verified, no longer listed as open. README quotes eval iteration 6, Python 3.11 and
+  three CSV dialects. `events`' ranking and severity lists match the code. The load-band table
+  names the real bands. Contradictions on Timelines *All*, the locale trap and the templates
+  are resolved. The field-test brief marks Parts A and B closed and installs the latest
+  release. `examples/README.md` and `ATTRIBUTIONS.md` match `CLAUDE.md`'s redaction and
+  licence rules.
 
 ## 1.1.0 — 2026-10-02
 

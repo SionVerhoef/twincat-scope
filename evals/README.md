@@ -67,8 +67,9 @@ For the live evals it writes `clamp_station_export.csv`, `axis1_run_20260722.csv
 `press_axis3_export.csv`, and then `stages/<eval>/data/` holding each eval's own files — nothing
 else. The two Scope files are built from this skill's own `newscope` output with the trap written
 in, so they are as well-formed as the generator — only the trap is wrong; the scaled CSV comes from
-the same dialect writer as the tests. It still writes the retired `filler_overnight.svdx`, and
-`--scale` the retired 127 MB fixture.
+the same dialect writer as the tests. It still writes the retired `filler_overnight.svdx`,
+`AxisDiagnosis.tcscopex` and `press_line_export.csv`, and with `--scale` the retired 127 MB
+fixture.
 
 Regenerable and gitignored, like every other fixture in this repo. Ground truth is written to
 `evals/ground_truth.json` — one directory *up* from the data, never beside it.

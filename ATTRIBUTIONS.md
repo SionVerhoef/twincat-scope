@@ -17,9 +17,10 @@ paste those files in and call the result a template.
 
 | Licence of a source | May this skill ship the file? |
 |---|---|
-| Permissive — MIT, 0BSD, BSD-2, MIT-0, Apache-2 | **Yes.** Record it in the table below. 0BSD needs no notice. |
-| Copyrighted, or copyleft (GPL/LGPL) | **No.** Read it, restate in original words. Copying GPL code in would force this whole skill to GPL. |
-| All rights reserved — vendor docs, blogs | **No.** Cite and link only; do not quote at length. |
+| Permissive — MIT, 0BSD, BSD-2, MIT-0, Apache-2 | **Yes.** Copy the upstream `LICENSE` into the folder and add a row below, in the same commit. |
+| Copyleft (GPL/LGPL) | **No — do not vendor; ask the maintainer first.** Read it, restate in original words. Copying GPL code in would force this whole skill to GPL. |
+| All rights reserved — vendor docs (InfoSys), blogs, forums | **No.** Cite and link; reproduce no passages, tables, diagrams or screenshots. |
+| Specs and standards | **No** for the document's text, tables, diagrams and examples; the technical rule may be stated in original words. |
 
 The `.tcscopex` templates in `templates/` were **written from the observed schema**, not
 copied from any sample. That is a deliberate choice: it keeps this table empty and avoids
@@ -38,6 +39,5 @@ classify it — read the file.
 ## Trademarks
 
 "TwinCAT" and "Beckhoff" are trademarks of Beckhoff Automation GmbH & Co. KG. "EtherCAT" is a
-registered trademark and patented technology, licensed by Beckhoff Automation GmbH, Germany.
-"CODESYS" is a trademark of CODESYS GmbH. All are used nominatively — to describe what this
-skill works with — and none of these organisations is affiliated with or endorses it.
+registered trademark and patented technology, licensed by Beckhoff Automation GmbH, Germany. All are used nominatively — to describe what
+this skill works with — and none of these organisations is affiliated with or endorses it.

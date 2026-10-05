@@ -261,8 +261,9 @@ It also lays them out, rather than piling every trace onto one axis:
   `Digital / state`, `Digital / state (2)` — because that is where `checkscope` starts warning,
   and a generator should not write what its own checker complains about.
 - **Flags stay on 0/1.** Scope saves no band height, so the file cannot give flags more room.
-  A display offset (`Channel/SubMember/AcquisitionInterpreter/Offset`) moves only the drawn
-  trace, and flags stacked that way were too close to tell apart, with axis labels that no
+  A channel offset (`Channel/SubMember/AcquisitionInterpreter/Offset`, part of its scaling
+  beside `ScaleFactor`) shifts the drawn trace — and the exported values too when *Scale
+  values before export* is on — and flags stacked that way were too close to tell apart, with axis labels that no
   longer lined up. So `newscope` writes no offset, and colour tells flags in one band apart.
 - **A lone parent is drawn beside what it drives.** A block with one channel and blocks
   beneath it — `GVL.fbCell.fbControl.seStep` above `…fbControl.fbStartup.*` — gets no tab of
@@ -307,8 +308,8 @@ looked up in the compiled program: a typo, a renamed variable, a whole block or 
 array is a problem, and so is a type read at the wrong width — an undeclared `DINT` written
 as `REAL64`. Enums are read at their base type. A type the `.tmc` does not describe, such as
 one from a library, is a warning, never a guess. The reader was written from the structure of
-one real `.tmc` and has not yet been run against one; treat a surprising result as a finding
-about the reader.
+one real `.tmc` and has been run against one (862 symbols, `evals/field-review-49a8e9b.md`);
+on another program, treat a surprising result as a finding about the reader.
 
 It also prints the layout — every chart, its bands and their channels — and warns when a chart
 stacks more than six bands or a band overlays more than eight channels. Both are readability,

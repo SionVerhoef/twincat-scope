@@ -1,7 +1,8 @@
 # Templates
 
-Known-good `.tcscopex` scope projects. UTF-8 with BOM, CRLF, valid GUID linkage, and they
-pass `scripts/tcscope.py checkscope`.
+Known-good `.tcscopex` scope projects. UTF-8 with BOM, CRLF and valid GUID linkage.
+`axis-diagnosis` passes `scripts/tcscope.py checkscope` (with a warning about its placeholder
+NetId); `minimal-single-channel` fails it on purpose until its symbol is filled in.
 
 | File | What it is |
 |---|---|

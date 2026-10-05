@@ -30,12 +30,12 @@ can come out reversed.
 This skill gives the agent the Scope-specific facts and a small tool that answers questions
 about a recording in a few hundred bytes or one picture, instead of returning samples.
 
-**What it has shown so far.** In the latest blinded evals (`evals/results-iteration-4.md`:
-five evals, three runs each, the same model with and without the skill) answers with the skill
-scored 28.3 of 29 against 20.7 without, and an independent judge ranked the two the same way on
-every eval. The widest gap was a hand-written `.tcscopex` that would record nothing: all three
-answers without the skill called it sound. On a planted-fault recording both scored full marks.
-The skill does not save tokens; it used about 9% more. On real machines, files it generates
+**What it has shown so far.** In the latest blinded evals (`evals/results-iteration-6.md`:
+seven evals, three runs each, the same model with and without the skill) answers with the skill
+scored 35.0 of 38 against 24.7 without, and an independent judge ranked the skill ahead on six of
+seven. On the seventh, a scaled CSV, the skill's own wording produced a confident wrong answer;
+after that wording was fixed, a re-run of that eval was ranked ahead too. On a planted-fault
+recording both scored full marks. The skill does not save tokens; it used about 18% more. On real machines, files it generates
 open and record unedited, and `checkscope --tmc` caught every planted symbol error against a
 real compiled program (see *Status*).
 
@@ -67,8 +67,8 @@ real compiled program (see *Status*).
   acquisition groups can be trusted at all.
 - **`stats`** — per-channel health: time pinned at a rail, flat stretches, quantisation,
   outlier-heavy distributions.
-- **`events`** — steps, spikes, ramps, flatlines, holds, clipping, digital transitions and
-  threshold crossings, ranked worst-first and spread across the recording. Tells a setpoint at
+- **`events`** — steps, spikes, ramps, flatlines, holds, wraps, clipping, standing following
+  errors, digital transitions and threshold crossings, ranked worst-first and spread across the recording. Tells a setpoint at
   rest from a frozen sensor.
 - **`plot`** — a PNG drawn as a min/max envelope per pixel, so a 3-sample spike is always
   visible.
@@ -76,7 +76,7 @@ real compiled program (see *Status*).
   channels on different clocks unless you ask it to resample.
 - **`window`** — the actual numbers for a short time range, capped so a broad question cannot
   flood the conversation.
-- **Real export formats** — both TAB and European `;`/`,` dialects, multi-rate groups,
+- **Real export formats** — TAB, European `;`/`,` and `,`/`.` dialects, multi-rate groups,
   repeat-padded or truncated slow groups, channels exported several times. Layouts it cannot
   read correctly are refused by name rather than misread.
 
@@ -142,7 +142,7 @@ Without `UV_NATIVE_TLS`, an intercepting proxy breaks TLS with an opaque error.
 py -3 scripts/tcscope.py doctor        # python3 on Linux or macOS
 ```
 
-`doctor`, `newscope` and `checkscope` need no packages, but they do need **Python 3** itself.
+`doctor`, `newscope` and `checkscope` need no packages, but they do need **Python 3.11 or newer** itself.
 A fresh Windows PC may have none: `python.exe` there can be a 0-byte Microsoft Store stub, and
 `py` missing. Install it for your user only, no administrator rights needed:
 
@@ -194,13 +194,15 @@ on real machines in field sessions, written up in `evals/field-review-*.md`.
   types.
 - Timelines *All* on a 10-channel group reads correctly.
 - `events` on a real 600 s, 33-channel recording, over several rounds of fixes.
+- An axis parked at a software limit or on an end stop gives no `clipping`; on the end stop
+  `events` reports one `standing` following error and leaves a real settling tail out.
 - The test suite on Windows and Linux.
 
 **Not yet verified**
 
 - The analysis verbs across a wide variety of real recordings — most real data so far comes
   from one machine.
-- An axis parked exactly at a limit, a genuine saturation, and marker tables in an export.
+- A genuine saturation, and marker tables in an export.
 - What a *Subsave* trigger records: it needs a Scope View Professional licence, which no test
   machine had.
 - A Scope View CSV exported with *Scale values* on cannot be told from a raw one: `manifest`
@@ -220,9 +222,10 @@ The most useful contribution is a redacted recording of a **known fault** — se
 py -3 tests/make_fixture.py && py -3 tests/make_real_fixtures.py
 py -3 tests/test_verbs.py              # end-to-end checks of every verb
 py -3 evals/test_grader.py             # the eval grader against known answers
+py -3 evals/test_stage_runs.py         # the eval staging harness
 ```
 
-Both test files are plain scripts, not pytest suites. `evals/README.md` explains how the skill
+These are plain scripts, not pytest suites. `evals/README.md` explains how the skill
 itself is evaluated against a no-skill baseline.
 
 ## Licence
