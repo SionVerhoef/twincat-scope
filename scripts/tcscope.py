@@ -1290,10 +1290,10 @@ def cmd_manifest(args):
                      unit=ch["unit"], data_type=ch["data_type"],
                      nan_fraction=float(np.mean(~np.isfinite(ch["values"]))),
                      constant=bool(np.nanmax(ch["values"]) == np.nanmin(ch["values"])))
-        # Where the trace is drawn, not what was recorded: the values are raw -
-        # unless the CSV was exported with 'Scale values before export' on.
-        if ch.get("display_offset"):
-            entry["display_offset"] = ch["display_offset"]
+        # The header's Offset row is the channel's scaling offset, beside its
+        # ScaleFactor (field review v1.1.0 §3b), so it is reported once, as
+        # scale_offset. The values are raw unless the CSV was exported with
+        # 'Scale values before export' on.
         factor = ch.get("scale_factor")
         if (factor is not None and factor != 1) or ch.get("display_offset"):
             entry["scale_factor"] = factor if factor is not None else 1.0

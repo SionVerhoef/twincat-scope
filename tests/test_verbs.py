@@ -1652,9 +1652,12 @@ def export_copy_checks():
               and symbols.count(parent) == 2,
               str(symbols))
         flag = next((c for c in chans if c["symbol_name"] == "GVL.fbCell.fbA.bFlag"), {})
-        check("a display offset is reported, and never applied to the values",
-              flag.get("display_offset") == 2.0
-              and not any("display_offset" in c for c in chans if c is not flag)
+        # Field review v1.1.0 §3b: the Offset row is the channel's scaling
+        # offset, so it is reported once, beside the factor, as scale_offset.
+        check("the Offset row is reported once, as scale_offset, and not applied to the values",
+              flag.get("scale_offset") == 2.0
+              and not any("display_offset" in c for c in chans)
+              and not any("scale_offset" in c for c in chans if c is not flag)
               and run("stats", csv, "--channels", "bFlag").get("channels", [{}])[0].get("max") == 1.0,
               str(flag))
 
@@ -1664,7 +1667,8 @@ def export_copy_checks():
         check("ingest keeps the collapse and the offset through Parquet",
               len(back.get("channels", [])) == 5
               and back.get("copies_collapsed") == man.get("copies_collapsed")
-              and any(c.get("display_offset") == 2.0 for c in back.get("channels", [])),
+              and any(c.get("scale_offset") == 2.0 for c in back.get("channels", []))
+              and not any("display_offset" in c for c in back.get("channels", [])),
               str(back.get("copies_collapsed")))
 
         # Scope View's own export carries no symbol; the "(n)" suffix plus
@@ -2727,6 +2731,7 @@ def scale_checks():
         flag = next((c for c in man.get("channels", []) if c.get("name") == "bFlag"), {})
         check("a channel's display scaling is reported",
               act.get("scale_factor") == 2.0 and act.get("scale_offset") == 10.0
+              and "display_offset" not in act
               and "scale_factor" not in flag and "scale_offset" not in flag,
               str({k: act.get(k) for k in ("scale_factor", "scale_offset", "display_offset")}))
         warned = [w for w in man.get("warnings", []) if "Scale values" in w]

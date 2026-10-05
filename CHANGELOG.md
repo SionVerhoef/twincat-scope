@@ -11,6 +11,11 @@
 - `SKILL.md`: the settling exclusion in `standing` is now confirmed on real recordings, so its
   caveat is gone. With v1.1.0 the settling tail is no longer reported, the end stop still is,
   identically, and a 27 380-event recording is unchanged (`evals/field-review-v1.1.0.md`).
+- `manifest`: a CSV's `Offset` header row is reported once, as `scale_offset`, not also as
+  `display_offset`. The docs had called it a display offset never to be added, while the
+  scaling warning said to apply factor × value + offset. On a real export it held the offset
+  set as the channel's scaling (`evals/field-review-v1.1.0.md`, §3b). `export-tool.md` also
+  notes that Scope View's CSV can start one sample earlier than `ingest` of the same `.svdx`.
 
 ## 1.1.0 — 2026-10-02
 

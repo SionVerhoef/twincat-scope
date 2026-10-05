@@ -103,9 +103,9 @@ Times in a Scope export are milliseconds. This tool converts on read and reports
 everywhere (`time_unit: "ms"`, `times_reported_in: "s"`).
 
 Scope exports one column per *display* channel, so a channel drawn in three tabs arrives
-three times. Exact copies are read as one channel and listed under `copies_collapsed`, and a
-non-zero `display_offset` is where the trace was drawn, not a change to the values — never
-add it. The export-side detail, and why `ingest` on the `.svdx` beats Scope View's own CSV
+three times. Exact copies are read as one channel and listed under `copies_collapsed`. The
+header's `Offset` row is part of the channel's scaling (`scale_offset`, beside
+`scale_factor`): until the export setting is known, give both readings. The export-side detail, and why `ingest` on the `.svdx` beats Scope View's own CSV
 export, is in `export-tool.md`.
 
 ### Rung 2 — `stats`
