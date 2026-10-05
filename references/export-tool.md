@@ -57,9 +57,14 @@ the same range**, and read the range from the header's `Starttime of export` and
   reader collapses exact copies (same symbol and port, same time column, same values) and
   `manifest` reports them as `copies_collapsed`, with `matched_on: "symbol"`. The same symbol
   recorded at another rate is a second recording and stays.
-- **The `Offset` header row is the display offset**, set per display channel in Scope View.
-  The values under it are raw: a flag drawn at offset 2 exported only 0 and 1. `manifest`
-  shows it as `display_offset`; **never add it to the values.**
+- **The `Offset` header row is the channel's scaling offset**, beside `ScaleFactor`, set per
+  display channel in Scope View. With *Scale values before export* off, the values under it
+  are raw: a flag drawn at offset 2 exported only 0 and 1, and an axis given factor 2 and
+  offset 10 exported its plain position. `manifest` reports it as `scale_offset` and warns;
+  give both readings until the export setting is known.
+- **Scope View's CSV can carry one leading sample more** than `ingest` of the same `.svdx`:
+  5 101 rows against 5 100, with CSV row *i* equal to `.svdx` row *i − 1*. When comparing
+  the two, align on the values or the time column, never on the row number.
 
 ### Exporting from Scope View by hand: the settings
 

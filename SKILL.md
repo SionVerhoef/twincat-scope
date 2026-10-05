@@ -70,8 +70,8 @@ Windows; on Linux or macOS (and in this repo's CI) the same commands are `python
 5. **A CSV exported from Scope View by hand depends on the user's export settings.** Ask for
    them, or advise the ones in `references/export-tool.md` (*Exporting from Scope View by
    hand*). A channel drawn in several tabs exports several times; exact copies are collapsed
-   and listed under `copies_collapsed`. A `display_offset` is where a trace was drawn — never
-   add it to the values.
+   and listed under `copies_collapsed`. The `Offset` header row is part of the channel's
+   scaling, reported as `scale_offset`, and the both-readings rule below applies to it.
 
 Then descend the ladder — never skip to the bottom:
 
