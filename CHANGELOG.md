@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- A disclaimer at the top of `README.md` and `SKILL.md`: reference material only, not for
+  safety functions, and every scope configuration, recording plan and diagnosis is reviewed
+  and validated by a qualified engineer against the drive and platform documentation before
+  anyone acts on it. The skill now says so when it hands over a result.
+
 ## 1.1.1 — 2026-10-05
 
 ### Fixed

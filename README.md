@@ -8,6 +8,10 @@ Companion skill: **[twincat-st](https://github.com/SionVerhoef/twincat-st)** wri
 the Structured Text. This one measures what that code does on the machine. Install either
 alone.
 
+> **Reference material only. Not for safety functions.** Scope configurations, recording
+> plans and diagnoses produced with this skill must be reviewed and validated by a qualified
+> engineer against the drive and platform documentation before anyone acts on them.
+
 > **Not affiliated with or endorsed by Beckhoff Automation GmbH & Co. KG.**
 > "TwinCAT" and "Beckhoff" are trademarks of Beckhoff Automation GmbH & Co. KG, used here
 > nominatively to describe what this skill works with. "EtherCAT" is a registered trademark
