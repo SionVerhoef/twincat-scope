@@ -5,6 +5,11 @@ description: "Record and analyse TwinCAT 3 Scope measurements. Trigger whenever 
 
 # twincat-scope — measure a machine, then actually read the measurement
 
+> **Reference material only. Not for safety functions.** Every scope configuration, recording
+> plan and diagnosis you produce must be reviewed and validated by a qualified engineer
+> against the drive and platform documentation before anyone acts on it — say so when you
+> hand one over.
+
 Recording is the easy half. Ten minutes of twenty channels at 1 kHz is twelve million
 samples — far too large to read, and the thing you are looking for is usually three samples
 wide. So this skill never hands back samples: it hands back summaries, events and pictures,
