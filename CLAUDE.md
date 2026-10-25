@@ -39,6 +39,11 @@ before writing up any work done against real recordings.
 Naming a *product* is fine and often necessary: "AX8000-series drives", "TC3.1", "linear-motor
 transport" describe hardware anyone can buy. Naming *whose* machine it is, is not.
 
+**Use placeholders that identify nothing:** AMS NetId `1.2.3.4.1.1`, IP addresses from
+`192.0.2.0/24`, MAC addresses from `00:00:5E:00:53:xx`. CI runs `scripts/check_private.py`
+and fails on any other NetId, IP or MAC it finds. It cannot recognise a customer name — that
+part is on you.
+
 ## Everything here must apply to everybody
 
 This is a general-purpose skill. Every reference, rule, threshold and example must make sense
