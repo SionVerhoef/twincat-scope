@@ -51,6 +51,10 @@ jobs:
           ! grep -rnE '/[h]ome/|/[p]rojects/|[C]:\\Users' \
               --include='*.md' --include='*.py' --include='*.yml' . || exit 1
 
+      # This repository is public: no real AMS NetId, IP or MAC address (see CLAUDE.md).
+      - name: no real network identities committed
+        run: python3 scripts/check_private.py
+
       - name: no real AMS NetId committed in a template
         # Must be a block scalar. In `run: ! grep ...` YAML reads the leading `!`
         # as a tag indicator and strips it, which silently inverts the check:
