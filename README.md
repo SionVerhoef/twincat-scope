@@ -2,7 +2,8 @@
 
 An agent skill for **TwinCAT 3 Scope**: build scope projects that actually record, and read
 the recordings they produce without drowning in samples. Built and tested with Claude Code;
-the same files follow the skill layout GitHub Copilot in VS Code reads, which is untested.
+the same files follow the skill layout GitHub Copilot in VS Code and OpenAI Codex read, which
+is untested. Codex takes its display name from `agents/openai.yaml`.
 
 Companion skill: **[twincat-st](https://github.com/SionVerhoef/twincat-st)** writes and reviews
 the Structured Text. This one measures what that code does on the machine. Install either
@@ -99,12 +100,15 @@ git submodule add https://github.com/SionVerhoef/twincat-scope .claude/skills/tw
 
 # GitHub Copilot in VS Code (untested)
 git submodule add https://github.com/SionVerhoef/twincat-scope .github/skills/twincat-scope
+
+# OpenAI Codex (untested)
+git submodule add https://github.com/SionVerhoef/twincat-scope .agents/skills/twincat-scope
 ```
 
 Pin a release rather than following `main`, and commit the pin:
 
 ```bash
-git -C .claude/skills/twincat-scope checkout v1.1.2
+git -C .claude/skills/twincat-scope checkout v1.2.0
 git add .claude/skills/twincat-scope
 ```
 
@@ -113,7 +117,7 @@ afterwards needs `git clone --recurse-submodules <your-repo>`, or `git submodule
 in an existing clone.
 
 If your team would rather not use submodules, `tools/update-skill.ps1` downloads a release zip
-instead (`-Version v1.1.2`, or the latest release by default). Its default target is the
+instead (`-Version v1.2.0`, or the latest release by default). Its default target is the
 Copilot folder, so for Claude Code pass `-Target .claude\skills\twincat-scope`. A copy of the
 script saved from a browser is blocked by the usual `RemoteSigned` policy until you unblock it:
 
@@ -161,6 +165,7 @@ or run the python.org installer with *Install for all users* unticked.
 ```
 twincat-scope/
 ├── SKILL.md                        entry point — rules, workflow, routing
+├── agents/openai.yaml              display name and blurb for OpenAI Codex
 ├── references/
 │   ├── data-triage.md              the method for reading a recording
 │   ├── recording-load.md           sizing a recording safely
@@ -212,7 +217,7 @@ on real machines in field sessions, written up in `evals/field-review-*.md`.
 - A Scope View CSV exported with *Scale values* on cannot be told from a raw one: `manifest`
   warns that its values *may* be scaled, and with a Name-only header cannot see the scaling at
   all. `ingest` on the `.svdx` reads raw values.
-- Installation through GitHub Copilot in VS Code.
+- Installation through GitHub Copilot in VS Code, or through OpenAI Codex.
 
 `SKILL.md` rule 3 tells the agent never to claim something is verified when it is not. The
 same applies to this list.

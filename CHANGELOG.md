@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.2.0 — 2026-10-26
+
+### Added
+
+- `agents/openai.yaml`: a display name and a one-line blurb for OpenAI Codex. `README.md` names
+  the folder Codex reads skills from (`.agents/skills/`). Untested in Codex.
+
+### Changed
+
+- `SKILL.md`: once the data has named a fault, the agent loads the companion skill `twincat-st`
+  for the fix if it is installed, and otherwise hands off as before. The description still
+  names no sibling skill, so this skill still ships alone.
+- The description reads "what it is, then use when". Its trigger terms are unchanged. On
+  `evals/triggers.json`, Sonnet 5.5, 3 runs a case: 36 of 36, the same as the old description
+  in the same run.
+
 ## 1.1.2 — 2026-10-08
 
 ### Added
