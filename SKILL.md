@@ -1,6 +1,6 @@
 ---
 name: twincat-scope
-description: "Record and analyse TwinCAT 3 Scope measurements. Trigger whenever the user works with: TwinCAT Scope, Scope View, TE1300, TF3300, Scope Server, .svdx, .tcscopex, .svd, .tcmproj, a scope project, a trace, a recording, a measurement, an oscilloscope view of PLC data, channels, sample rate, oversampling, a scope trigger, or exporting scope data to CSV/TDMS. Also trigger for diagnosing machine behaviour from recorded data: following error, position lag, torque spikes, velocity saturation, jitter, cycle-time overruns, axis oscillation, drive tuning, 'why did the axis fault', 'what happened at 12 seconds', or any request to scan, summarise or find events in a large measurement file. Also trigger when a directory contains .tcscopex or .svdx files even if the user does not say TwinCAT. Do NOT use for WRITING or REVIEWING Structured Text or PLC code - this skill is for measurement and diagnosis, not authoring. Do NOT use for Siemens or Rockwell trace tools."
+description: "Records and analyses TwinCAT 3 Scope measurements. Use when the user works with TwinCAT Scope, Scope View, TE1300, TF3300, Scope Server, .svdx, .tcscopex, .svd, .tcmproj, a scope project, a trace, a recording, a measurement, an oscilloscope view of PLC data, channels, sample rate, oversampling, a scope trigger, or exporting scope data to CSV/TDMS. Also use when diagnosing machine behaviour from recorded data: following error, position lag, torque spikes, velocity saturation, jitter, cycle-time overruns, axis oscillation, drive tuning, 'why did the axis fault', 'what happened at 12 seconds', or any request to scan, summarise or find events in a large measurement file, and when a directory contains .tcscopex or .svdx files even if the user does not say TwinCAT. Do NOT use for WRITING or REVIEWING Structured Text or PLC code - this skill is for measurement and diagnosis, not authoring. Do NOT use for Siemens or Rockwell trace tools."
 ---
 
 # twincat-scope — measure a machine, then actually read the measurement
@@ -16,8 +16,8 @@ wide. So this skill never hands back samples: it hands back summaries, events an
 and only returns real rows once a time range is known.
 
 **Not for authoring code.** This skill measures and diagnoses. Once the data has named a
-fault, writing the PLC fix is a different job — hand off to whatever covers ST authoring in
-this project.
+fault, writing the PLC fix is a different job. Load the companion skill `twincat-st` for it if
+it is installed; otherwise hand off to whatever covers ST authoring in this project.
 
 ## The four rules
 
