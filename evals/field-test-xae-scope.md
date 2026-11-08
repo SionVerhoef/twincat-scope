@@ -20,9 +20,13 @@ wants three of those manual steps gone:
 2. **"Add Existing Item".** The user adds every generated `.tcscopex` to the TwinCAT
    Measurement project (`.tcmproj`) by hand. **Find out whether the Automation Interface can do
    it** without a dialog, and how.
-3. **Record and save.** The user drags the scope in, presses Record, and saves the data as
-   `.svdx` by hand. **Find out whether any scriptable path can start a recording, stop it and
-   save the `.svdx`.**
+3. **Save and hand over the recording.** After recording, the user saves the data as `.svdx`
+   to the desktop through Scope View's save dialog, then drags that file into the agent's chat.
+   **Find out whether a script can save the recording to a fixed path without a dialog.** The
+   agent can then read it from there, and nothing needs dragging. Whether a script can also
+   start and stop the recording is secondary: `SKILL.md` rule 4 keeps Record a human action
+   unless the maintainer decides otherwise. Also record where Scope View saves an `.svdx` by
+   default, and whether that folder is fixed.
 
 Nothing is known yet from a real XAE. Nobody has run the probe, or even parsed it: the
 machine it was written on has no PowerShell. Your output decides what tool gets built, so
@@ -113,7 +117,7 @@ Quote the full output of every probe run. Note XAE's version from P2.
 | P4 | `probe -Add C:\work\gen\ScopeB.tcscopex -Method AddFromFile` | The same as P3. Does the item point at `C:\work\gen`, or was the file copied anyway? | Q2: which method matches "Add Existing Item" |
 | P5 | `probe -Add C:\work\gen\ScopeA.tcscopex` again | Error, a duplicate item, a `ScopeA1`, or a dialog? | Q2: what a re-run does |
 | P6 | Open `ScopeA` from the Measurement project in XAE so it is visible. Run the `newscope` line for `A` again, but write to **the path the project item uses** (P3's `file=`), with `--record-time 20`. Switch to XAE | Does XAE show a reload prompt? Quote it, answer **No**, and note what XAE shows. Repeat with the scope's document **closed** in XAE | Q1: can this skill cause the popup, and when |
-| P7 | Only on the user's local/test runtime, with the user present, and with **ScopeC** added by the probe. (a) For each P2 command that looks like record/stop/save-data, run `$dte.ExecuteCommand('<name>')` with ScopeC's node selected in Solution Explorer (`$dte` from the ROT, as in the probe). (b) If P2's `object=` for ScopeC is not `__ComObject`/empty, list `$item.Object \| Get-Member` and try `StartRecord`, `StopRecord` and `SaveData('<path>.svdx')` if they exist. Save your snippet to `evals/probes/` | For each call: return or error, any dialog, did a recording start (does the chart move?), and did an `.svdx` appear (path, size)? Run `py -3 scripts\tcscope.py checkscope <that>.svdx`, then `ingest <that>.svdx` and `manifest` on the Parquet it names. Expect channel `nCounter` at about 100 Hz for about 10 s | Q3: record and save through XAE |
+| P7 | Only on the user's local/test runtime, with the user present, and with **ScopeC** added by the probe. (a) For each P2 command that looks like record/stop/save-data, run `$dte.ExecuteCommand('<name>')` with ScopeC's node selected in Solution Explorer (`$dte` from the ROT, as in the probe). (b) If P2's `object=` for ScopeC is not `__ComObject`/empty, list `$item.Object \| Get-Member` and try `StartRecord`, `StopRecord` and `SaveData('<path>.svdx')` if they exist. Save your snippet to `evals/probes/` | For each call: return or error, any dialog, did a recording start (does the chart move?), and did an `.svdx` appear (path, size)? **Most important:** after the user records and stops by hand, can a save-data call write the `.svdx` to a path you choose, with no Save dialog? Run `py -3 scripts\tcscope.py checkscope <that>.svdx`, then `ingest <that>.svdx` and `manifest` on the Parquet it names. Expect channel `nCounter` at about 100 Hz for about 10 s | Q3: record and save through XAE |
 | P8 | Find the Scope View install: `Get-ChildItem C:\TwinCAT -Recurse -Filter 'TwinCAT.Measurement.Scope.API*.dll' -ErrorAction SilentlyContinue`. For each one: `[Reflection.Assembly]::LoadFrom($p).GetExportedTypes() \| ? Name -match 'ScopeProject\|Record' \| % { $_.FullName; $_.GetMethods().Name \| sort -u }` | The DLL paths (redact the root to `C:\TwinCAT\…`), the version, and the public methods of `ScopeProject` (or what stands in for it). Is TF3300 Scope Server installed (Programs and Features)? | Q3: is a standalone recorder possible without XAE |
 | P9 | Close every dialog. Remove ScopeA–D from the project by hand, revert Scratch with git | Clean `git status` | clean-up |
 
