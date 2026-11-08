@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- `SKILL.md`: an agent running on the TwinCAT PC finds the `.svdx` the user just saved on disk
+  and names the file it picked, instead of asking the user to drag the file into the chat.
+
 ## 1.2.0 — 2026-10-26
 
 ### Added

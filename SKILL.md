@@ -60,6 +60,13 @@ Windows; on Linux or macOS (and in this repo's CI) the same commands are `python
 
 ## Workflow — diagnosing from a recording
 
+**Find the recording before asking for it.** When you run on the TwinCAT PC, the `.svdx` the
+user just saved is already on disk, so do not ask them to upload or drag it in. List the newest
+ones in the folder they name, the solution's folder and their Desktop:
+`Get-ChildItem $HOME\Desktop, <solution folder> -Recurse -Filter *.svdx | Sort-Object LastWriteTime -Descending | Select-Object -First 5`.
+Name the file you picked and when it was saved, so a wrong pick gets caught, then pass its path
+to `ingest`. On another machine, ask for the file.
+
 1. **`manifest` first, always.** It names the channels, units, sample rate, duration and
    gaps rather than letting you guess them — and every frequency claim downstream is scaled
    by that rate. `manifest --dump-header` shows the raw first lines when a CSV looks mangled.
