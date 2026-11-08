@@ -23,9 +23,10 @@ wants three of those manual steps gone:
 3. **Save and hand over the recording.** After recording, the user saves the data as `.svdx`
    to the desktop through Scope View's save dialog, then drags that file into the agent's chat.
    **Find out whether a script can save the recording to a fixed path without a dialog.** The
-   agent can then read it from there, and nothing needs dragging. Whether a script can also
-   start and stop the recording is secondary: `SKILL.md` rule 4 keeps Record a human action
-   unless the maintainer decides otherwise. Also record where Scope View saves an `.svdx` by
+   agent can then read it from there, and nothing needs dragging. **Also find out whether a script can
+   start and stop the recording.** The maintainer's decision: the user normally presses Record
+   themselves, but the tool must be able to do it too, **only when the user explicitly asks**,
+   never on its own initiative (`SKILL.md` rule 4 is to be amended to match when the tool lands). Also record where Scope View saves an `.svdx` by
    default, and whether that folder is fixed.
 
 Nothing is known yet from a real XAE. Nobody has run the probe, or even parsed it: the
