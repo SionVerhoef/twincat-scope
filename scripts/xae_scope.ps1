@@ -147,9 +147,16 @@ function Get-Com($o, [string] $name, [object[]] $arguments = $null) {
 function Invoke-Com($o, [string] $name, [object[]] $arguments) {
     , [System.__ComObject].InvokeMember($name, $IM, $null, $o, $arguments)
 }
+# Count + Item(i), late-bound first: on an object the adapter cannot see, PowerShell answers
+# .Count with its own intrinsic 1. The adapter is the fallback for typed DTE collections.
 function Get-ComItems($collection) {
-    $n = [int](Get-Com $collection 'Count')
-    for ($i = 1; $i -le $n; $i++) { , (Invoke-Com $collection 'Item' @($i)) }
+    try { $n = [int][System.__ComObject].InvokeMember('Count', $GP, $null, $collection, $null) }
+    catch { $n = [int]$collection.Count }
+    for ($i = 1; $i -le $n; $i++) {
+        try { $it = [System.__ComObject].InvokeMember('Item', $IM, $null, $collection, @($i)) }
+        catch { $it = $collection.Item($i) }
+        , $it
+    }
 }
 function Get-InnerError($ex) {
     while ($ex.InnerException) { $ex = $ex.InnerException }
@@ -165,7 +172,8 @@ function Find-Xae {
         $sln = ''
         try { $sln = [string] $r.Obj.Solution.FullName } catch { }
         if ($sln -and ((Full $sln) -eq $Solution)) {
-            return [pscustomobject]@{ Dte = $r.Obj; Pid = [int]($r.Name -replace '^.*:', ''); Seen = $seen }
+            if ($r.Name -notmatch ':(\d+)$') { Fail "cannot read the process id from the ROT entry '$($r.Name)'" }
+            return [pscustomobject]@{ Dte = $r.Obj; Pid = [int]$Matches[1]; Seen = $seen }
         }
     }
     Fail "no XAE has $Solution open ($seen XAE/Visual Studio instance(s) checked)" `
@@ -242,7 +250,10 @@ try {
             catch { Fail "added $leaf but could not save the project: $(Get-InnerError $_.Exception)" 'Save the Measurement project in XAE.' }
             $saved = [bool](Get-Com $proj.Obj 'Saved')
             Assert-NoDialog $xae ' after the add'
-            Emit ([ordered]@{ ok = $saved; item = $leaf; path = (Get-ItemPath $new); project = $proj.Name; project_saved = $saved }) $(if ($saved) { 0 } else { 1 })
+            if (-not $saved) { Fail "added $leaf but the project still reports unsaved changes" 'Save the Measurement project in XAE.' }
+            $path = Join-Path $projDir $leaf
+            try { if ($null -ne $new) { $path = Get-ItemPath $new } } catch { }
+            Emit ([ordered]@{ ok = $true; item = $leaf; path = $path; project = $proj.Name; project_saved = $saved }) 0
         }
         'save' {
             if (Test-Inside $Out $projDir) {
@@ -257,15 +268,17 @@ try {
             # (InvalidCastException even on GetType()), so straight to InvokeMember.
             $sw = [Diagnostics.Stopwatch]::StartNew()
             try {
-                $node = Get-Com $hit[0].Obj 'Object'
-                $sp = [System.__ComObject].InvokeMember('ScopeProject', $GP, $null, $node, $null)
+                $node = [System.__ComObject].InvokeMember('Object', $GP, $null, $hit[0].Obj, $null)
+                $sp =[System.__ComObject].InvokeMember('ScopeProject', $GP, $null, $node, $null)
                 [void][System.__ComObject].InvokeMember('SaveData', $IM, $null, $sp, @($Out))
             } catch { Fail "SaveData failed: $(Get-InnerError $_.Exception)" 'Is there a recording held in Scope View for this scope? Press Record, let it stop, then save.' }
-            $last = -1
-            for ($k = 0; $k -lt 20; $k++) {
+            # Measured: the file is complete when SaveData returns (30 kB in under 0.2 s). Still,
+            # wait up to 60 s for a size that holds still, and never report a growing file as saved.
+            $last = -1; $stable = $false
+            for ($k = 0; $k -lt 240; $k++) {
                 if (Test-Path -LiteralPath $Out) {
                     $len = (Get-Item -LiteralPath $Out).Length
-                    if ($len -gt 0 -and $len -eq $last) { break }
+                    if ($len -gt 0 -and $len -eq $last) { $stable = $true; break }
                     $last = $len
                 }
                 Start-Sleep -Milliseconds 250
@@ -273,6 +286,9 @@ try {
             Assert-NoDialog $xae ' after SaveData'
             if (-not (Test-Path -LiteralPath $Out)) {
                 Fail "SaveData returned but wrote no file at $Out" 'Is there a recording held in Scope View for this scope?'
+            }
+            if (-not $stable) {
+                Fail "$Out was still being written after 60 s" 'Wait until its size stops changing, then ingest it by path.'
             }
             Emit ([ordered]@{ ok = $true; path = $Out; bytes = (Get-Item -LiteralPath $Out).Length; item = $Item;
                     project = $proj.Name; ms = $sw.ElapsedMilliseconds }) 0

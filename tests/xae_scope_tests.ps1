@@ -15,7 +15,8 @@ $taken = Join-Path $tmp 'taken.svdx'; Set-Content $taken 'x'
 $failed = 0
 
 function Run([string[]] $argv) {
-    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $helper @argv 2>&1
+    $ErrorActionPreference = 'Continue'   # a child's stderr line must not end the test run
+    $out =& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $helper @argv 2>&1
     $code = $LASTEXITCODE
     $json = $null
     try { $json = ($out | Select-Object -Last 1) | ConvertFrom-Json } catch { }

@@ -4035,6 +4035,13 @@ def refuse_measurement_folder(path):
              "tcscope.py xae add <file> --solution <.sln>")
 
 
+def _absolute(path):
+    """Absolute, spelled the way the user and XAE spell it: resolve() would turn
+    a subst or mapped drive into its target, and the XAE holding the solution
+    would then not be recognised."""
+    return Path(os.path.abspath(path))
+
+
 def solution_file(value):
     """The .sln named, or the only one in the folder named."""
     path = Path(value)
@@ -4046,7 +4053,7 @@ def solution_file(value):
         path = found[0]
     if path.suffix.lower() != ".sln" or not path.is_file():
         fail(f"{path} is not a solution file", "Pass the .sln XAE has open to --solution.")
-    return path.resolve()
+    return _absolute(path)
 
 
 def _read_json(path):
@@ -4070,11 +4077,11 @@ def recordings_dir(sln):
     project = sln.parent / PROJECT_SETTINGS
     got = _read_json(project).get(RECORDINGS_KEY)
     if got:
-        return (sln.parent / got).resolve(), f"project setting {project}"
+        return _absolute(sln.parent / got), f"project setting {project}"
     got = _read_json(config_dir() / "config.json").get(RECORDINGS_KEY)
     if got:
-        return Path(got).resolve(), f"this PC ({config_dir() / 'config.json'})"
-    return (sln.parent / DEFAULT_RECORDINGS).resolve(), "default"
+        return _absolute(Path(got)), f"this PC ({config_dir() / 'config.json'})"
+    return _absolute(sln.parent / DEFAULT_RECORDINGS), "default"
 
 
 def run_xae(verb, sln, project=None, **opts):
@@ -4125,7 +4132,7 @@ def cmd_xae(args):
         if scope.suffix.lower() != ".tcscopex" or not scope.is_file():
             fail(f"'{args.target or ''}' is not a .tcscopex file",
                  "tcscope.py xae add <file.tcscopex> --solution <.sln>")
-        emit(run_xae("add", sln, args.project, Scope=scope.resolve()))
+        emit(run_xae("add", sln, args.project, Scope=_absolute(scope)))
         return 0
 
     # save
@@ -4171,7 +4178,7 @@ def cmd_recordings(args):
     where = None
     if args.set:
         target = Path(args.set)
-        target = (target if target.is_absolute() else sln.parent / target).resolve()
+        target = _absolute(target if target.is_absolute() else sln.parent / target)
         if target.is_dir() and any(target.glob("*.tcmproj")):
             fail(f"{target} is a Measurement project folder", "Pick a folder outside it.")
         if args.this_pc:
