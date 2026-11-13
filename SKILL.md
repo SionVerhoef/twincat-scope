@@ -32,7 +32,9 @@ it is installed; otherwise hand off to whatever covers ST authoring in this proj
    is under *Status* below — report at that precision, never rounded up to "works".
 4. **A recording is not free.** Sample rate × channel count consumes real-time bandwidth on
    the target, and an over-specified scope can disturb the very machine it is diagnosing.
-   Propose the configuration; a human starts it — `references/recording-load.md`.
+   Propose the configuration; a human starts it — `references/recording-load.md`. Start or
+   stop a recording yourself only when the user explicitly asks, never on your own initiative —
+   and `xae record` does not work yet, so today the user presses Record.
 
 ## Architecture
 
@@ -43,7 +45,8 @@ it is installed; otherwise hand off to whatever covers ST authoring in this proj
 | `references/scope-configuration.md` | Building or editing a `.tcscopex`. Schema, ports, types, layout, GUID linkage. |
 | `references/export-tool.md` | Getting data out of a `.svdx`, and the CSV traps. |
 
-Plus `scripts/tcscope.py` (every verb), `templates/` (known-good `.tcscopex`), `examples/`
+Plus `scripts/tcscope.py` (every verb), `scripts/xae_scope.ps1` (the open XAE, called by
+`tcscope.py xae`), `templates/` (known-good `.tcscopex`), `examples/`
 (real recordings — empty by design), `tests/` (synthetic fixtures with planted defects).
 
 ## Running the tool
@@ -60,8 +63,10 @@ Windows; on Linux or macOS (and in this repo's CI) the same commands are `python
 
 ## Workflow — diagnosing from a recording
 
-**Find the recording before asking for it.** When you run on the TwinCAT PC, the `.svdx` the
-user just saved is already on disk, so do not ask them to upload or drag it in. List the newest
+**Save the recording yourself when you can.** On the TwinCAT PC, with the scope in the
+solution's Measurement project and its recording held in Scope View, `xae save` writes it to the
+recordings folder with no dialog (*Workflow — building a recording*). Otherwise the `.svdx` the
+user saved by hand is already on disk, so do not ask them to upload or drag it in. List the newest
 ones in the folder they name, the solution's folder and their Desktop:
 `Get-ChildItem $HOME\Desktop, <solution folder> -Recurse -Filter *.svdx | Sort-Object LastWriteTime -Descending | Select-Object -First 5`.
 Name the file you picked and when it was saved, so a wrong pick gets caught, then pass its path
@@ -166,11 +171,47 @@ against the compiled program: typos, renamed variables, whole blocks, and types 
 wrong width. The `.tmc` reader has been run against one real 862-symbol program; on another,
 treat a surprising result as a finding about the reader. `references/scope-configuration.md`.
 
-Then stop: opening the file in Scope View and pressing Record is the human's move (rule 4).
-Tell them to **add it to an existing TwinCAT Measurement project** — double-clicked on its
-own, one hung in the new-project wizard. Generated files carry fresh GUIDs, so two can share
-a project; a hand-copied file cannot. Have them save the `.svdx` before changing any setting:
-a change after Record discards the unsaved recording.
+### Through the open XAE — add, save, clean up
+
+When you run on the TwinCAT PC and the user has the solution open in XAE, these replace Add
+Existing Item, Scope View's Save dialog and the drag into the chat. Each touches only the XAE
+whose open solution is `--solution`, and refuses — quoting it — while that XAE shows a dialog.
+Windows PowerShell must run at the same elevation as XAE.
+
+```bash
+py -3 scripts/tcscope.py newscope templates/axis-diagnosis.tcscopex -o C:\work\gen\ScopeC.tcscopex ...
+py -3 scripts/tcscope.py checkscope C:\work\gen\ScopeC.tcscopex
+py -3 scripts/tcscope.py xae add C:\work\gen\ScopeC.tcscopex --solution C:\work\Scratch\Scratch.sln
+#   the user presses Record in Scope View and lets it stop
+py -3 scripts/tcscope.py xae save ScopeC --solution C:\work\Scratch\Scratch.sln
+uv run scripts/tcscope.py ingest <the path xae save printed>
+#   ... analysis ...
+py -3 scripts/tcscope.py cleanup --solution C:\work\Scratch\Scratch.sln
+```
+
+- **Generate outside the Measurement project folder.** XAE watches every file in it: rewriting a
+  `.tcscopex` it holds raises *File has been changed outside the environment*, and after a *No*
+  a later save wrote XAE's old copy back over the new file. `newscope` refuses such a folder;
+  `xae add` copies the file in and saves the project. A name the project already holds is
+  refused — generate a changed scope under a new name.
+- **Pressing Record stays the user's move** (rule 4). `xae record` exists to say so: start/stop
+  from a script returned without error and recorded nothing in the field.
+- **`xae save`** writes `<scope>_<yyyyMMdd-HHmmss>.svdx` into the recordings folder: the
+  project's own setting, else this PC's, else `<solution folder>\Recordings` — never the
+  Desktop. `recordings --solution … --set <folder>` remembers the user's choice in
+  `tcscope.json` beside the `.sln`, which they commit; `--this-pc` keeps it on this PC only.
+  There is no `.gitignore` for the folder on purpose: an untracked recording in `git status` is
+  the reminder that a session left one behind.
+- **Delete at the end, not after `ingest`** — the user may reopen the recording or want it
+  analysed again. When the analysis is done, run `cleanup` and tell the user which files it
+  deleted. It deletes only the `.svdx` files `xae save` wrote and the cache files `ingest` made
+  from them; `--keep <svdx>` spares one the user wants, `--dry-run` lists without deleting.
+
+Without XAE automation, stop after `checkscope`: tell the user to **add the file to an existing
+TwinCAT Measurement project** — double-clicked on its own, one hung in the new-project wizard.
+Generated files carry fresh GUIDs, so two can share a project; a hand-copied file cannot. Either
+way, have them save the recording before changing any setting: a change after Record discards
+the unsaved recording.
 
 ## Task routing
 
@@ -200,6 +241,14 @@ axis fields, `ToPlc`/`FromPlc` members) record on a moving axis and keep their t
 Timelines *All* on a multi-channel group reads correctly. `events` reports an axis on an end
 stop as one `standing` and leaves a real settling tail after arrival out. `manifest`'s
 scaling warning fires on a real Scope View export and names only the scaled channel.
+
+**XAE automation** (`xae`, `recordings`, `cleanup`): every call `xae_scope.ps1` makes was
+measured in one field session on TC3.1.4024 with Scope View 3.4 — add with no dialog, the
+project saved, a recording saved by `SaveData` that round-tripped through `checkscope`, `ingest`
+and `manifest`, and deletion with the scope still open. The helper itself has not yet run against
+an XAE; Windows CI covers it only up to "no XAE has the solution open". Not covered: a
+Measurement project inside a solution folder, several Measurement projects, other XAE or Scope
+View versions, and starting or stopping a recording.
 
 **Not verified:** the analysis verbs across many real recordings (most real data is from one
 machine), what a *Subsave* trigger records (it needs a Professional licence), marker tables in

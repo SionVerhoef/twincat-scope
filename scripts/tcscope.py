@@ -38,6 +38,7 @@ import argparse
 import bisect
 import collections
 import copy
+import datetime
 import hashlib
 import json
 import math
@@ -1131,16 +1132,21 @@ def cmd_doctor(args):
 # ingest / manifest
 # --------------------------------------------------------------------------
 
+def cache_stem(src):
+    """The name ingest gives a recording's cache files, before the suffix.
+    Scope's default names (Record_1.svdx) repeat from project to project, so
+    the stem alone would let one recording overwrite another's cache files."""
+    tag = hashlib.sha1(str(Path(src).resolve()).encode(), usedforsecurity=False).hexdigest()[:8]
+    return f"{Path(src).stem}-{tag}"
+
+
 def cmd_ingest(args):
     src = Path(args.input)
     if not src.exists():
         fail(f"{src} does not exist")
     if args.output:
         output_path(args.output)
-    # Scope's default names (Record_1.svdx) repeat from project to project, so
-    # the stem alone would let one recording overwrite another's cache files.
-    tag = hashlib.sha1(str(src.resolve()).encode(), usedforsecurity=False).hexdigest()[:8]
-    cached = f"{src.stem}-{tag}"
+    cached = cache_stem(src)
 
     if src.suffix.lower() == ".svdx":
         tool = find_export_tool()
@@ -3065,6 +3071,7 @@ def cmd_newscope(args):
         fail(f"template {template} not found",
              "Templates ship in templates/ next to this script.")
     output_path(args.output)
+    refuse_measurement_folder(Path(args.output))
     root = read_tcscopex(template)
 
     acquisitions = root.findall(".//AdsAcquisition")
@@ -4006,6 +4013,223 @@ def cmd_checkscope(args):
 
 
 # --------------------------------------------------------------------------
+# xae, recordings, cleanup - the open XAE does the adding and the saving
+# --------------------------------------------------------------------------
+
+XAE_HELPER = Path(__file__).resolve().with_name("xae_scope.ps1")
+PROJECT_SETTINGS = "tcscope.json"     # beside the .sln; the user commits it
+RECORDINGS_KEY = "recordings_dir"
+DEFAULT_RECORDINGS = "Recordings"
+LEDGER = "recordings.json"            # in config_dir(): every .svdx this tool saved
+
+
+def refuse_measurement_folder(path):
+    """XAE watches every file in a Measurement project folder. Rewriting a
+    .tcscopex it holds raises 'File has been changed outside the environment',
+    and after a No a later save wrote XAE's stale copy over the new file."""
+    folder = path.resolve().parent
+    if any(folder.glob("*.tcmproj")):
+        fail(f"{folder} is a TwinCAT Measurement project folder; XAE watches the "
+             "files in it, and rewriting one it holds can lose the new version",
+             "Write the .tcscopex outside the project folder, then add it with: "
+             "tcscope.py xae add <file> --solution <.sln>")
+
+
+def solution_file(value):
+    """The .sln named, or the only one in the folder named."""
+    path = Path(value)
+    if path.is_dir():
+        found = sorted(path.glob("*.sln"))
+        if len(found) != 1:
+            fail(f"{path} holds {len(found)} .sln files, not one",
+                 "Pass the .sln itself to --solution.")
+        path = found[0]
+    if path.suffix.lower() != ".sln" or not path.is_file():
+        fail(f"{path} is not a solution file", "Pass the .sln XAE has open to --solution.")
+    return path.resolve()
+
+
+def _read_json(path):
+    try:
+        got = json.loads(path.read_text(encoding="utf-8"))
+        return got if isinstance(got, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_json(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def recordings_dir(sln):
+    """Where xae save puts recordings: the project's own setting, then this
+    PC's, then <solution folder>/Recordings. Never the Desktop. No .gitignore
+    goes with it on purpose: an untracked recording in git status is the
+    reminder that a session left one behind."""
+    project = sln.parent / PROJECT_SETTINGS
+    got = _read_json(project).get(RECORDINGS_KEY)
+    if got:
+        return (sln.parent / got).resolve(), f"project setting {project}"
+    got = _read_json(config_dir() / "config.json").get(RECORDINGS_KEY)
+    if got:
+        return Path(got).resolve(), f"this PC ({config_dir() / 'config.json'})"
+    return (sln.parent / DEFAULT_RECORDINGS).resolve(), "default"
+
+
+def run_xae(verb, sln, project=None, **opts):
+    """One helper process per operation: after a DTE error, the same process
+    was seen reading empty lists from a project a fresh one read fine."""
+    helper = os.environ.get("TCSCOPE_XAE_HELPER")     # tests put a stand-in here
+    if helper:
+        cmd = [helper]
+    elif os.name == "nt" and shutil.which("powershell.exe"):
+        cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+               "-File", str(XAE_HELPER)]
+    else:
+        fail("xae needs Windows PowerShell and TwinCAT XAE on this machine",
+             "Run it on the engineering PC that has the solution open in XAE.")
+    cmd += [verb, "-Solution", str(sln)]
+    if project:
+        cmd += ["-Project", project]
+    for key, value in opts.items():
+        cmd += [f"-{key}", str(value)]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=180)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        fail(f"the XAE helper did not finish: {exc}")
+    lines = proc.stdout.decode("utf-8", "replace").strip().splitlines()
+    try:
+        got = json.loads(lines[-1])
+    except (IndexError, ValueError):
+        fail(f"the XAE helper gave no answer (exit {proc.returncode})",
+             proc.stderr.decode("utf-8", "replace").strip()[-600:] or None)
+    if not got.get("ok"):
+        fail(got.get("error", "the XAE helper failed"), got.get("fix"))
+    return got
+
+
+def cmd_xae(args):
+    if args.action == "record":
+        fail("starting or stopping a recording from a script does not work yet: "
+             "StartRecord and StopRecord return without error and record nothing",
+             "Ask the user to press Record in Scope View, then run: tcscope.py xae save")
+    if not args.solution:
+        fail("--solution is required", "Pass the .sln XAE has open, or its folder.")
+    sln = solution_file(args.solution)
+    if args.action == "list":
+        emit(run_xae("list", sln, args.project))
+        return 0
+    if args.action == "add":
+        scope = Path(args.target or "")
+        if scope.suffix.lower() != ".tcscopex" or not scope.is_file():
+            fail(f"'{args.target or ''}' is not a .tcscopex file",
+                 "tcscope.py xae add <file.tcscopex> --solution <.sln>")
+        emit(run_xae("add", sln, args.project, Scope=scope.resolve()))
+        return 0
+
+    # save
+    item = args.target
+    if not item:
+        scopes = run_xae("list", sln, args.project).get("scopes") or []
+        if len(scopes) != 1:
+            fail(f"the Measurement project holds {len(scopes)} scopes; say which to save",
+                 "tcscope.py xae save <scope> --solution <.sln>   (scopes: "
+                 + ", ".join(s.get("name", "?") for s in scopes) + ")")
+        item = scopes[0]["name"]
+    if not item.lower().endswith(".tcscopex"):
+        item += ".tcscopex"
+    folder, source = recordings_dir(sln)
+    created = None if folder.exists() else folder
+    stem = re.sub(r"[^\w.-]", "_", Path(item).stem)
+    out = folder / f"{stem}_{datetime.datetime.now():%Y%m%d-%H%M%S}.svdx"
+    if out.exists():
+        fail(f"{out} already exists", "Run it again in a second.")
+    folder.mkdir(parents=True, exist_ok=True)
+    try:
+        got = run_xae("save", sln, args.project, Item=item, Out=out)
+    except SystemExit:
+        if created and not any(created.iterdir()):
+            created.rmdir()
+        raise
+    ledger_path = config_dir() / LEDGER
+    ledger = _read_json(ledger_path)
+    ledger.setdefault("files", []).append(
+        {"svdx": str(out), "solution": str(sln),
+         "created_dir": str(created) if created else None})
+    _write_json(ledger_path, ledger)
+    emit({"ok": True, "output": str(out), "bytes": got.get("bytes"), "scope": item,
+          "recordings_dir": str(folder), "recordings_dir_source": source,
+          "next": f"tcscope.py ingest {out}",
+          "note": "Kept until `tcscope.py cleanup` at the end of the session, so it "
+                  "can still be reopened in Scope View or analysed again."})
+    return 0
+
+
+def cmd_recordings(args):
+    sln = solution_file(args.solution)
+    where = None
+    if args.set:
+        target = Path(args.set)
+        target = (target if target.is_absolute() else sln.parent / target).resolve()
+        if target.is_dir() and any(target.glob("*.tcmproj")):
+            fail(f"{target} is a Measurement project folder", "Pick a folder outside it.")
+        if args.this_pc:
+            where = config_dir() / "config.json"
+            data = _read_json(where)
+            data[RECORDINGS_KEY] = str(target)
+        else:
+            where = sln.parent / PROJECT_SETTINGS
+            data = _read_json(where)
+            try:      # relative inside the project, so the setting travels with it
+                data[RECORDINGS_KEY] = target.relative_to(sln.parent).as_posix()
+            except ValueError:
+                data[RECORDINGS_KEY] = str(target)
+        _write_json(where, data)
+    folder, source = recordings_dir(sln)
+    emit({"ok": True, "recordings_dir": str(folder), "source": source,
+          **({"written": str(where)} if where else {})})
+    return 0
+
+
+def cmd_cleanup(args):
+    """Deletes what xae save created, and the cache files ingest made from it -
+    nothing else. Anything not in the ledger is the user's."""
+    ledger_path = config_dir() / LEDGER
+    ledger = _read_json(ledger_path)
+    keep = {os.path.normcase(Path(k).resolve()) for k in args.keep}
+    sln = str(solution_file(args.solution)) if args.solution else None
+    deleted, kept, remaining, dirs = [], [], [], []
+    for entry in ledger.get("files") or []:
+        svdx = Path(entry.get("svdx", ""))
+        if (sln and entry.get("solution") != sln) or svdx.suffix.lower() != ".svdx":
+            remaining.append(entry)
+            continue
+        if os.path.normcase(svdx.resolve()) in keep:
+            kept.append(str(svdx))
+            continue
+        stem = cache_stem(svdx)      # before the delete: ingest hashed the resolved path
+        for f in (svdx, cache_dir() / f"{stem}.csv", cache_dir() / f"{stem}.parquet"):
+            if f.is_file():
+                if not args.dry_run:
+                    f.unlink()
+                deleted.append(str(f))
+        if entry.get("created_dir"):
+            dirs.append(Path(entry["created_dir"]))
+    for d in dict.fromkeys(dirs):
+        if not args.dry_run and d.is_dir() and not any(d.iterdir()):
+            d.rmdir()
+            deleted.append(str(d))
+    if not args.dry_run:
+        ledger["files"] = remaining
+        _write_json(ledger_path, ledger)
+    emit({"ok": True, "dry_run": args.dry_run, "deleted": deleted, "kept": kept,
+          "note": "Only recordings `xae save` wrote, and the cache files ingest "
+                  "made from them; nothing else is ever deleted."})
+    return 0
+
+
+# --------------------------------------------------------------------------
 
 class JsonArgumentParser(argparse.ArgumentParser):
     """Argument errors in JSON as well, like every other failure: argparse's
@@ -4149,6 +4373,37 @@ def build_parser():
                         "the .plcproj. Checks every PLC symbol exists and is "
                         "read at its compiled width. Repeat for each PLC runtime.")
     q.set_defaults(func=cmd_checkscope)
+
+    q = sub.add_parser("xae", help="add a scope to, or save a recording from, the open XAE")
+    q.add_argument("action", choices=("list", "add", "save", "record"),
+                   help="list: the scopes in the Measurement project. add: add a "
+                        "generated .tcscopex and save the project. save: write the "
+                        "recording Scope View holds to the recordings folder. "
+                        "record: not working yet")
+    q.add_argument("target", nargs="?",
+                   help="add: the .tcscopex. save: the scope's name (optional with "
+                        "one scope)")
+    q.add_argument("--solution",
+                   help="the .sln XAE has open, or its folder; no other XAE is touched")
+    q.add_argument("--project", help="the Measurement project, when there are several")
+    q.set_defaults(func=cmd_xae)
+
+    q = sub.add_parser("recordings", help="show or set where xae save puts recordings")
+    q.add_argument("--solution", required=True, help="the .sln, or its folder")
+    q.add_argument("--set", metavar="FOLDER",
+                   help="remember this folder in the project's tcscope.json "
+                        "(a relative path is from the solution folder)")
+    q.add_argument("--this-pc", action="store_true",
+                   help="with --set: remember it on this PC only, the fallback "
+                        "for projects without a setting")
+    q.set_defaults(func=cmd_recordings)
+
+    q = sub.add_parser("cleanup", help="delete the recordings xae save made, and their cache files")
+    q.add_argument("--solution", help="only this solution's recordings")
+    q.add_argument("--keep", action="append", default=[], metavar="SVDX",
+                   help="keep this recording and stop tracking it; repeatable")
+    q.add_argument("--dry-run", action="store_true", help="list, delete nothing")
+    q.set_defaults(func=cmd_cleanup)
 
     return p
 

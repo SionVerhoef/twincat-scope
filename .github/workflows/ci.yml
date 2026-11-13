@@ -61,3 +61,13 @@ jobs:
         # it then fails when the templates are clean and passes when they are not.
         run: |
           ! grep -rnE '<AmsNetId>[1-9]' templates/ || exit 1
+
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # xae_scope.ps1 supports Windows PowerShell 5.1 only, and there is no XAE here, so this
+      # covers its argument errors and its COM/Win32 plumbing up to "no XAE has the solution
+      # open". evals/field-review-xae-scope.md covers the rest on an XAE PC.
+      - name: xae_scope.ps1 without XAE, in Windows PowerShell 5.1
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\xae_scope_tests.ps1

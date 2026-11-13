@@ -2,8 +2,25 @@
 
 ## Unreleased
 
+### Added
+
+- `xae add | save | list` drive the open TwinCAT XAE through `scripts/xae_scope.ps1`: a
+  generated scope is added to the Measurement project and the project saved, and the recording
+  Scope View holds is saved as `<scope>_<yyyyMMdd-HHmmss>.svdx` — no Add Existing Item, no
+  Save dialog. Only the XAE holding `--solution` is touched, and nothing while it shows a dialog.
+- `recordings` shows or sets where recordings go: the project's `tcscope.json`, else this PC,
+  else `<solution folder>\Recordings`. Never the Desktop.
+- `cleanup` deletes the recordings `xae save` wrote and the cache files `ingest` made from them,
+  and nothing else.
+- `xae record` refuses: start/stop from a script recorded nothing in the field.
+- `evals/field-review-xae-scope.md`: the field measurements these verbs are built on.
+- A Windows CI job runs `xae_scope.ps1` in Windows PowerShell 5.1 up to "no XAE".
+
 ### Changed
 
+- `newscope` refuses to write into a Measurement project folder: XAE watches its files, and
+  rewriting a scope it holds raised a reload prompt that could end with the new file lost.
+- `SKILL.md` rule 4: the agent may start or stop a recording only on the user's explicit request.
 - `SKILL.md`: an agent running on the TwinCAT PC finds the `.svdx` the user just saved on disk
   and names the file it picked, instead of asking the user to drag the file into the chat.
 
