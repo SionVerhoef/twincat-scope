@@ -10,8 +10,9 @@
   Save dialog. Only the XAE holding `--solution` is touched, and nothing while it shows a dialog.
 - `recordings` shows or sets where recordings go: the project's `tcscope.json`, else this PC,
   else `<solution folder>\Recordings`. Never the Desktop.
-- `cleanup` deletes the recordings `xae save` wrote and the cache files `ingest` made from them,
-  and nothing else.
+- `cleanup --solution … [--scope …]` deletes the recordings `xae save` wrote and the cache
+  files `ingest` made from them, and nothing else. The agent runs it only once the user says
+  they are finished with the problem, which can be several sessions later.
 - `xae record` refuses: start/stop from a script recorded nothing in the field.
 - `evals/field-review-xae-scope.md`: the field measurements these verbs are built on.
 - A Windows CI job runs `xae_scope.ps1` in Windows PowerShell 5.1 up to "no XAE".

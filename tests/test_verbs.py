@@ -2837,36 +2837,36 @@ def xae_checks():
         check("an ingested recording leaves its cache files", all(f.is_file() for f in cache),
               str(ing.get("error")))
 
-        dry = x("cleanup", "--dry-run")
+        dry = x("cleanup", "--solution", sln, "--dry-run")
         check("cleanup --dry-run lists the recording and its cache files, deletes nothing",
               sorted(dry.get("deleted") or []) == sorted(map(str, [svdx, *cache]))
               and svdx.is_file(), str(dry))
 
         stray = work / "Recordings" / "hand_saved.svdx"   # in the folder, not ours
         stray.write_bytes(b"theirs")
-        out = x("cleanup")
+        out = x("cleanup", "--solution", sln)
         check("cleanup deletes only the tracked recording and its cache files",
               out.get("ok") is True and not svdx.exists()
               and not any(f.exists() for f in cache)
               and stray.is_file() and mine.is_file(), str(out))
         check("cleanup keeps a recordings folder that still holds the user's files",
               (work / "Recordings").is_dir())
-        out = x("cleanup")
+        out = x("cleanup", "--solution", sln)
         check("a second cleanup has nothing left to delete", out.get("deleted") == [], str(out))
 
         stray.unlink()
         (work / "Recordings").rmdir()
         out = x("xae", "save", "ScopeC", "--solution", sln)
         kept = Path(out.get("output") or "")
-        out = x("cleanup", "--keep", kept)
+        out = x("cleanup", "--solution", sln, "--keep", kept)
         check("cleanup --keep spares a recording and stops tracking it",
               kept.is_file() and out.get("kept") == [str(kept)]
-              and x("cleanup", "--dry-run").get("deleted") == [], str(out))
+              and x("cleanup", "--solution", sln, "--dry-run").get("deleted") == [], str(out))
         kept.unlink()
         (work / "Recordings").rmdir()
 
         out = x("xae", "save", "ScopeC", "--solution", sln)
-        x("cleanup")
+        x("cleanup", "--solution", sln)
         check("cleanup removes the recordings folder xae save created, once empty",
               out.get("ok") is True and not (work / "Recordings").exists(), str(out))
 
@@ -2879,7 +2879,24 @@ def xae_checks():
         out = x("xae", "save", "--solution", sln)
         check("the project setting wins over this PC's, and xae save honours it",
               Path(out.get("output") or "").parent == (work / "Data" / "Scope").resolve(), str(out))
-        x("cleanup")
+        out_c = x("xae", "save", "ScopeE", "--solution", sln)
+        out_d = x("xae", "save", "ScopeD", "--solution", sln)
+        out = x("cleanup", "--solution", sln, "--scope", "ScopeD")
+        check("cleanup --scope deletes one problem's recordings and keeps the others",
+              not Path(out_d.get("output") or "/").exists()
+              and Path(out_c.get("output") or "").is_file(), str(out))
+        out = x("cleanup", "--solution", tmp / "Other" / "Other.sln")
+        check("cleanup needs the solution it cleans to exist", out.get("ok") is False, str(out))
+        other = tmp / "Other"
+        other.mkdir()
+        (other / "Other.sln").write_text("")
+        x("cleanup", "--solution", other / "Other.sln")
+        check("cleanup of another solution leaves this one's recordings",
+              Path(out_c.get("output") or "").is_file())
+        out = x("cleanup")
+        check("cleanup refuses to run without --solution",
+              out.get("ok") is False and Path(out_c.get("output") or "").is_file(), str(out))
+        x("cleanup", "--solution", sln)
         (work / "tcscope.json").unlink()
         out = x("recordings", "--solution", sln)
         check("without a project setting, this PC's folder is the fallback",

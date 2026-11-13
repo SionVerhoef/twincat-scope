@@ -185,7 +185,7 @@ py -3 scripts/tcscope.py xae add C:\work\gen\ScopeC.tcscopex --solution C:\work\
 #   the user presses Record in Scope View and lets it stop
 py -3 scripts/tcscope.py xae save ScopeC --solution C:\work\Scratch\Scratch.sln
 uv run scripts/tcscope.py ingest <the path xae save printed>
-#   ... analysis ...
+#   ... analysis, possibly over several sessions; then, once the user says they are finished:
 py -3 scripts/tcscope.py cleanup --solution C:\work\Scratch\Scratch.sln
 ```
 
@@ -202,10 +202,14 @@ py -3 scripts/tcscope.py cleanup --solution C:\work\Scratch\Scratch.sln
   `tcscope.json` beside the `.sln`, which they commit; `--this-pc` keeps it on this PC only.
   There is no `.gitignore` for the folder on purpose: an untracked recording in `git status` is
   the reminder that a session left one behind.
-- **Delete at the end, not after `ingest`** — the user may reopen the recording or want it
-  analysed again. When the analysis is done, run `cleanup` and tell the user which files it
-  deleted. It deletes only the `.svdx` files `xae save` wrote and the cache files `ingest` made
-  from them; `--keep <svdx>` spares one the user wants, `--dry-run` lists without deleting.
+- **Delete only when the user says they are finished with the problem** — not after `ingest`,
+  and not at the end of your session: one problem often spans several sessions, and the
+  recordings stay tracked across them. When a session ends with the problem still open, show
+  what is kept (`cleanup --solution … --dry-run`) and leave it. Once the user says they are
+  done, run `cleanup --solution …` (add `--scope <name>` when the solution holds another problem
+  still being worked on) and tell them which files it deleted. It deletes only the `.svdx`
+  files `xae save` wrote and the cache files `ingest` made from them; `--keep <svdx>` spares one
+  they want to keep.
 
 Without XAE automation, stop after `checkscope`: tell the user to **add the file to an existing
 TwinCAT Measurement project** — double-clicked on its own, one hung in the new-project wizard.

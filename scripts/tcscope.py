@@ -4162,14 +4162,15 @@ def cmd_xae(args):
     ledger_path = config_dir() / LEDGER
     ledger = _read_json(ledger_path)
     ledger.setdefault("files", []).append(
-        {"svdx": str(out), "solution": str(sln),
+        {"svdx": str(out), "solution": str(sln), "scope": item,
          "created_dir": str(created) if created else None})
     _write_json(ledger_path, ledger)
     emit({"ok": True, "output": str(out), "bytes": got.get("bytes"), "scope": item,
           "recordings_dir": str(folder), "recordings_dir_source": source,
           "next": f"tcscope.py ingest {out}",
-          "note": "Kept until `tcscope.py cleanup` at the end of the session, so it "
-                  "can still be reopened in Scope View or analysed again."})
+          "note": "Kept, across sessions, until the user says they are finished with "
+                  "this problem and `tcscope.py cleanup` runs - it can be reopened in "
+                  "Scope View or analysed again until then."})
     return 0
 
 
@@ -4201,15 +4202,20 @@ def cmd_recordings(args):
 
 def cmd_cleanup(args):
     """Deletes what xae save created, and the cache files ingest made from it -
-    nothing else. Anything not in the ledger is the user's."""
+    nothing else. Anything not in the ledger is the user's. Run only when the
+    user says they are finished: one problem can span several sessions."""
     ledger_path = config_dir() / LEDGER
     ledger = _read_json(ledger_path)
     keep = {os.path.normcase(Path(k).resolve()) for k in args.keep}
-    sln = str(solution_file(args.solution)) if args.solution else None
+    sln = str(solution_file(args.solution))
+    scope = None
+    if args.scope:
+        scope = args.scope if args.scope.lower().endswith(".tcscopex") else f"{args.scope}.tcscopex"
     deleted, kept, remaining, dirs = [], [], [], []
     for entry in ledger.get("files") or []:
         svdx = Path(entry.get("svdx", ""))
-        if (sln and entry.get("solution") != sln) or svdx.suffix.lower() != ".svdx":
+        if (entry.get("solution") != sln or svdx.suffix.lower() != ".svdx"
+                or (scope and (entry.get("scope") or "").lower() != scope.lower())):
             remaining.append(entry)
             continue
         if os.path.normcase(svdx.resolve()) in keep:
@@ -4406,7 +4412,9 @@ def build_parser():
     q.set_defaults(func=cmd_recordings)
 
     q = sub.add_parser("cleanup", help="delete the recordings xae save made, and their cache files")
-    q.add_argument("--solution", help="only this solution's recordings")
+    q.add_argument("--solution", required=True, help="this solution's recordings only")
+    q.add_argument("--scope", help="only this scope's recordings, when the solution holds "
+                                   "other problems still being worked on")
     q.add_argument("--keep", action="append", default=[], metavar="SVDX",
                    help="keep this recording and stop tracking it; repeatable")
     q.add_argument("--dry-run", action="store_true", help="list, delete nothing")
