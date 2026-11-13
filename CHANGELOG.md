@@ -6,6 +6,13 @@
 
 - `SKILL.md`: an agent running on the TwinCAT PC finds the `.svdx` the user just saved on disk
   and names the file it picked, instead of asking the user to drag the file into the chat.
+- The description no longer carries the trigger phrase "why did the axis fault": it pulled the
+  skill into every axis-fault question, including ones with no recording behind them. "What
+  happened at 12 seconds" stays, because a timestamp means there is a recording.
+  `evals/triggers.json` gains a decline case for an axis fault with no recording, and a TwinCAT
+  motion distractor to go to instead. With that distractor present, `oscillation-tuning` (an
+  oscillating axis, no recording) now routes to motion control and is a decline case too. Blind
+  run, Sonnet 5.5, one run a case: 11 of 11.
 
 ## 1.2.0 — 2026-10-26
 

@@ -164,7 +164,7 @@ answer: one of them is wrong, and the disagreement is the most useful output of 
 
 ## Running the trigger half
 
-`triggers.json` carries ten prompts, four of which must *not* fire. Present the skill's
+`triggers.json` carries eleven prompts, six of which must *not* fire. Present the skill's
 description alongside the distractor descriptions in that file to an agent that has not seen the
 skill, ask which one applies, and record the name it gives. Testing a description on its own is
 close to meaningless — with nothing to lose against, almost anything fires.
