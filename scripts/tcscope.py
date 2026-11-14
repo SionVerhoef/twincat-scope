@@ -3498,8 +3498,10 @@ def check_against_tmc(channels, paths, problems, warnings):
         if kind == "missing":
             problems.append(
                 f"{symbol}: {detail} is not in the compiled program, so Scope "
-                "would report an unknown symbol. A typo, a renamed variable, or "
-                "a symbol of another PLC runtime - pass that one's .tmc too.")
+                "would report an unknown symbol. A typo, a renamed variable, a "
+                "symbol of another PLC runtime - pass that one's .tmc too - or one "
+                "a pragma keeps out of the symbol table, such as {attribute 'hide'} "
+                "or {attribute 'tc_no_symbol'}.")
         elif kind == "compound":
             problems.append(
                 f"{symbol}: compiles to {detail}, a block, structure or array "

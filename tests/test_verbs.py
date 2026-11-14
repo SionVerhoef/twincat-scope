@@ -2219,7 +2219,8 @@ def tmc_checks():
               and "MAIN.fbStation: compiles to FB_Station" in problems
               and "MAIN.fbStation.aLoad: compiles to ARRAY OF INT" in problems
               and "nCount: compiled as DINT, which Scope reads as INT32" in problems
-              and "GVL.nMissing: GVL.nMissing is not in the compiled program" in problems,
+              and "GVL.nMissing: GVL.nMissing is not in the compiled program" in problems
+              and "a pragma keeps out of the symbol table" in problems,
               problems)
         check("checkscope --tmc warns where the .tmc does not describe a type",
               "stLib.x: found, but its type ST_FromALibrary" in warnings, warnings)
