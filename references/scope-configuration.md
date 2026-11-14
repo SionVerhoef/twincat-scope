@@ -311,6 +311,32 @@ one from a library, is a warning, never a guess. The reader was written from the
 one real `.tmc` and has been run against one (862 symbols, `evals/field-review-49a8e9b.md`);
 on another program, treat a surprising result as a finding about the reader.
 
+### Pragmas that keep a symbol from Scope
+
+Scope records a PLC variable by name over ADS, so a variable the PLC leaves out of its ADS
+symbol table cannot be recorded, whatever its declaration looks like. Which attribute pragmas
+do that:
+
+- **Documented to remove the ADS symbol:** `{attribute 'hide'}` (on the declaration directly
+  below it, or on a POU's signature; `'hide_all_locals'` covers every local of a declaration)
+  and `{attribute 'tc_no_symbol'}`, spelled `'TcNoSymbol'` from TC3.1 4022 on. Sources:
+  [Attribute 'hide'](https://infosys.beckhoff.com/content/1033/tc3_plc_intro/2529654667.html),
+  [Attribute 'TcNoSymbol'](https://infosys.beckhoff.com/content/1033/tc3_plc_intro/3108007179.html).
+- **Not about ADS:** `{attribute 'OPC.UA.DA' := '0'}` takes a symbol out of the TwinCAT OPC UA
+  server's address space and nothing more
+  ([OPC UA server attributes](https://infosys.beckhoff.com/content/1033/tf6100_tc3_opcua_server/15563857163.html)).
+  A block marked so is still reachable by Scope; do not conclude otherwise from it.
+- **Not established:** what `{attribute 'symbol' := 'none'}` does in TwinCAT (it is documented
+  for CODESYS, not in Beckhoff's PLC documentation), and whether `hide` or `tc_no_symbol` on a
+  function block's declaration also hides the members of its instances. Until a build shows it,
+  say it is unknown rather than guessing either way.
+
+Do not decide reachability from the source. Check it: `checkscope --tmc` flags a symbol the
+compiled program does not carry, and names a pragma as one possible reason. A symbol it *finds*
+is not yet proof — whether a member hidden inside a block still appears in that block's type
+description in the `.tmc` has not been checked, so the live symbol table on the target is the
+final word.
+
 It also prints the layout — every chart, its bands and their channels — and warns when a chart
 stacks more than six bands or a band overlays more than eight channels. Both are readability,
 not validity: the file is fine, the picture is not. `theme` says which background the charts

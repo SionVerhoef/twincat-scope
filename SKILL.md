@@ -170,6 +170,9 @@ With the PLC project at hand, add `--tmc <PLC>.tmc` — every PLC symbol is then
 against the compiled program: typos, renamed variables, whole blocks, and types read at the
 wrong width. The `.tmc` reader has been run against one real 862-symbol program; on another,
 treat a surprising result as a finding about the reader. `references/scope-configuration.md`.
+Whether a symbol is reachable is decided by pragmas such as `{attribute 'hide'}`, not by its
+OPC UA setting — check it with `--tmc` rather than reading it off the source
+(*Pragmas that keep a symbol from Scope* in the same file).
 
 ### Through the open XAE — add, save, clean up
 

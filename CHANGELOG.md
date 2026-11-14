@@ -17,6 +17,11 @@
 - `evals/field-review-xae-scope.md`: the field measurements these verbs are built on.
 - A Windows CI job runs `xae_scope.ps1` in Windows PowerShell 5.1 up to "no XAE".
 
+- `references/scope-configuration.md`: which pragmas keep a symbol from Scope. `hide` and
+  `tc_no_symbol` do; `OPC.UA.DA := '0'` only affects OPC UA; `symbol := 'none'` and hiding a
+  block's members are marked unverified. `checkscope --tmc` names a pragma as one reason a
+  symbol is missing.
+
 ### Changed
 
 - `SKILL.md` asks less of the engineer. Rule 1 is one line: the skill writes no code, so the
