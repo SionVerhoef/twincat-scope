@@ -61,6 +61,10 @@ real compiled program (see *Status*).
   probably miss an intermittent fault, ring-buffer and trigger behaviour.
 - **`--tmc`** — checks every PLC symbol against the compiled program: typos, renamed
   variables, types read at the wrong width.
+- **Through the open XAE** — `xae add` puts a generated scope into the Measurement project and
+  saves it, `xae save` writes the recording Scope View holds to `<solution>\Recordings\` under a
+  unique name, and `cleanup` deletes those recordings and their cache files when the analysis is
+  done. No dialogs; nothing on the Desktop. Pressing Record stays a human gesture.
 - **No dependencies** — `doctor`, `newscope` and `checkscope` run on plain Python, so they work
   on a locked-down engineering PC.
 
@@ -209,6 +213,9 @@ on real machines in field sessions, written up in `evals/field-review-*.md`.
 
 **Not yet verified**
 
+- The `xae` verbs against a real XAE: every call they make was measured once on TC3.1.4024
+  with Scope View 3.4 (`evals/field-review-xae-scope.md`), the helper as a whole not yet.
+  Starting or stopping a recording from a script does not work.
 - The analysis verbs across a wide variety of real recordings — most real data so far comes
   from one machine.
 - A genuine saturation, and marker tables in an export.

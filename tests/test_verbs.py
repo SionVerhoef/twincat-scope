@@ -2759,6 +2759,178 @@ def scale_checks():
               str(back.get("warnings")))
 
 
+def xae_checks():
+    """xae save names, places and tracks recordings; cleanup deletes exactly
+    what it tracked; recordings remembers a folder per project.
+
+    XAE only exists on Windows, so a stand-in honours xae_scope.ps1's
+    arguments: it logs each call, and `save` writes the -Out file.
+    """
+    if sys.platform == "win32":
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        log = tmp / "helper.log"
+        helper = tmp / "fake_xae_helper"
+        helper.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            f"open({str(log)!r}, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "a = sys.argv[1:]\n"
+            "opt = {a[i][1:]: a[i + 1] for i in range(1, len(a) - 1, 2)}\n"
+            "if a[0] == 'save':\n"
+            "    open(opt['Out'], 'wb').write(b'svdx')\n"
+            "    print(json.dumps({'ok': True, 'path': opt['Out'], 'bytes': 4}))\n"
+            "elif a[0] == 'list':\n"
+            "    print(json.dumps({'ok': True, 'scopes': [{'name': 'ScopeC.tcscopex'}]}))\n"
+            "else:\n"
+            "    print(json.dumps({'ok': True, 'item': opt.get('Scope')}))\n")
+        helper.chmod(0o755)
+        tool = tmp / "fake_export_tool"
+        tool.write_text(
+            "#!/bin/sh\n"
+            'for a in "$@"; do case "$a" in target=*) t="${a#target=}";; esac; done\n'
+            f'cp "{REAL / "real_tab_2group.csv"}" "$t"\n')
+        tool.chmod(0o755)
+        env = {**os.environ, "TCSCOPE_XAE_HELPER": str(helper),
+               "TCSCOPE_EXPORT_TOOL": str(tool),
+               "XDG_CACHE_HOME": str(tmp / "cache"), "XDG_CONFIG_HOME": str(tmp / "cfg")}
+
+        def x(*args):
+            proc = subprocess.run([*BASE_CMD, *map(str, args)], capture_output=True,
+                                  text=True, env=env)
+            try:
+                return loads(proc.stdout)
+            except ValueError:
+                return {"ok": False, "error": proc.stdout[:200] + proc.stderr[:200]}
+
+        work = tmp / "Scratch"
+        work.mkdir()
+        sln = work / "Scratch.sln"
+        sln.write_text("")
+        mproj = work / "Measurement"
+        mproj.mkdir()
+        (mproj / "Measurement.tcmproj").write_text("")
+        mine = tmp / "Desktop" / "Record_1.svdx"      # the user's own, never touched
+        mine.parent.mkdir()
+        mine.write_bytes(b"theirs")
+
+        out = x("recordings", "--solution", work)
+        check("recordings defaults to <solution folder>/Recordings, never the Desktop",
+              out.get("recordings_dir") == str((work / "Recordings").resolve())
+              and out.get("source") == "default", str(out))
+
+        out = x("xae", "save", "--solution", sln)
+        svdx = Path(out.get("output") or "")
+        check("xae save writes <scope>_<yyyyMMdd-HHmmss>.svdx into Recordings",
+              out.get("ok") is True and svdx.parent == (work / "Recordings").resolve()
+              and re.fullmatch(r"ScopeC_\d{8}-\d{6}\.svdx", svdx.name)
+              and svdx.is_file(), str(out))
+        calls = log.read_text().splitlines()
+        check("xae save asks the helper for the only scope, then saves that item",
+              len(calls) == 2 and calls[0].startswith("list -Solution ")
+              and "-Item ScopeC.tcscopex" in calls[1] and f"-Out {svdx}" in calls[1],
+              str(calls))
+
+        ing = x("ingest", svdx)
+        cache = [Path(ing.get("output") or "x"), Path(ing.get("intermediate_csv") or "x")]
+        check("an ingested recording leaves its cache files", all(f.is_file() for f in cache),
+              str(ing.get("error")))
+
+        dry = x("cleanup", "--solution", sln, "--dry-run")
+        check("cleanup --dry-run lists the recording and its cache files, deletes nothing",
+              sorted(dry.get("deleted") or []) == sorted(map(str, [svdx, *cache]))
+              and svdx.is_file(), str(dry))
+
+        stray = work / "Recordings" / "hand_saved.svdx"   # in the folder, not ours
+        stray.write_bytes(b"theirs")
+        out = x("cleanup", "--solution", sln)
+        check("cleanup deletes only the tracked recording and its cache files",
+              out.get("ok") is True and not svdx.exists()
+              and not any(f.exists() for f in cache)
+              and stray.is_file() and mine.is_file(), str(out))
+        check("cleanup keeps a recordings folder that still holds the user's files",
+              (work / "Recordings").is_dir())
+        out = x("cleanup", "--solution", sln)
+        check("a second cleanup has nothing left to delete", out.get("deleted") == [], str(out))
+
+        stray.unlink()
+        (work / "Recordings").rmdir()
+        out = x("xae", "save", "ScopeC", "--solution", sln)
+        kept = Path(out.get("output") or "")
+        out = x("cleanup", "--solution", sln, "--keep", kept)
+        check("cleanup --keep spares a recording and stops tracking it",
+              kept.is_file() and out.get("kept") == [str(kept)]
+              and x("cleanup", "--solution", sln, "--dry-run").get("deleted") == [], str(out))
+        kept.unlink()
+        (work / "Recordings").rmdir()
+
+        out = x("xae", "save", "ScopeC", "--solution", sln)
+        x("cleanup", "--solution", sln)
+        check("cleanup removes the recordings folder xae save created, once empty",
+              out.get("ok") is True and not (work / "Recordings").exists(), str(out))
+
+        out = x("recordings", "--solution", sln, "--set", "Data/Scope")
+        setting = loads((work / "tcscope.json").read_text())
+        check("recordings --set stores the folder in the project, relative to it",
+              setting == {"recordings_dir": "Data/Scope"}
+              and out.get("recordings_dir") == str((work / "Data" / "Scope").resolve()), str(out))
+        x("recordings", "--solution", sln, "--set", tmp / "pc", "--this-pc")
+        out = x("xae", "save", "--solution", sln)
+        check("the project setting wins over this PC's, and xae save honours it",
+              Path(out.get("output") or "").parent == (work / "Data" / "Scope").resolve(), str(out))
+        out_c = x("xae", "save", "ScopeE", "--solution", sln)
+        out_d = x("xae", "save", "ScopeD", "--solution", sln)
+        out = x("cleanup", "--solution", sln, "--scope", "ScopeD")
+        check("cleanup --scope deletes one problem's recordings and keeps the others",
+              not Path(out_d.get("output") or "/").exists()
+              and Path(out_c.get("output") or "").is_file(), str(out))
+        out = x("cleanup", "--solution", tmp / "Other" / "Other.sln")
+        check("cleanup needs the solution it cleans to exist", out.get("ok") is False, str(out))
+        other = tmp / "Other"
+        other.mkdir()
+        (other / "Other.sln").write_text("")
+        x("cleanup", "--solution", other / "Other.sln")
+        check("cleanup of another solution leaves this one's recordings",
+              Path(out_c.get("output") or "").is_file())
+        out = x("cleanup")
+        check("cleanup refuses to run without --solution",
+              out.get("ok") is False and Path(out_c.get("output") or "").is_file(), str(out))
+        x("cleanup", "--solution", sln)
+        (work / "tcscope.json").unlink()
+        out = x("recordings", "--solution", sln)
+        check("without a project setting, this PC's folder is the fallback",
+              out.get("recordings_dir") == str((tmp / "pc").resolve())
+              and out.get("source", "").startswith("this PC"), str(out))
+
+        out = x("recordings", "--solution", sln, "--set", mproj)
+        check("recordings refuses a Measurement project folder",
+              out.get("ok") is False and "Measurement project" in out.get("error", ""), str(out))
+
+        before = len(log.read_text().splitlines())
+        out = x("xae", "record", "start", "--solution", sln)
+        check("xae record says start/stop does not work yet, and calls nothing",
+              out.get("ok") is False and "does not work yet" in out.get("error", "")
+              and len(log.read_text().splitlines()) == before, str(out))
+
+        gen = tmp / "ScopeC.tcscopex"
+        gen.write_text("<x/>")
+        out = x("xae", "add", gen, "--solution", sln)
+        check("xae add hands the helper the full path of the .tcscopex",
+              out.get("ok") is True and out.get("item") == str(gen.resolve()), str(out))
+
+        out = x("newscope", ROOT / "templates" / "minimal-single-channel.tcscopex",
+                "-o", mproj / "ScopeD.tcscopex", "--channels", "MAIN.nCounter:UDINT")
+        check("newscope refuses to write into a Measurement project folder",
+              out.get("ok") is False and "Measurement project" in out.get("error", "")
+              and not (mproj / "ScopeD.tcscopex").exists(), str(out))
+
+        env.pop("TCSCOPE_XAE_HELPER")
+        out = x("xae", "list", "--solution", sln)
+        check("xae without Windows PowerShell says what it needs",
+              out.get("ok") is False and "Windows PowerShell" in out.get("error", ""), str(out))
+
+
 def ingest_cache_checks():
     """ingest leaves the export tool's CSV in the cache dir, never beside the
     .svdx - which sits in a project folder that is not ours to fill.
@@ -3371,6 +3543,7 @@ def main():
     parquet_pool_checks()
     export_option_checks()
     ingest_cache_checks()
+    xae_checks()
     scale_checks()
     svdx_checkscope_checks()
     shareability_checks()
