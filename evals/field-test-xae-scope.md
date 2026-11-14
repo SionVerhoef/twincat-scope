@@ -1,5 +1,9 @@
 # Field test — driving a scope through the open XAE
 
+> **Historical.** This brief has been answered and its probe, `scripts/probe_xae_scope.ps1`,
+> removed. The results are in `evals/field-review-xae-scope.md`; the tool built on them is
+> `scripts/xae_scope.ps1`, driven by `tcscope.py xae`.
+
 **Read this cold.** It assumes you have this repository, a Windows PC with TwinCAT XAE, and
 nothing else: no earlier conversation, no other repository. Everything you need is here or in
 the files it names.
