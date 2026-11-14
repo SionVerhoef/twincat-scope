@@ -2099,6 +2099,60 @@ def shareability_checks():
           "; ".join(f"{k} in {v[0]}" for k, v in list(offenders.items())[:3]))
 
 
+def preset_checks():
+    """presets saves named channel sets on this PC; newscope --preset starts from
+    one, and the command line adds to and overrides it."""
+    print("\n[presets]")
+    tpl = ROOT / "templates" / "axis-diagnosis.tcscopex"
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        env = {**os.environ, "XDG_CONFIG_HOME": str(tmp / "cfg"),
+               "LOCALAPPDATA": str(tmp / "local")}
+
+        def x(*args):
+            proc = subprocess.run([*BASE_CMD, *map(str, args)], capture_output=True,
+                                  text=True, env=env)
+            try:
+                return loads(proc.stdout)
+            except ValueError:
+                return {"ok": False, "error": proc.stdout[:200] + proc.stderr[:200]}
+
+        out = x("presets")
+        check("presets lists none on a fresh PC", out.get("ok") and out.get("presets") == {}, out)
+        out = x("presets", "--set", "lineA-tracking", "--channels",
+                "MAIN.fbTrack.Product.ActPos:LREAL,MAIN.fbTrack.bInZone:BOOL",
+                "--netid", "1.2.3.4.1.1", "--sample-time-ms", "2", "--record-time", "90")
+        saved = (out.get("presets") or {}).get("lineA-tracking", {})
+        check("presets --set saves channels and settings",
+              out.get("written") == "lineA-tracking" and len(saved.get("channels", [])) == 2
+              and saved.get("record_time") == 90 and Path(out.get("file", "")).exists(), out)
+        check("presets --set refuses a malformed channel",
+              not x("presets", "--set", "bad", "--channels", "MAIN.x:NOTATYPE").get("ok"))
+        check("presets --set refuses no channels",
+              not x("presets", "--set", "empty").get("ok"))
+
+        gen = tmp / "gen" / "Track.tcscopex"
+        gen.parent.mkdir()
+        out = x("newscope", tpl, "-o", gen, "--preset", "lineA-tracking",
+                "--channels", "MAIN.fbTrack.bInZone:INT,MAIN.fbTrack.nCount:DINT",
+                "--record-time", "30")
+        chans = {c["symbol"]: c["data_type"] for c in out.get("channels") or []
+                 if isinstance(c, dict)}
+        check("newscope --preset writes the preset's channels plus the command line's",
+              out.get("ok") and out.get("preset") == "lineA-tracking"
+              and set(chans) == {"MAIN.fbTrack.Product.ActPos", "MAIN.fbTrack.bInZone",
+                                 "MAIN.fbTrack.nCount"}, out)
+        check("a channel on the command line replaces the preset's entry for it",
+              chans.get("MAIN.fbTrack.bInZone") == "INT16", chans)
+        check("command-line options override the preset, the rest come from it",
+              near(out.get("record_seconds"), 30) and out.get("ams_net_id") == "1.2.3.4.1.1", out)
+        out = x("newscope", tpl, "-o", tmp / "gen" / "Nope.tcscopex", "--preset", "missing")
+        check("newscope --preset names the saved presets when one is not found",
+              not out.get("ok") and "lineA-tracking" in (out.get("fix") or ""), out)
+        out = x("presets", "--remove", "lineA-tracking")
+        check("presets --remove deletes it", out.get("ok") and out.get("presets") == {}, out)
+
+
 def retarget_checks():
     """Restyling a project with no --channels keeps its own targets.
 
@@ -3548,6 +3602,7 @@ def main():
     scale_checks()
     svdx_checkscope_checks()
     shareability_checks()
+    preset_checks()
     retarget_checks()
     tmc_checks()
     robustness_checks()

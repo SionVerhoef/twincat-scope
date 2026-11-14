@@ -15,6 +15,7 @@ Subcommands, acquisition side (no third-party imports needed):
   doctor      Check the environment and say how to fix what is missing
   newscope    Write a .tcscopex from a template, with fresh GUIDs
   checkscope  Validate a .tcscopex and warn about recording load
+  presets     List, save or remove named channel sets for newscope (this PC)
 
 Subcommands, analysis side (needs numpy; run under `uv run`):
   ingest      Convert an export (.svdx / CSV) to Parquet, once
@@ -3066,6 +3067,8 @@ def _split_band(band, channels):
 
 
 def cmd_newscope(args):
+    if args.preset:
+        apply_preset(args)
     template = Path(args.template)
     if not template.exists():
         fail(f"template {template} not found",
@@ -3296,6 +3299,7 @@ def cmd_newscope(args):
     out = {
         "ok": True,
         "output": str(args.output),
+        **({"preset": args.preset} if args.preset else {}),
         "channels": [{"symbol": s, "name": aliases[s], "port": spec["port"],
                       "port_source": spec["port_source"],
                       "data_type": spec["data_type"],
@@ -4023,6 +4027,7 @@ PROJECT_SETTINGS = "tcscope.json"     # beside the .sln; the user commits it
 RECORDINGS_KEY = "recordings_dir"
 DEFAULT_RECORDINGS = "Recordings"
 LEDGER = "recordings.json"            # in config_dir(): every .svdx this tool saved
+PRESETS = "presets.json"              # in config_dir(): named newscope settings, this PC only
 
 
 def refuse_measurement_folder(path):
@@ -4199,6 +4204,72 @@ def cmd_recordings(args):
     folder, source = recordings_dir(sln)
     emit({"ok": True, "recordings_dir": str(folder), "source": source,
           **({"written": str(where)} if where else {})})
+    return 0
+
+
+def load_presets():
+    return config_dir() / PRESETS, _read_json(config_dir() / PRESETS)
+
+
+def apply_preset(args):
+    """Fold a saved preset into newscope's arguments. What the command line
+    gives wins: a channel named there replaces the preset's entry for the same
+    symbol, and --netid, --sample-time-ms and --record-time override."""
+    path, presets = load_presets()
+    preset = presets.get(args.preset)
+    if not isinstance(preset, dict):
+        fail(f"no preset '{args.preset}' in {path}",
+             f"Saved presets: {', '.join(sorted(presets)) or 'none'}. "
+             "Save one with: tcscope.py presets --set NAME --channels ...")
+    given = ([c.strip() for c in args.channels.split(",") if c.strip()]
+             if args.channels else [])
+    named = {parse_channel_spec(c, PLC_FIRST_PORT)["symbol"].lower() for c in given}
+    kept = [c for c in preset.get("channels", [])
+            if parse_channel_spec(c, PLC_FIRST_PORT)["symbol"].lower() not in named]
+    args.channels = ",".join(kept + given) or None
+    for key in ("netid", "sample_time_ms", "record_time"):
+        if getattr(args, key) is None and preset.get(key) is not None:
+            setattr(args, key, preset[key])
+
+
+def cmd_presets(args):
+    """Named channel sets for newscope, kept on this PC and nowhere else: symbol
+    paths belong to one PLC project, so name a preset after it (lineA-tracking)."""
+    path, presets = load_presets()
+    written = None
+    if args.set and args.remove:
+        fail("--set and --remove together", "Give one of them.")
+    if args.set:
+        name = args.set.strip()
+        if not name:
+            fail("--set needs a name")
+        if not args.channels:
+            fail("--set needs --channels", "A preset is first of all its channels.")
+        channels = [c.strip() for c in args.channels.split(",") if c.strip()]
+        if not channels:
+            fail(f"--channels '{args.channels}' names no symbols")
+        for c in channels:
+            parse_channel_spec(c, PLC_FIRST_PORT)    # refuses a malformed entry now, not at newscope
+        for key, value in (("sample-time-ms", args.sample_time_ms),
+                           ("record-time", args.record_time)):
+            if value is not None and not (math.isfinite(value) and value > 0):
+                fail(f"--{key} must be a positive number, not {value}")
+        preset = {"channels": channels}
+        for key in ("netid", "sample_time_ms", "record_time"):
+            if getattr(args, key) is not None:
+                preset[key] = getattr(args, key)
+        presets[name] = preset
+        _write_json(path, presets)
+        written = name
+    elif args.remove:
+        if args.remove not in presets:
+            fail(f"no preset '{args.remove}' in {path}",
+                 f"Saved presets: {', '.join(sorted(presets)) or 'none'}.")
+        del presets[args.remove]
+        _write_json(path, presets)
+        written = args.remove
+    emit({"ok": True, "file": str(path), "presets": presets,
+          **({"written": written} if written else {})})
     return 0
 
 
@@ -4379,6 +4450,9 @@ def build_parser():
                         "stores fixed colours that do not follow the IDE theme. "
                         f"auto (default) reads the TwinCAT XAE Shell's theme, "
                         f"else {DEFAULT_THEME}")
+    q.add_argument("--preset", metavar="NAME",
+                   help="start from a preset saved with 'presets --set'; "
+                        "--channels adds to it, and the other options override it")
     q.set_defaults(func=cmd_newscope)
 
     q = sub.add_parser("checkscope", help="validate a .tcscopex")
@@ -4412,6 +4486,18 @@ def build_parser():
                    help="with --set: remember it on this PC only, the fallback "
                         "for projects without a setting")
     q.set_defaults(func=cmd_recordings)
+
+    q = sub.add_parser("presets", help="list, save or remove named channel sets for newscope")
+    q.add_argument("--set", metavar="NAME",
+                   help="save a preset under NAME (replacing one of that name); "
+                        "name it after the PLC project, e.g. lineA-tracking")
+    q.add_argument("--remove", metavar="NAME", help="delete a preset")
+    q.add_argument("--channels", metavar="SYMBOL[:TYPE[:PORT]],...",
+                   help="with --set: the channels, written as for newscope")
+    q.add_argument("--netid", help="with --set: the target AmsNetId")
+    q.add_argument("--sample-time-ms", type=float, help="with --set: sample time")
+    q.add_argument("--record-time", type=float, help="with --set: window, in seconds")
+    q.set_defaults(func=cmd_presets)
 
     q = sub.add_parser("cleanup", help="delete the recordings xae save made, and their cache files")
     q.add_argument("--solution", required=True, help="this solution's recordings only")

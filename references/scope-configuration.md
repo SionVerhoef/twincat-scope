@@ -209,6 +209,13 @@ instead of part of a symbol name. No TwinCAT symbol path seen here contains a co
 nothing in the format promises that, and a symbol that does contain one cannot be written in
 this grammar.
 
+`--preset <name>` starts from a channel set saved with `presets --set`, kept in
+`presets.json` in the tool's per-PC config folder (`%LOCALAPPDATA%\tcscope`,
+`$XDG_CONFIG_HOME/tcscope` elsewhere) and nowhere else. A channel on the command line replaces
+the preset's entry for the same symbol, so `--channels "MAIN.fb.bFlag:INT"` corrects one type
+without re-saving; `--netid`, `--sample-time-ms` and `--record-time` override, and the rest
+comes from the preset.
+
 The NC runtime's own field names say their type, because Beckhoff fixes them. Two shapes are
 typed, and `newscope` writes them with `type_source: nc-field`:
 
