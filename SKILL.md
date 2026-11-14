@@ -7,8 +7,7 @@ description: "Records and analyses TwinCAT 3 Scope measurements. Use when the us
 
 > **Reference material only. Not for safety functions.** Every scope configuration, recording
 > plan and diagnosis you produce must be reviewed and validated by a qualified engineer
-> against the drive and platform documentation before anyone acts on it — say so when you
-> hand one over.
+> against the drive and platform documentation before anyone acts on it.
 
 Recording is the easy half. Ten minutes of twenty channels at 1 kHz is twelve million
 samples — far too large to read, and the thing you are looking for is usually three samples
@@ -21,14 +20,13 @@ it is installed; otherwise hand off to whatever covers ST authoring in this proj
 
 ## The four rules
 
-1. **Never author safety logic.** No TwinSAFE, no FSoE, no safety-PLC configuration, and
-   never present standard PLC code as a safety function. Reading and explaining existing
-   safety configuration is fine; recording a safety signal for diagnosis is fine.
+1. **No safety logic.** This skill writes no code, safety code least of all; reading, explaining
+   and recording safety signals is fine.
 2. **Never write to or activate a live machine.** Reading measurements is safe. Writing a
    variable, activating a configuration, or switching Run/Config mode is a human gesture —
    propose the command, do not run it.
-3. **Never claim something is verified that you have not verified.** There is very likely no
-   TwinCAT installation on this machine. What has and has not been seen working in TwinCAT
+3. **Never claim something is verified that you have not verified.** There may be no TwinCAT
+   installation on this machine. What has and has not been seen working in TwinCAT
    is under *Status* below — report at that precision, never rounded up to "works".
 4. **A recording is not free.** Sample rate × channel count consumes real-time bandwidth on
    the target, and an over-specified scope can disturb the very machine it is diagnosing.
@@ -84,9 +82,11 @@ to `ingest`. On another machine, ask for the file.
    instead of minutes against CSV. Without `-o` the Parquet goes to the cache dir
    (`%LOCALAPPDATA%\tcscope\cache`, `$XDG_CACHE_HOME/tcscope` elsewhere); `output` names it —
    pass that path to every later verb.
-5. **A CSV exported from Scope View by hand depends on the user's export settings.** Ask for
-   them, or advise the ones in `references/export-tool.md` (*Exporting from Scope View by
-   hand*). A channel drawn in several tabs exports several times; exact copies are collapsed
+5. **A CSV exported from Scope View by hand depends on the user's export settings.** Do not
+   ask for them up front: prefer the `.svdx`, which never depends on them, and otherwise let
+   `manifest` read the layout — it reads each one or refuses it by name. Ask only when it
+   refuses the file or warns that values may be scaled; to get a clean export, advise the
+   settings in `references/export-tool.md` (*Exporting from Scope View by hand*). A channel drawn in several tabs exports several times; exact copies are collapsed
    and listed under `copies_collapsed`. The `Offset` header row is part of the channel's
    scaling, reported as `scale_offset`, and the both-readings rule below applies to it.
 

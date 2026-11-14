@@ -19,6 +19,11 @@
 
 ### Changed
 
+- `SKILL.md` asks less of the engineer. Rule 1 is one line: the skill writes no code, so the
+  safety rule needs no detail. The agent no longer repeats the review disclaimer at every
+  hand-over; it stays at the top of `SKILL.md` and `README.md`. It asks for a hand export's
+  settings only when `manifest` refuses the file or warns about scaling, and prefers the
+  `.svdx`. Rule 3 no longer assumes there is no TwinCAT on the machine.
 - `newscope` refuses to write into a Measurement project folder: XAE watches its files, and
   rewriting a scope it holds raised a reload prompt that could end with the new file lost.
 - `SKILL.md` rule 4: the agent may start or stop a recording only on the user's explicit request.
