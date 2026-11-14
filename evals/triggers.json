@@ -4,7 +4,8 @@
   "distractors": [
     "A skill for writing and reviewing IEC 61131-3 Structured Text for PLCs",
     "A skill for general CSV and dataframe analysis in Python",
-    "A skill for Siemens TIA Portal and S7 controllers"
+    "A skill for Siemens TIA Portal and S7 controllers",
+    "A skill for TwinCAT 3 motion control: NC axes, MC_ function blocks, axis errors and their causes"
   ],
   "without_neighbour": {
     "notes": "Iteration 1 scored 10/10, but each decline case had a distractor that was a near-perfect match to go to instead. Run these again with that neighbour removed from the field: the right answer becomes 'none', and the question is whether twincat-scope grabs the case once nothing better is on offer.",
@@ -26,7 +27,7 @@
       "name": "axis-fault-no-vendor",
       "prompt": "Why did the axis fault at 12 seconds?",
       "should_fire": true,
-      "why": "The prompt from the bead. No vendor, no file, no format - the description has to reach it through the diagnosis clause alone."
+      "why": "No vendor, no file, no format. The timestamp is what says a recording exists; the description reaches it through 'what happened at 12 seconds' and the diagnosis-from-recorded-data clause, not through the bare phrase 'why did the axis fault', which was dropped as too broad."
     },
     {
       "id": 2,
@@ -53,8 +54,8 @@
       "id": 5,
       "name": "oscillation-tuning",
       "prompt": "Our robot cell has started oscillating on the Z axis and nobody can work out why. Can you help?",
-      "should_fire": true,
-      "why": "Near miss. 'axis oscillation' and 'drive tuning' are both in the description, but nothing here names a file or a vendor."
+      "should_fire": false,
+      "why": "Near miss. 'axis oscillation' and 'drive tuning' are both in the description, but nothing names a recording, a file or a vendor, so a motion-control skill is the better first stop; this skill takes over once there is data to read. Flipped from should_fire true when the motion distractor joined the field."
     },
     {
       "id": 6,
@@ -83,6 +84,13 @@
       "prompt": "Convert this CSV to Parquet and tell me the column means.",
       "should_fire": false,
       "why": "Near miss in the other direction. The skill does convert CSV to Parquet and does report per-channel statistics, but nothing here is a machine measurement. Firing on this would mean it fires on every CSV."
+    },
+    {
+      "id": 10,
+      "name": "axis-fault-no-recording",
+      "prompt": "Our axis keeps going into an error state at startup. What should I check?",
+      "should_fire": false,
+      "why": "An axis-fault question with no recording, no timestamp and no scope file. The first move is reading the axis error and the logger, not building a scope. The description used to carry 'why did the axis fault' and would have grabbed this."
     }
   ]
 }
