@@ -21,6 +21,7 @@ Two halves, different costs:
 | `make_eval_fixture.py`, `stage_runs.py`, `test_stage_runs.py` | Build fixtures; stage runs outside the repo, file the answers, run the judge read blind; and that harness's self-test | yes |
 | `results-iteration-*.md` | One write-up per eval round; the highest number is the latest | latest only |
 | `field-test-brief.md` | The checklist for a session on a real TwinCAT machine | yes |
+| `field-test-xae-acceptance.md` | Acceptance of the `xae` verbs on a real XAE, and which pragmas hide a symbol from Scope; answered in `field-review-xae-acceptance.md` | yes |
 | `field-review-*.md` | Write-ups of those sessions, named after the commit tested | record |
 
 **Latest result** (`results-iteration-6.md`, n=3 per cell, Opus 5.5): the skill arm scored
