@@ -65,7 +65,10 @@ real compiled program (see *Status*).
   saves it, `xae save` writes the recording Scope View holds to `<solution>\Recordings\` under a
   unique name, and `cleanup` deletes those recordings and their cache files when the analysis is
   done. No dialogs; nothing on the Desktop. Pressing Record stays a human gesture.
-- **No dependencies** — `doctor`, `newscope` and `checkscope` run on plain Python, so they work
+- **Presets** — save a named channel set on this PC (`presets --set lineA-tracking …`) and
+  build from it with `newscope --preset`, so a tracking scope always carries the channels you
+  always want. Never written into a project or this repo.
+- **No dependencies** — `doctor`, `newscope`, `checkscope` and `presets` run on plain Python, so they work
   on a locked-down engineering PC.
 
 **Read a recording**

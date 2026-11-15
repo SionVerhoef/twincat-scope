@@ -54,7 +54,7 @@ uv run scripts/tcscope.py <verb> ...        # analysis verbs need dependencies
 py -3 scripts/tcscope.py doctor             # works with nothing installed
 ```
 
-`doctor`, `newscope` and `checkscope` deliberately need no third-party packages, so the
+`doctor`, `newscope`, `checkscope` and `presets` deliberately need no third-party packages, so the
 acquisition half works on a machine that has never seen `uv`. If anything is missing, run
 `doctor` first — it names the fix. `py -3` is the Windows launcher, and TwinCAT runs on
 Windows; on Linux or macOS (and in this repo's CI) the same commands are `python3`.
@@ -127,6 +127,13 @@ py -3 scripts/tcscope.py newscope templates/axis-diagnosis.tcscopex \
 
 py -3 scripts/tcscope.py checkscope MyScope.tcscopex
 ```
+
+**Check for a preset first.** `presets` lists the named channel sets saved on this PC. When
+one fits the request, build from it with `newscope --preset <name>` and say which you used;
+`--channels` adds to it and the other options override it. Save a new preset
+(`presets --set <name> --channels … [--netid --sample-time-ms --record-time]`) only when the
+user asks. Symbol paths belong to one PLC project, so a preset is named after it
+(`lineA-tracking`).
 
 Four things decide whether the file records at all — detail and field history for each in
 `references/scope-configuration.md`:

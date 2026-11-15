@@ -4,6 +4,10 @@
 
 ### Added
 
+- `presets` saves named channel sets on this PC, and `newscope --preset <name>` builds from
+  one; `--channels` adds to it and the other options override it. The agent checks for a
+  fitting preset before building a scope and saves one only when asked. Stored per PC, never
+  in a project or this repo.
 - `xae add | save | list` drive the open TwinCAT XAE through `scripts/xae_scope.ps1`: a
   generated scope is added to the Measurement project and the project saved, and the recording
   Scope View holds is saved as `<scope>_<yyyyMMdd-HHmmss>.svdx` — no Add Existing Item, no
