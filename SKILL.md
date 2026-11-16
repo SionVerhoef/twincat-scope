@@ -30,9 +30,9 @@ it is installed; otherwise hand off to whatever covers ST authoring in this proj
    is under *Status* below — report at that precision, never rounded up to "works".
 4. **A recording is not free.** Sample rate × channel count consumes real-time bandwidth on
    the target, and an over-specified scope can disturb the very machine it is diagnosing.
-   Propose the configuration; a human starts it — `references/recording-load.md`. Start or
-   stop a recording yourself only when the user explicitly asks, never on your own initiative —
-   and `xae record` does not work yet, so today the user presses Record.
+   Propose the configuration; a human starts it — `references/recording-load.md`. Start a
+   recording yourself (`xae record`) only when the user explicitly asks, never on your own
+   initiative; by default the user presses Record.
 
 ## Architecture
 
@@ -175,21 +175,24 @@ never a fixed window: it keeps the last `RecordTime` until someone stops it.
 
 With the PLC project at hand, add `--tmc <PLC>.tmc` — every PLC symbol is then checked
 against the compiled program: typos, renamed variables, whole blocks, and types read at the
-wrong width. The `.tmc` reader has been run against one real 862-symbol program; on another,
+wrong width. Run it before the first Record: Scope View names only the **first** unknown symbol
+per attempt, so four bad channels cost four rounds there and one here. The `.tmc` reader has been run against one real 862-symbol program; on another,
 treat a surprising result as a finding about the reader. `references/scope-configuration.md`.
-Whether a symbol is reachable is decided by pragmas such as `{attribute 'hide'}`, not by its
-OPC UA setting — check it with `--tmc` rather than reading it off the source
+Whether a symbol is reachable is decided by pragmas on the variable or member itself —
+`hide`, `tc_no_symbol` / `TcNoSymbol` — not by `symbol := 'none'`, its OPC UA setting, or a
+pragma on its block's type; check it with `--tmc` rather than reading it off the source
 (*Pragmas that keep a symbol from Scope* in the same file).
 
-### Through the open XAE — add, save, clean up
+### Through the open XAE — add, record, save, clean up
 
 When you run on the TwinCAT PC and the user has the solution open in XAE, these replace Add
 Existing Item, Scope View's Save dialog and the drag into the chat. Each touches only the XAE
-whose open solution is `--solution`, and refuses — quoting it — while that XAE shows a dialog.
-Windows PowerShell must run at the same elevation as XAE.
+whose open solution is `--solution`, and refuses — quoting it — while that XAE shows a dialog
+(a message box, or any modal window such as Scope View's *Stop Record?*). Windows PowerShell
+must run at the same elevation as XAE.
 
 ```bash
-py -3 scripts/tcscope.py newscope templates/axis-diagnosis.tcscopex -o C:\work\gen\ScopeC.tcscopex ...
+py -3 scripts/tcscope.py newscope templates/axis-diagnosis.tcscopex -o C:\work\gen\ScopeC.tcscopex --netid <target> ...
 py -3 scripts/tcscope.py checkscope C:\work\gen\ScopeC.tcscopex
 py -3 scripts/tcscope.py xae add C:\work\gen\ScopeC.tcscopex --solution C:\work\Scratch\Scratch.sln
 #   the user presses Record in Scope View and lets it stop
@@ -204,8 +207,15 @@ py -3 scripts/tcscope.py cleanup --solution C:\work\Scratch\Scratch.sln
   a later save wrote XAE's old copy back over the new file. `newscope` refuses such a folder;
   `xae add` copies the file in and saves the project. A name the project already holds is
   refused — generate a changed scope under a new name.
-- **Pressing Record stays the user's move** (rule 4). `xae record` exists to say so: start/stop
-  from a script returned without error and recorded nothing in the field.
+- **Pass `--netid`.** The default `0.0.0.0.0.0` did not reach the runtime even on the PC running
+  it (*Target not connected*); `newscope` says so in `netid_note`.
+- **Pressing Record stays the user's move** (rule 4). Only when the user asks you to record,
+  `xae record ScopeC --solution …` presses XAE's *Start Record* — on the scope that is the
+  **active document**, so the user clicks into its tab first — waits for the scope to stop by
+  itself, and saves exactly like `xae save`. It refuses a scope that never ends on its own (ring
+  buffer, auto-restart) and needs `--timeout` for one that stops on a trigger. It never presses
+  *Stop Record*: stopping early raises a popup that blocks XAE until a person answers it. If the
+  user wants it stopped early, they press Stop in XAE and answer the popup themselves.
 - **`xae save`** writes `<scope>_<yyyyMMdd-HHmmss>.svdx` into the recordings folder: the
   project's own setting, else this PC's, else `<solution folder>\Recordings` — never the
   Desktop. `recordings --solution … --set <folder>` remembers the user's choice in
@@ -256,13 +266,16 @@ Timelines *All* on a multi-channel group reads correctly. `events` reports an ax
 stop as one `standing` and leaves a real settling tail after arrival out. `manifest`'s
 scaling warning fires on a real Scope View export and names only the scaled channel.
 
-**XAE automation** (`xae`, `recordings`, `cleanup`): every call `xae_scope.ps1` makes was
-measured in one field session on TC3.1.4024 with Scope View 3.4 — add with no dialog, the
-project saved, a recording saved by `SaveData` that round-tripped through `checkscope`, `ingest`
-and `manifest`, and deletion with the scope still open. The helper itself has not yet run against
-an XAE; Windows CI covers it only up to "no XAE has the solution open". Not covered: a
-Measurement project inside a solution folder, several Measurement projects, other XAE or Scope
-View versions, and starting or stopping a recording.
+**XAE automation** (`xae`, `recordings`, `cleanup`): `list`, `add`, `save`, the project
+recordings setting, `cleanup` and a solution opened through a `subst` drive passed an acceptance
+run on TC3.1.4024 with Scope View 3.4 (`evals/field-review-xae-acceptance.md`) — no dialog,
+the expected `git` trace, recordings that round-tripped through `checkscope`, `ingest` and
+`manifest`. Pressing *Start Record* through UI Automation and waiting on `ScopeState` was
+measured by hand in a field session; **`xae record` itself, the check for non-message-box
+dialogs and the refusal while a dialog is open have not yet run against an XAE** — the fixes
+after that acceptance run are untested there. Not covered: a Measurement project inside a
+solution folder, several Measurement projects, a localised XAE, other XAE or Scope View
+versions, and saving after a recording stopped early.
 
 **Not verified:** the analysis verbs across many real recordings (most real data is from one
 machine), what a *Subsave* trigger records (it needs a Professional licence), marker tables in

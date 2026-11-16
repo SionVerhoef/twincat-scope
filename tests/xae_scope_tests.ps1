@@ -48,9 +48,19 @@ try {
     $r = Run @('save', '-Solution', $sln, '-Item', 'ScopeC.tcscopex', '-Out', (Join-Path $tmp 'nope\a.svdx'))
     Check 'save refuses a folder that does not exist' ($r.Code -eq 1) $r
 
+    $r = Run @('record', '-Solution', $sln, '-Out', (Join-Path $tmp 'new.svdx'), '-TimeoutS', '40')
+    Check 'record without -Item is a usage error' ($r.Code -eq 2 -and $r.Json.error -like '*-Item*') $r
+
+    $r = Run @('record', '-Solution', $sln, '-Item', 'ScopeC.tcscopex', '-Out', (Join-Path $tmp 'new.svdx'))
+    Check 'record without -TimeoutS is a usage error' ($r.Code -eq 2 -and $r.Json.error -like '*-TimeoutS*') $r
+
+    $r = Run @('record', '-Solution', $sln, '-Item', 'ScopeC.tcscopex', '-Out', $taken, '-TimeoutS', '40')
+    Check 'record refuses to overwrite a file' ($r.Code -eq 1 -and $r.Json.error -like '*refusing to overwrite*') $r
+
     # Compiles the C# plumbing, walks the Running Object Table, finds no XAE.
     foreach ($argv in @(@('list', '-Solution', $sln), @('add', '-Solution', $sln, '-Scope', $scope),
-                        @('save', '-Solution', $sln, '-Item', 'ScopeC.tcscopex', '-Out', (Join-Path $tmp 'new.svdx')))) {
+                        @('save', '-Solution', $sln, '-Item', 'ScopeC.tcscopex', '-Out', (Join-Path $tmp 'new.svdx')),
+                        @('record', '-Solution', $sln, '-Item', 'ScopeC.tcscopex', '-Out', (Join-Path $tmp 'new.svdx'), '-TimeoutS', '40'))) {
         $r = Run $argv
         Check "$($argv[0]) without XAE says no XAE has the solution open" ($r.Code -eq 1 -and $r.Json.error -like 'no XAE has*' -and $r.Json.fix) $r
     }

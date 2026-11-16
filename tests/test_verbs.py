@@ -2819,7 +2819,8 @@ def xae_checks():
     what it tracked; recordings remembers a folder per project.
 
     XAE only exists on Windows, so a stand-in honours xae_scope.ps1's
-    arguments: it logs each call, and `save` writes the -Out file.
+    arguments: it logs each call, `save` and `record` write the -Out file, and
+    `list` answers from scopes.json when the test wrote one.
     """
     if sys.platform == "win32":
         return
@@ -2833,11 +2834,23 @@ def xae_checks():
             f"open({str(log)!r}, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
             "a = sys.argv[1:]\n"
             "opt = {a[i][1:]: a[i + 1] for i in range(1, len(a) - 1, 2)}\n"
-            "if a[0] == 'save':\n"
+            "states = [{'s': 0.0, 'state': 60}, {'s': 0.5, 'state': 50}, {'s': 10.5, 'state': 70},\n"
+            "          {'s': 11.5, 'state': 60}]\n"
+            "if a[0] == 'record' and opt.get('Item') == 'ScopeBusy.tcscopex':\n"
+            "    print(json.dumps({'ok': False, 'error': 'XAE shows a dialog while recording',\n"
+            "                      'fix': 'Answer it', 'pressed': ['Start Record'], 'states': states[:2]}))\n"
+            "    sys.exit(1)\n"
+            "if a[0] in ('save', 'record'):\n"
             "    open(opt['Out'], 'wb').write(b'svdx')\n"
-            "    print(json.dumps({'ok': True, 'path': opt['Out'], 'bytes': 4}))\n"
+            "    got = {'ok': True, 'path': opt['Out'], 'bytes': 4}\n"
+            "    if a[0] == 'record':\n"
+            "        got.update(states=states, pressed=['Start Record'], recorded_s=12.0)\n"
+            "    print(json.dumps(got))\n"
             "elif a[0] == 'list':\n"
-            "    print(json.dumps({'ok': True, 'scopes': [{'name': 'ScopeC.tcscopex'}]}))\n"
+            "    import os\n"
+            f"    f = {str(tmp / 'scopes.json')!r}\n"
+            "    scopes = json.load(open(f)) if os.path.exists(f) else [{'name': 'ScopeC.tcscopex'}]\n"
+            "    print(json.dumps({'ok': True, 'scopes': scopes}))\n"
             "else:\n"
             "    print(json.dumps({'ok': True, 'item': opt.get('Scope')}))\n")
         helper.chmod(0o755)
@@ -2952,6 +2965,8 @@ def xae_checks():
         check("cleanup refuses to run without --solution",
               out.get("ok") is False and Path(out_c.get("output") or "").is_file(), str(out))
         x("cleanup", "--solution", sln)
+        check("cleanup removes every folder xae save created, the parent of Data/Scope too",
+              not (work / "Data").exists(), str(list(work.iterdir())))
         (work / "tcscope.json").unlink()
         out = x("recordings", "--solution", sln)
         check("without a project setting, this PC's folder is the fallback",
@@ -2962,11 +2977,7 @@ def xae_checks():
         check("recordings refuses a Measurement project folder",
               out.get("ok") is False and "Measurement project" in out.get("error", ""), str(out))
 
-        before = len(log.read_text().splitlines())
-        out = x("xae", "record", "start", "--solution", sln)
-        check("xae record says start/stop does not work yet, and calls nothing",
-              out.get("ok") is False and "does not work yet" in out.get("error", "")
-              and len(log.read_text().splitlines()) == before, str(out))
+        record_checks(x, tmp, work, sln, log)
 
         gen = tmp / "ScopeC.tcscopex"
         gen.write_text("<x/>")
@@ -2984,6 +2995,93 @@ def xae_checks():
         out = x("xae", "list", "--solution", sln)
         check("xae without Windows PowerShell says what it needs",
               out.get("ok") is False and "Windows PowerShell" in out.get("error", ""), str(out))
+
+
+def record_checks(x, tmp, work, sln, log):
+    """xae record: refused unless the scope ends by itself, then the helper's
+    states and pressed buttons reach the user unchanged, and the recording is
+    tracked like a saved one."""
+    template = ROOT / "templates" / "minimal-single-channel.tcscopex"
+    gen = tmp / "gen"
+    gen.mkdir()
+
+    def scope(name, old=None, new=None):
+        path = gen / f"{name}.tcscopex"
+        x("newscope", template, "-o", path, "--channels", "MAIN.nCounter:UDINT",
+          "--netid", "1.2.3.4.1.1", "--sample-time-ms", "10", "--record-time", "10")
+        if old:
+            text = path.read_bytes().decode("utf-8-sig")
+            edited = re.sub(old, new, text, count=1)
+            assert edited != text, old
+            path.write_bytes(b"\xef\xbb\xbf" + edited.encode("utf-8"))
+        return {"name": path.name, "path": str(path)}
+
+    scopes = [scope("ScopeR"),
+              scope("ScopeRing", "<StopMode>AutoStop<", "<StopMode>ClientStop<"),
+              scope("ScopeLoop", "<AutoRestartRecord>false<", "<AutoRestartRecord>true<"),
+              scope("ScopeTrig", r"(<TriggerModule[^>]*>\s*)<SubMember />",
+                    r"\1<SubMember><TriggerGroup><TriggerAction>STOP_RECORD</TriggerAction>"
+                    r"</TriggerGroup></SubMember>"),
+              scope("ScopeBusy")]
+    (tmp / "scopes.json").write_text(json.dumps(scopes))
+    calls = lambda: log.read_text().splitlines()
+
+    out = x("newscope", template, "-o", gen / "NoNetId.tcscopex", "--channels", "MAIN.nCounter:UDINT")
+    check("newscope says the default AmsNetId did not reach even a local runtime",
+          "Target not connected" in out.get("netid_note", ""), str(out.get("netid_note")))
+    check("newscope with --netid has no AmsNetId note",
+          "netid_note" not in x("newscope", template, "-o", gen / "NetId.tcscopex", "--channels",
+                                "MAIN.nCounter:UDINT", "--netid", "1.2.3.4.1.1"))
+
+    out = x("xae", "record", "ScopeR")
+    check("xae record without --solution is refused",
+          out.get("ok") is False and "--solution" in out.get("error", ""), str(out))
+
+    for name, why in (("ScopeRing", "ring buffer"), ("ScopeLoop", "restarts"),
+                      ("ScopeTrig", "Stop Record trigger")):
+        before = len(calls())
+        out = x("xae", "record", name, "--solution", sln)
+        check(f"xae record refuses a scope that does not end by itself ({why}), pressing nothing",
+              out.get("ok") is False and why in out.get("error", "")
+              and not any(c.startswith("record ") for c in calls()[before:]), str(out))
+
+    before = len(calls())
+    out = x("xae", "record", "ScopeTrig", "--solution", sln, "--timeout", "45")
+    rec = [c for c in calls()[before:] if c.startswith("record ")]
+    check("with --timeout, a Stop Record trigger scope is recorded, waiting that long",
+          out.get("ok") is True and out.get("ends_by") == "Stop Record trigger"
+          and len(rec) == 1 and "-TimeoutS 45.0" in rec[0], str(out) + str(rec))
+
+    before = len(calls())
+    out = x("xae", "record", "ScopeR", "--solution", sln)
+    rec = [c for c in calls()[before:] if c.startswith("record ")]
+    svdx = Path(out.get("output") or "")
+    check("xae record hands the helper the scope, a new .svdx and window + margin as timeout",
+          len(rec) == 1 and "-Item ScopeR.tcscopex" in rec[0] and f"-Out {svdx}" in rec[0]
+          and "-TimeoutS 40.0" in rec[0], str(rec))
+    check("xae record reports the helper's states and pressed buttons unchanged",
+          out.get("ok") is True and out.get("pressed") == ["Start Record"]
+          and [s["state"] for s in out.get("states") or []] == [60, 50, 70, 60]
+          and out.get("ends_by") == "fixed 10 s window"
+          and re.fullmatch(r"ScopeR_\d{8}-\d{6}\.svdx", svdx.name) and svdx.is_file(), str(out))
+    dry = x("cleanup", "--solution", sln, "--dry-run")
+    check("a recording made by xae record is tracked for cleanup",
+          str(svdx) in (dry.get("deleted") or []), str(dry))
+
+    out = x("xae", "record", "ScopeBusy", "--solution", sln)
+    check("a refusal from the helper reaches the user with its states and pressed buttons",
+          out.get("ok") is False and out.get("error") == "XAE shows a dialog while recording"
+          and out.get("fix") == "Answer it" and out.get("pressed") == ["Start Record"]
+          and len(out.get("states") or []) == 2, str(out))
+
+    out = x("xae", "record", "ScopeNope", "--solution", sln)
+    check("xae record refuses a scope the project does not hold",
+          out.get("ok") is False and "no scope named" in out.get("error", ""), str(out))
+    out = x("xae", "record", "--solution", sln)
+    check("xae record with several scopes and none named asks which",
+          out.get("ok") is False and "say which to record" in out.get("error", ""), str(out))
+    x("cleanup", "--solution", sln)
+    (tmp / "scopes.json").unlink()
 
 
 def ingest_cache_checks():
