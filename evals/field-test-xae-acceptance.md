@@ -162,14 +162,16 @@ project folder:
 
 ```powershell
 mkdir C:\work\gen -Force | Out-Null
-foreach ($n in 'A','B','C') {
+$netid = '<the test runtime''s AMS NetId>'
+foreach ($n in 'A','B','C','D') {
   tc newscope templates\minimal-single-channel.tcscopex -o "C:\work\gen\Scope$n.tcscopex" `
-     --channels "MAIN.nCounter:UDINT" --sample-time-ms 10 --record-time 10
+     --channels "MAIN.nCounter:UDINT" --sample-time-ms 10 --record-time 10 --netid $netid
 }
 ```
 
-For recordings, regenerate the scope with `--netid <the test runtime's AMS NetId>` if the
-default `0.0.0.0.0.0` does not reach it. That NetId stays on the PC; the report says `1.2.3.4.1.1`.
+Pass `--netid` from the start: in round 1 the default `0.0.0.0.0.0` did not reach the runtime
+even on the same PC. That NetId stays on the PC; the report says `1.2.3.4.1.1`. ScopeD is used
+only in R2.
 
 ## 4. Part A — the XAE verbs
 
@@ -194,7 +196,7 @@ Quote every command with its full output. "Clean" means `git status` in `C:\work
 
 ### A12 — `xae record` (R1–R4)
 
-Use the scope that recorded in A8 (regenerated with `--netid` if the default NetId does not
+Use ScopeB, the scope that recorded in A8 (generated with `--netid`; the default NetId does not
 connect). Before each recording, read `MAIN.nCounter` over ADS and note it.
 
 | # | Do | Pass when | Record |
