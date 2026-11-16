@@ -179,7 +179,7 @@ chart reads well in both. `theme_source` says which happened. Found on TcXaeShel
 | `SymbolBased` | `true` = resolve by name (portable). `false` = use `IndexGroup`/`IndexOffset`, which are addresses and break when the program is rebuilt. Prefer `true`. |
 | `IndexGroup` / `IndexOffset` | Direct addresses. Leave `0` when symbol-based. NC axis channels recorded that way, although real files carry non-zero values on their NC acquisitions — Scope does not need them as inputs. **Never copy these between machines.** |
 | `TargetPort` | `851` for the first PLC runtime. `852`, `853`… for further ones. **NC axis symbols (`Axes.…`) are served by the NC runtime on `501`.** One port written across every channel resolves the PLC symbols and fails every axis symbol with "Symbolname could not be found" — a message that sends you looking at the name, which is not the problem. |
-| `AmsNetId` | The target. A placeholder here is the single most common reason a scope records nothing. |
+| `AmsNetId` | The target. A placeholder here is the single most common reason a scope records nothing. `0.0.0.0.0.0` is not "this PC": Scope View refused it on the very PC running the runtime with *Target not connected: '0.0.0.0.0.0 Port: 851'*. Write the target's own AmsNetId. |
 | `DataType` | Scope's own vocabulary, **not IEC's**: `BIT` for a `BOOL`, `INT16` for an `INT`, `REAL64` for an `LREAL`. Seen in real project files: `BIT`, `INT8`, `INT16`, `UINT32`, `REAL64`; the others follow the same naming. Scope read `LREAL` as `VOID`, **wrote `VOID` back when the project was saved**, and refused the channel: "The datatype is not supported: 'VOID'". Other IEC names are expected to go the same way; only `LREAL` has been tried. A `VOID` in a file is that failure's fingerprint. |
 | `VariableSize` | Bytes, and it must match `DataType`: 1 for `BIT`/`INT8`, 2 for `INT16`, 4 for `UINT32`, 8 for `REAL64`. Scope reads that many bytes from the target whatever the variable actually is, so 8 bytes off a `BOOL` is a recording of its neighbours. |
 | `Name` | The label in the Scope tree **and the column header when the recording is exported to CSV**. `minimal-single-channel.tcscopex` ships the placeholder `Signal`; left alone, fifty-three channels exported as fifty-three columns called `Signal`, which is what happened on a machine. `newscope` derives a short unique name per channel and keeps the full path in `Title`. |
@@ -321,28 +321,36 @@ on another program, treat a surprising result as a finding about the reader.
 ### Pragmas that keep a symbol from Scope
 
 Scope records a PLC variable by name over ADS, so a variable the PLC leaves out of its ADS
-symbol table cannot be recorded, whatever its declaration looks like. Which attribute pragmas
-do that:
+symbol table cannot be recorded, whatever its declaration looks like. Measured on TC3.1 build
+4024.55, one variable or block per pragma, each checked in the `.tmc`, the Target Browser and a
+recording (`evals/field-review-xae-acceptance.md`, Part B):
 
-- **Documented to remove the ADS symbol:** `{attribute 'hide'}` (on the declaration directly
-  below it, or on a POU's signature; `'hide_all_locals'` covers every local of a declaration)
-  and `{attribute 'tc_no_symbol'}`, spelled `'TcNoSymbol'` from TC3.1 4022 on. Sources:
-  [Attribute 'hide'](https://infosys.beckhoff.com/content/1033/tc3_plc_intro/2529654667.html),
-  [Attribute 'TcNoSymbol'](https://infosys.beckhoff.com/content/1033/tc3_plc_intro/3108007179.html).
-- **Not about ADS:** `{attribute 'OPC.UA.DA' := '0'}` takes a symbol out of the TwinCAT OPC UA
-  server's address space and nothing more
-  ([OPC UA server attributes](https://infosys.beckhoff.com/content/1033/tf6100_tc3_opcua_server/15563857163.html)).
-  A block marked so is still reachable by Scope; do not conclude otherwise from it.
-- **Not established:** what `{attribute 'symbol' := 'none'}` does in TwinCAT (it is documented
-  for CODESYS, not in Beckhoff's PLC documentation), and whether `hide` or `tc_no_symbol` on a
-  function block's declaration also hides the members of its instances. Until a build shows it,
-  say it is unknown rather than guessing either way.
+| Pragma | Where | Scope can record it? | In the `.tmc` |
+|---|---|---|---|
+| `{attribute 'hide'}` | on the variable | **no** — *Symbolname could not be found* | no symbol |
+| `{attribute 'tc_no_symbol'}`, `{attribute 'TcNoSymbol'}` | on the variable | **no** — absent from the Target Browser | no symbol |
+| `{attribute 'hide'}` | on one member of a function block | **no**, that member only | no `SubItem` for it in the block's `DataType` |
+| `{attribute 'symbol' := 'none'}` | on the variable | yes | symbol, with property `symbol` = `none` |
+| `{attribute 'symbol' := 'read'}` | on the variable | yes | symbol, with property `symbol` = `read` |
+| `{attribute 'OPC.UA.DA' := '0'}` | on the variable | yes — it only affects the OPC UA server | symbol, with property `OPC.UA.DA` = `0` |
+| `hide`, `tc_no_symbol` or `symbol := 'none'` | on a function block's declaration | yes — instances and their members stay reachable | property on the `DataType`; instance and members present |
+
+Beckhoff documents `hide` and `TcNoSymbol`
+([Attribute 'hide'](https://infosys.beckhoff.com/content/1033/tc3_plc_intro/2529654667.html),
+[Attribute 'TcNoSymbol'](https://infosys.beckhoff.com/content/1033/tc3_plc_intro/3108007179.html),
+[OPC UA server attributes](https://infosys.beckhoff.com/content/1033/tf6100_tc3_opcua_server/15563857163.html));
+`symbol := 'none'` is CODESYS's spelling and, on this build, did nothing to ADS. Not measured:
+`hide_all_locals`, other TwinCAT builds.
 
 Do not decide reachability from the source. Check it: `checkscope --tmc` flags a symbol the
-compiled program does not carry, and names a pragma as one possible reason. A symbol it *finds*
-is not yet proof — whether a member hidden inside a block still appears in that block's type
-description in the `.tmc` has not been checked, so the live symbol table on the target is the
-final word.
+compiled program does not carry — a hidden member included, since it has no `SubItem` — and
+names a pragma as one possible reason. Every symbol it resolved in that test also recorded. The
+only trace a hidden member leaves in the XML is a `DataType` whose `BitSize` is larger than its
+last `SubItem` reaches.
+
+Run it before the first Record: Scope View stops at the **first** unknown symbol and names only
+that one, so four unreachable channels take four rounds of edit-and-record there, and one run of
+`checkscope --tmc` here.
 
 It also prints the layout — every chart, its bands and their channels — and warns when a chart
 stacks more than six bands or a band overlays more than eight channels. Both are readability,

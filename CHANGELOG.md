@@ -17,14 +17,33 @@
 - `cleanup --solution … [--scope …]` deletes the recordings `xae save` wrote and the cache
   files `ingest` made from them, and nothing else. The agent runs it only once the user says
   they are finished with the problem, which can be several sessions later.
-- `xae record` refuses: start/stop from a script recorded nothing in the field.
+- `xae record <scope>` — only when the user asks — presses XAE's *Start Record* (exact name,
+  inside the *TwinCAT 3 Scope* toolbar only) on the active scope, waits for it to stop by itself,
+  and saves like `xae save`, reporting each `ScopeState` it saw and every button it pressed. It
+  refuses a scope that does not end on its own, needs `--timeout` with a Stop Record trigger, and
+  never presses *Stop Record*. Not yet run against XAE by the tool itself.
+- `evals/field-review-xae-acceptance.md`: the acceptance run of the XAE verbs and the pragma
+  test. The acceptance brief is now round 2: A6 re-tested, A12 replaced by `xae record` checks.
 - `evals/field-review-xae-scope.md`: the field measurements these verbs are built on.
 - A Windows CI job runs `xae_scope.ps1` in Windows PowerShell 5.1 up to "no XAE".
 
-- `references/scope-configuration.md`: which pragmas keep a symbol from Scope. `hide` and
-  `tc_no_symbol` do; `OPC.UA.DA := '0'` only affects OPC UA; `symbol := 'none'` and hiding a
-  block's members are marked unverified. `checkscope --tmc` names a pragma as one reason a
-  symbol is missing.
+- `references/scope-configuration.md`: which pragmas keep a symbol from Scope, measured on
+  TC3.1.4024: `hide`, `tc_no_symbol` and `TcNoSymbol` on a variable, and `hide` on a block's
+  member, do; `symbol := 'none'`, `symbol := 'read'`, `OPC.UA.DA := '0'` and any of them on a
+  block's declaration do not. A hidden member has no `SubItem` in the `.tmc`, so
+  `checkscope --tmc` already flags it.
+
+### Fixed
+
+- With a dialog open in XAE, every `xae` verb waited 30 s and then said "no XAE … run both at
+  the same level". The dialog check now runs before any COM call and quotes the dialog; an XAE
+  that does not answer is reported as busy, not missing.
+- The dialog check saw only message boxes. It now also catches any modal window — Scope View's
+  *Stop Record?*, XAE's New Project — by the disabled main window it leaves behind.
+- `cleanup` left the empty parent of a nested recordings folder (`Data\` of `Data\Scope`). It
+  now removes every folder `xae save` created, deepest first, while empty.
+- `newscope` says when it writes the placeholder AmsNetId `0.0.0.0.0.0`: it did not reach the
+  runtime even on the PC running it.
 
 ### Changed
 

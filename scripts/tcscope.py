@@ -3322,6 +3322,14 @@ def cmd_newscope(args):
     }
     if not channels:
         out["retargeted"] = retargeted
+    if out["ams_net_id"] in ("", "0.0.0.0.0.0"):
+        # Field test evals/field-review-xae-acceptance.md: on the PC running the
+        # runtime itself, Scope View refused it - "Target not connected:
+        # '0.0.0.0.0.0 Port: 851'".
+        out["netid_note"] = (
+            "AmsNetId is the placeholder 0.0.0.0.0.0, which did not reach the runtime "
+            "even on the PC running it (Scope View: 'Target not connected'). Regenerate "
+            "with --netid <the target's AmsNetId> before recording.")
     if args.sample_time_ms is not None:
         # Measured in the field (evals/field-review-74dd86d.md): at Record, Scope
         # rounds down to a whole multiple of each acquisition's own task cycle,
@@ -4091,9 +4099,10 @@ def recordings_dir(sln):
     return _absolute(sln.parent / DEFAULT_RECORDINGS), "default"
 
 
-def run_xae(verb, sln, project=None, **opts):
+def run_xae(verb, sln, project=None, timeout=180, **opts):
     """One helper process per operation: after a DTE error, the same process
-    was seen reading empty lists from a project a fresh one read fine."""
+    was seen reading empty lists from a project a fresh one read fine. A
+    refusal reaches the user whole - record's states and pressed buttons too."""
     helper = os.environ.get("TCSCOPE_XAE_HELPER")     # tests put a stand-in here
     if helper:
         cmd = [helper]
@@ -4109,7 +4118,7 @@ def run_xae(verb, sln, project=None, **opts):
     for key, value in opts.items():
         cmd += [f"-{key}", str(value)]
     try:
-        proc = subprocess.run(cmd, capture_output=True, timeout=180)
+        proc = subprocess.run(cmd, capture_output=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as exc:
         fail(f"the XAE helper did not finish: {exc}")
     lines = proc.stdout.decode("utf-8", "replace").strip().splitlines()
@@ -4119,15 +4128,106 @@ def run_xae(verb, sln, project=None, **opts):
         fail(f"the XAE helper gave no answer (exit {proc.returncode})",
              proc.stderr.decode("utf-8", "replace").strip()[-600:] or None)
     if not got.get("ok"):
-        fail(got.get("error", "the XAE helper failed"), got.get("fix"))
+        emit({"ok": False, "error": got.get("error", "the XAE helper failed"),
+              **{k: v for k, v in got.items() if k not in ("ok", "error")}})
+        raise SystemExit(1)
     return got
 
 
+def _new_recording(sln, item):
+    """The recordings folder, a fresh <scope>_<yyyyMMdd-HHmmss>.svdx in it, and
+    every folder this call had to create, deepest first - so cleanup can remove
+    exactly those once they are empty, and never one the user made."""
+    folder, source = recordings_dir(sln)
+    created, up = [], folder
+    while not up.exists():
+        created.append(up)
+        up = up.parent
+    stem = re.sub(r"[^\w.-]", "_", Path(item).stem)
+    out = folder / f"{stem}_{datetime.datetime.now():%Y%m%d-%H%M%S}.svdx"
+    if out.exists():
+        fail(f"{out} already exists", "Run it again in a second.")
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder, source, out, created
+
+
+def _remove_empty_dirs(dirs, dry_run=False):
+    """Deepest first, each only while empty."""
+    removed = []
+    for d in sorted(dict.fromkeys(dirs), key=lambda d: len(d.parts), reverse=True):
+        if d.is_dir() and not any(d.iterdir()):
+            if not dry_run:
+                d.rmdir()
+            removed.append(str(d))
+    return removed
+
+
+def _save_through_xae(verb, sln, project, item, timeout=180, **opts):
+    """save and record: write into the recordings folder, track what was
+    written and created for cleanup, and report it."""
+    folder, source, out, created = _new_recording(sln, item)
+    try:
+        got = run_xae(verb, sln, project, timeout=timeout, Item=item, Out=out, **opts)
+    except SystemExit:
+        _remove_empty_dirs(created)
+        raise
+    ledger_path = config_dir() / LEDGER
+    ledger = _read_json(ledger_path)
+    ledger.setdefault("files", []).append(
+        {"svdx": str(out), "solution": str(sln), "scope": item,
+         "created_dirs": [str(d) for d in created]})
+    _write_json(ledger_path, ledger)
+    return {"ok": True, "output": str(out), "bytes": got.get("bytes"), "scope": item,
+            "recordings_dir": str(folder), "recordings_dir_source": source,
+            "next": f"tcscope.py ingest {out}",
+            "note": "Kept, across sessions, until the user says they are finished with "
+                    "this problem and `tcscope.py cleanup` runs - it can be reopened in "
+                    "Scope View or analysed again until then."}, got
+
+
+RECORD_MARGIN_S = 30      # past the record window: start-up, the ~1 s 'stopping' state
+
+
+def record_wait(path, timeout):
+    """How long `xae record` may wait for the scope to stop by itself, or a
+    refusal. The tool never presses Stop Record - early, it raises a popup that
+    blocks XAE until a person answers - so a scope that does not end on its own
+    is refused. Read from the file on disk: changes unsaved in XAE are not seen."""
+    proc = subprocess.run([sys.executable, str(Path(__file__).resolve()), "checkscope",
+                           str(path)], capture_output=True, text=True)
+    try:
+        chk = json.loads(proc.stdout)
+    except ValueError:
+        fail(f"could not read {path} to see how its recording ends",
+             proc.stderr.strip()[-400:] or None)
+    if chk.get("problems"):
+        fail(f"checkscope finds problems in {path}, so it would record nothing usable: "
+             + "; ".join(chk["problems"]), f"tcscope.py checkscope {path}")
+    if chk.get("auto_restart_record"):
+        fail(f"{Path(path).name} restarts its recording after every stop, so it never ends "
+             "by itself", "Ask the user to record it in Scope View, then run: tcscope.py xae save")
+    actions = {(g.get("action") or "").upper() for g in chk.get("trigger_groups") or []
+               if g.get("enabled")}
+    other = sorted(actions & (TRIGGER_ACTIONS_RECORDING - {"STOP_RECORD"}))
+    if other:
+        fail(f"{Path(path).name} has a {', '.join(other)} trigger; `xae record` handles a "
+             "fixed window or a Stop Record trigger only",
+             "Ask the user to record it in Scope View, then run: tcscope.py xae save")
+    if "STOP_RECORD" in actions:
+        if not timeout:
+            fail(f"{Path(path).name} stops on a Stop Record trigger, so when it ends depends "
+                 "on the event", "Give --timeout <seconds>: how long to wait for it.")
+        return timeout, "Stop Record trigger"
+    seconds = chk.get("record_seconds")
+    if chk.get("fixed_window") and seconds:
+        return timeout or seconds + RECORD_MARGIN_S, f"fixed {seconds:g} s window"
+    fail(f"{Path(path).name} has no window that ends by itself"
+         + (" (a ring buffer runs until someone stops it)" if chk.get("ring_buffer") else ""),
+         "Give it a record time or a Stop Record trigger with newscope, or ask the user to "
+         "record it in Scope View and then run: tcscope.py xae save")
+
+
 def cmd_xae(args):
-    if args.action == "record":
-        fail("starting or stopping a recording from a script does not work yet: "
-             "StartRecord and StopRecord return without error and record nothing",
-             "Ask the user to press Record in Scope View, then run: tcscope.py xae save")
     if not args.solution:
         fail("--solution is required", "Pass the .sln XAE has open, or its folder.")
     sln = solution_file(args.solution)
@@ -4141,43 +4241,41 @@ def cmd_xae(args):
                  "tcscope.py xae add <file.tcscopex> --solution <.sln>")
         emit(run_xae("add", sln, args.project, Scope=_absolute(scope)))
         return 0
+    if args.timeout is not None and not (math.isfinite(args.timeout) and args.timeout > 0):
+        fail(f"--timeout must be a positive number of seconds, not {args.timeout}")
 
-    # save
+    # save and record name a scope the project holds; with one scope it may go unnamed
     item = args.target
-    if not item:
+    scopes = None
+    if not item or args.action == "record":
         scopes = run_xae("list", sln, args.project).get("scopes") or []
+    if not item:
         if len(scopes) != 1:
-            fail(f"the Measurement project holds {len(scopes)} scopes; say which to save",
-                 "tcscope.py xae save <scope> --solution <.sln>   (scopes: "
+            fail(f"the Measurement project holds {len(scopes)} scopes; say which to {args.action}",
+                 f"tcscope.py xae {args.action} <scope> --solution <.sln>   (scopes: "
                  + ", ".join(s.get("name", "?") for s in scopes) + ")")
         item = scopes[0]["name"]
     if not item.lower().endswith(".tcscopex"):
         item += ".tcscopex"
-    folder, source = recordings_dir(sln)
-    created = None if folder.exists() else folder
-    stem = re.sub(r"[^\w.-]", "_", Path(item).stem)
-    out = folder / f"{stem}_{datetime.datetime.now():%Y%m%d-%H%M%S}.svdx"
-    if out.exists():
-        fail(f"{out} already exists", "Run it again in a second.")
-    folder.mkdir(parents=True, exist_ok=True)
-    try:
-        got = run_xae("save", sln, args.project, Item=item, Out=out)
-    except SystemExit:
-        if created and not any(created.iterdir()):
-            created.rmdir()
-        raise
-    ledger_path = config_dir() / LEDGER
-    ledger = _read_json(ledger_path)
-    ledger.setdefault("files", []).append(
-        {"svdx": str(out), "solution": str(sln), "scope": item,
-         "created_dir": str(created) if created else None})
-    _write_json(ledger_path, ledger)
-    emit({"ok": True, "output": str(out), "bytes": got.get("bytes"), "scope": item,
-          "recordings_dir": str(folder), "recordings_dir_source": source,
-          "next": f"tcscope.py ingest {out}",
-          "note": "Kept, across sessions, until the user says they are finished with "
-                  "this problem and `tcscope.py cleanup` runs - it can be reopened in "
-                  "Scope View or analysed again until then."})
+
+    if args.action == "save":
+        out, _ = _save_through_xae("save", sln, args.project, item)
+        emit(out)
+        return 0
+
+    # record - only on the user's explicit request (SKILL.md rule 4)
+    hit = next((s for s in scopes if (s.get("name") or "").lower() == item.lower()), None)
+    if hit is None:
+        fail(f"the Measurement project holds no scope named {item}",
+             "Scopes: " + (", ".join(s.get("name", "?") for s in scopes) or "none"))
+    item = hit["name"]
+    wait, ends = record_wait(hit.get("path") or "", args.timeout)
+    out, got = _save_through_xae("record", sln, args.project, item,
+                                 timeout=wait + 120, TimeoutS=wait)
+    out.update({"ends_by": ends, "waited_up_to_s": wait,
+                "recorded_s": got.get("recorded_s"), "states": got.get("states"),
+                "pressed": got.get("pressed")})
+    emit(out)
     return 0
 
 
@@ -4300,12 +4398,12 @@ def cmd_cleanup(args):
                 if not args.dry_run:
                     f.unlink()
                 deleted.append(str(f))
-        if entry.get("created_dir"):
-            dirs.append(Path(entry["created_dir"]))
-    for d in dict.fromkeys(dirs):
-        if not args.dry_run and d.is_dir() and not any(d.iterdir()):
-            d.rmdir()
-            deleted.append(str(d))
+        # created_dir: the single folder ledgers before created_dirs recorded
+        for d in entry.get("created_dirs") or [entry.get("created_dir")]:
+            if d:
+                dirs.append(Path(d))
+    if not args.dry_run:
+        deleted += _remove_empty_dirs(dirs)
     if not args.dry_run:
         ledger["files"] = remaining
         _write_json(ledger_path, ledger)
@@ -4463,15 +4561,19 @@ def build_parser():
                         "read at its compiled width. Repeat for each PLC runtime.")
     q.set_defaults(func=cmd_checkscope)
 
-    q = sub.add_parser("xae", help="add a scope to, or save a recording from, the open XAE")
+    q = sub.add_parser("xae", help="add a scope to, record and save it through, the open XAE")
     q.add_argument("action", choices=("list", "add", "save", "record"),
                    help="list: the scopes in the Measurement project. add: add a "
                         "generated .tcscopex and save the project. save: write the "
                         "recording Scope View holds to the recordings folder. "
-                        "record: not working yet")
+                        "record: ONLY when the user asks - press Start Record on the "
+                        "scope open in XAE, wait for it to stop by itself, then save")
     q.add_argument("target", nargs="?",
-                   help="add: the .tcscopex. save: the scope's name (optional with "
-                        "one scope)")
+                   help="add: the .tcscopex. save, record: the scope's name (optional "
+                        "with one scope)")
+    q.add_argument("--timeout", type=float,
+                   help="record: seconds to wait for the scope to stop by itself "
+                        "(default: its window + 30 s; required with a Stop Record trigger)")
     q.add_argument("--solution",
                    help="the .sln XAE has open, or its folder; no other XAE is touched")
     q.add_argument("--project", help="the Measurement project, when there are several")

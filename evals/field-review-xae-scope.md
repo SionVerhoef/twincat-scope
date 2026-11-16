@@ -65,6 +65,41 @@ Test scope: `newscope templates\minimal-single-channel.tcscopex`, one channel `M
   `SaveData` works). A `SaveData` after the no-op `StartRecord` wrote a larger file (31.1 kB)
   with identical samples — unexplained.
 
+## Starting a recording — a later session, same PC and scratch solution
+
+- **Dead ends:** `ScopeProject.StartRecord()` / `StopRecord()` return without error (186 ms /
+  13 ms) and record nothing. No DTE command records (every command listed, not only `Scope*`).
+  `ScopeProject.GetCommands()` lists 22 Scope View menu commands; none records. Untested and no
+  longer needed: `AttachClient`, `ConnectHeadlessServer`, a standalone recorder through TF3300.
+- **What works: XAE's own toolbar, pressed through UI Automation.** XAE's main window holds a
+  `ToolBar` named exactly `TwinCAT 3 Scope` with `Button` children `Start Record` and
+  `Stop Record`, both supporting `InvokePattern`. They act on the scope whose document is
+  **active** (`DTE.ActiveDocument.Name`). The same window also holds `Restart TwinCAT System`,
+  `Restart TwinCAT (Config Mode)`, `Start`, `Start Display`, `Stop Display` and
+  `Toggle Free Run State` — hence exact names, inside that one toolbar only.
+- **`ScopeState`** (late-bound property of `ScopeProject`): 60 idle (Start enabled, Stop
+  disabled), 50 recording (Start disabled, Stop enabled), 70 stopping — about 1 s, seen once at
+  the end of a full window, Stop still enabled. No other value seen.
+- **A full 10 s window started by script and left to stop by itself:** 60 before; 50 from +1 s to
+  +9 s; 70 at +10 s; 60 at +11 s; ended after ~12.7 s. `SaveData` then wrote 29,686 bytes: 1001
+  rows, `nCounter` rising by one per row from 50 above the value read over ADS just before the
+  press (first sample 0.5 s after it). No dialog at any point.
+- **Stopping early raises a popup that blocks XAE.** Pressing `Stop Record` at +5.6 s opened
+  *Stop Record?* — "Stop Recording? Recorded dataset will still be visible.", OK / Cancel and a
+  "Remember my answer" checkbox (a per-user XAE setting; never tick it). It is a WinForms window
+  (`WindowsForms10.Window.8.app.0.…`) owned by XAE's main window, **not** a `#32770` box. While
+  open, `ScopeState` stayed 50, late-bound calls failed or waited in the message filter, and a
+  fresh process could not find the XAE. After the user pressed OK: 60, XAE normal. Saving after
+  an early stop has not been tried.
+- **`SaveData` and an `InvalidCastException`.** A path built with `Join-Path` is a `PSObject`
+  wrapping the string; passed on as it is, COM got the wrapper and `SaveData` failed every time
+  with *Specified cast is not valid*, no dialog. Cast to `[string]`, the same call wrote the file.
+  The session first blamed a broken Scope View session (after `GetCommands()` or the popup) and
+  restarted XAE — wrong; the wrapped path was the only cause.
+- Smaller: a UI Automation `ProcessIdProperty` condition needs an `[int]`; declaring
+  `IDispatch.GetIDsOfNames` from C# with `string[]` / `int[]` marshalling crashed the calling
+  PowerShell (XAE survived) — `InvokeMember` by name is enough.
+
 ## Where recordings went, and deleting them
 
 - Scope View stores no save folder of its own; its Save dialog reopens the last folder the XAE
@@ -78,7 +113,7 @@ Test scope: `newscope templates\minimal-single-channel.tcscopex`, one channel `M
 ## Still unknown
 
 - Whether removing an item through the DTE and re-adding it avoids the reload prompt.
-- How to start or stop a recording from a script (`AttachClient` / `ConnectHeadlessServer`
-  before `StartRecord`, or the standalone `TwinCAT.Measurement.Scope.API` with TF3300).
+- Saving after a recording was stopped early; `ScopeState` values other than 50 / 60 / 70; the
+  toolbar and button names on a localised XAE.
 - A Measurement project inside a solution folder, several Measurement projects, and other XAE
   or Scope View versions.

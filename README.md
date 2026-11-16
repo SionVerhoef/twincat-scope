@@ -64,7 +64,8 @@ real compiled program (see *Status*).
 - **Through the open XAE** — `xae add` puts a generated scope into the Measurement project and
   saves it, `xae save` writes the recording Scope View holds to `<solution>\Recordings\` under a
   unique name, and `cleanup` deletes those recordings and their cache files when the analysis is
-  done. No dialogs; nothing on the Desktop. Pressing Record stays a human gesture.
+  done. No dialogs; nothing on the Desktop. Pressing Record stays a human gesture; only when
+  asked, `xae record` presses it, lets the window end by itself and saves.
 - **Presets** — save a named channel set on this PC (`presets --set lineA-tracking …`) and
   build from it with `newscope --preset`, so a tracking scope always carries the channels you
   always want. Never written into a project or this repo.
@@ -216,9 +217,9 @@ on real machines in field sessions, written up in `evals/field-review-*.md`.
 
 **Not yet verified**
 
-- The `xae` verbs against a real XAE: every call they make was measured once on TC3.1.4024
-  with Scope View 3.4 (`evals/field-review-xae-scope.md`), the helper as a whole not yet.
-  Starting or stopping a recording from a script does not work.
+- `xae record`, and the fixes after the XAE acceptance run (refusing while any modal window is
+  open), against a real XAE. `xae list | add | save`, `recordings` and `cleanup` passed that
+  run on TC3.1.4024 with Scope View 3.4 (`evals/field-review-xae-acceptance.md`).
 - The analysis verbs across a wide variety of real recordings — most real data so far comes
   from one machine.
 - A genuine saturation, and marker tables in an export.
