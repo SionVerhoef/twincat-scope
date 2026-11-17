@@ -13,7 +13,7 @@ non-elevated shell, and the other way round.
   xae_scope.ps1 list -Solution <.sln> [-Project <name>]
   xae_scope.ps1 add  -Solution <.sln> -Scope <file.tcscopex> [-Project <name>]
   xae_scope.ps1 save -Solution <.sln> -Item <name.tcscopex> -Out <file.svdx> [-Project <name>]
-  xae_scope.ps1 record -Solution <.sln> -Item <name.tcscopex> -Out <file.svdx> -TimeoutS <s> [-Project <name>]
+  xae_scope.ps1 record -Solution <.sln> -Item <name.tcscopex> -Out <file.svdx> -TimeoutS <s> [-ScopePath <file>] [-Project <name>]
 
 Prints one JSON object. Exit 0 done, 1 refused or failed, 2 bad arguments.
 
@@ -33,6 +33,7 @@ param(
     [string] $Scope,
     [string] $Item,
     [string] $Out,
+    [string] $ScopePath,
     [double] $TimeoutS = 0
 )
 $ErrorActionPreference = 'Stop'
@@ -288,7 +289,8 @@ function Get-ScopeProject($item) {
     , [System.__ComObject].InvokeMember('ScopeProject', $GP, $null, $node, $null)
 }
 # Measured on Scope View 3.4: 60 idle, 50 recording, 70 stopping (about 1 s at the end of a
-# full window). No other value has been seen.
+# full window). 30 was seen once, 0.7 s after Start Record, before a normal full window
+# (evals/field-review-xae-acceptance-2.md, R3a): any value but 60 counts as busy.
 $StateNames = @{ 60 = 'idle'; 50 = 'recording'; 70 = 'stopping' }
 function Get-ScopeState($sp) { [int][System.__ComObject].InvokeMember('ScopeState', $GP, $null, $sp, $null) }
 
@@ -345,7 +347,20 @@ function Get-ScopeButton([int] $xaePid, [string] $name) {
     }
     $hits = @($bars[0].FindAll('Children', $AND::new($PC::new($A::ControlTypeProperty, $CT::Button),
                                                      $PC::new($A::NameProperty, $name))))
-    if ($hits.Count -ne 1) { Fail "expected exactly one '$name' button in the TwinCAT 3 Scope toolbar, found $($hits.Count)" }
+    if ($hits.Count -eq 0) {
+        # A narrow XAE (half a 1920 px screen) moves the toolbar's buttons into its overflow (>>),
+        # where UI Automation sees only 'Toolbar Options' and nothing can be pressed.
+        $kids = @($bars[0].FindAll('Children', [System.Windows.Automation.Condition]::TrueCondition) |
+                  ForEach-Object { $_.Current.Name })
+        if ($kids -contains 'Toolbar Options') {
+            Fail "'$name' is not on the TwinCAT 3 Scope toolbar: XAE's window is too narrow, so the toolbar moved its buttons into its overflow (>>) - toolbar shows: $($kids -join ', ')" `
+                'Widen or maximise the XAE window so Start Record shows on the TwinCAT 3 Scope toolbar, then run again.'
+        }
+    }
+    if ($hits.Count -ne 1) {
+        Fail "expected exactly one '$name' button in the TwinCAT 3 Scope toolbar, found $($hits.Count)" `
+            "Check that the toolbar shows '$name' in XAE; otherwise press Record yourself, then run: tcscope.py xae save"
+    }
     $hits[0]
 }
 
@@ -407,20 +422,32 @@ try {
             if (Test-Inside $Out $projDir) {
                 Fail "$Out is inside the Measurement project folder $projDir" 'Save recordings outside the project folder.'
             }
-            $sp = Get-ScopeProject (Find-ScopeItem $proj $Item)
+            $found = Find-ScopeItem $proj $Item
+            # tcscope.py read the window from this file on disk; it must be the one XAE holds.
+            if ($ScopePath) {
+                $held = Get-ItemPath $found.Obj
+                if ((Full $held) -ne (Full $ScopePath)) {
+                    Fail "XAE holds $Item at $held, not at $ScopePath, which tcscope.py read its record window from" `
+                        'Run: tcscope.py xae list --solution <.sln>, and record the scope it lists.'
+                }
+            }
+            $sp = Get-ScopeProject $found
+            # The UI Automation search takes ~2 s, so it runs first and every check after it,
+            # right before the press: a check made before the search was 2 s old at the press.
+            $button = Get-ScopeButton $xae.Pid 'Start Record'
             $state = Get-ScopeState $sp
             if ($state -ne 60) {
                 $what = if ($StateNames.ContainsKey($state)) { $StateNames[$state] } else { 'a state this tool does not know' }
                 Fail "$Item is not idle: ScopeState $state ($what)" 'Wait until Scope View has stopped, save any recording it holds, then run again.'
             }
-            # The toolbar acts on the active document, not on a named scope.
+            # The toolbar acts on the active document, not on a named scope. With a designer tab
+            # in front (the system project's), XAE reports the last text document instead.
             $active = ''
             try { $active = [string] $xae.Dte.ActiveDocument.Name } catch { }
             if ($active -ne $Item) {
-                Fail "Start Record acts on the active document, which is '$active', not $Item" `
+                Fail "Start Record acts on the tab in front, and XAE does not report $Item as its active document (it reports '$active'; with a project designer in front it names the last text document instead)" `
                     "Click into $Item's tab in XAE so it is the active document, then run again."
             }
-            $button = Get-ScopeButton $xae.Pid 'Start Record'
             if (-not $button.Current.IsEnabled) { Fail "'Start Record' is not enabled in XAE" 'Is a recording already running, or the runtime stopped?' }
             Assert-NoDialog $xae ' before Start Record'
 
@@ -442,9 +469,9 @@ try {
                 Assert-NoDialog $xae " while recording ($t s after Start Record)"
                 $s = Get-ScopeState $sp
                 if ($s -ne $states[$states.Count - 1].state) { [void]$states.Add([ordered]@{ s = $t; state = $s }) }
-                if (-not $StateNames.ContainsKey($s)) {
-                    Fail "ScopeState $s after Start Record, a value this tool does not know; not touching the scope" 'Look at Scope View; save with tcscope.py xae save once it has stopped.'
-                }
+                # An unknown value is watched like any other busy state: giving up on it left the
+                # recording this tool started running and unsaved (round 2, R3a). The timeout
+                # below still ends a wait on a state that never returns to idle.
                 if ($s -ne 60) { $started = $true }
                 elseif ($started) { break }
                 elseif ($t -ge 10) {

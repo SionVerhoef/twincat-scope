@@ -2906,8 +2906,10 @@ def xae_checks():
               str(ing.get("error")))
 
         dry = x("cleanup", "--solution", sln, "--dry-run")
-        check("cleanup --dry-run lists the recording and its cache files, deletes nothing",
-              sorted(dry.get("deleted") or []) == sorted(map(str, [svdx, *cache]))
+        check("cleanup --dry-run lists the recording, its cache files and the folder it "
+              "would remove, deletes nothing",
+              sorted(dry.get("deleted") or [])
+              == sorted(map(str, [svdx, *cache, (work / "Recordings").resolve()]))
               and svdx.is_file(), str(dry))
 
         stray = work / "Recordings" / "hand_saved.svdx"   # in the folder, not ours
@@ -3080,6 +3082,18 @@ def record_checks(x, tmp, work, sln, log):
     out = x("xae", "record", "--solution", sln)
     check("xae record with several scopes and none named asks which",
           out.get("ok") is False and "say which to record" in out.get("error", ""), str(out))
+
+    # A named scope found in the Measurement folder on disk needs no `list` process
+    # before the press; the helper is told the path, to check XAE holds that file.
+    mproj = work / "Measurement"
+    shutil.copyfile(gen / "ScopeR.tcscopex", mproj / "ScopeM.tcscopex")
+    before = len(calls())
+    out = x("xae", "record", "ScopeM", "--solution", sln)
+    new = calls()[before:]
+    check("xae record of a scope on disk starts one helper process, handing it the path",
+          out.get("ok") is True and len(new) == 1 and new[0].startswith("record ")
+          and f"-ScopePath {(mproj / 'ScopeM.tcscopex').resolve()}" in new[0], str(new))
+    (mproj / "ScopeM.tcscopex").unlink()
     x("cleanup", "--solution", sln)
     (tmp / "scopes.json").unlink()
 

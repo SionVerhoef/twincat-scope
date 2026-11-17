@@ -4151,14 +4151,16 @@ def _new_recording(sln, item):
     return folder, source, out, created
 
 
-def _remove_empty_dirs(dirs, dry_run=False):
-    """Deepest first, each only while empty."""
-    removed = []
+def _remove_empty_dirs(dirs, dry_run=False, gone=()):
+    """Deepest first, each only while empty. A dry run counts the paths in
+    `gone` - what the real run would delete first - as already deleted."""
+    removed, gone = [], {os.path.normcase(str(g)) for g in gone}
     for d in sorted(dict.fromkeys(dirs), key=lambda d: len(d.parts), reverse=True):
-        if d.is_dir() and not any(d.iterdir()):
+        if d.is_dir() and all(os.path.normcase(str(c)) in gone for c in d.iterdir()):
             if not dry_run:
                 d.rmdir()
             removed.append(str(d))
+            gone.add(os.path.normcase(str(d)))
     return removed
 
 
@@ -4227,6 +4229,22 @@ def record_wait(path, timeout):
          "record it in Scope View and then run: tcscope.py xae save")
 
 
+def _scope_on_disk(sln, item, project=None):
+    """The scope file in the solution's one Measurement project folder, read
+    from disk, or None. Saves `xae record` a whole XAE look-up (a PowerShell
+    process, 1-3 s) before its press; the helper then refuses unless XAE holds
+    the item at this same path. Anything ambiguous falls back to `xae list`."""
+    name = item if item.lower().endswith(".tcscopex") else f"{item}.tcscopex"
+    projs = [p for p in sln.parent.glob("*/*.tcmproj")
+             if not project or p.stem == project]
+    if len(projs) != 1:
+        return None
+    path = projs[0].parent / name
+    if not path.is_file():
+        return None
+    return {"name": path.name, "path": str(_absolute(path))}
+
+
 def cmd_xae(args):
     if not args.solution:
         fail("--solution is required", "Pass the .sln XAE has open, or its folder.")
@@ -4247,7 +4265,12 @@ def cmd_xae(args):
     # save and record name a scope the project holds; with one scope it may go unnamed
     item = args.target
     scopes = None
-    if not item or args.action == "record":
+    on_disk = None
+    if item and args.action == "record":
+        on_disk = _scope_on_disk(sln, item, args.project)
+        if on_disk:
+            scopes = [on_disk]
+    if not item or (args.action == "record" and not on_disk):
         scopes = run_xae("list", sln, args.project).get("scopes") or []
     if not item:
         if len(scopes) != 1:
@@ -4270,8 +4293,9 @@ def cmd_xae(args):
              "Scopes: " + (", ".join(s.get("name", "?") for s in scopes) or "none"))
     item = hit["name"]
     wait, ends = record_wait(hit.get("path") or "", args.timeout)
+    extra = {"ScopePath": hit["path"]} if on_disk else {}
     out, got = _save_through_xae("record", sln, args.project, item,
-                                 timeout=wait + 120, TimeoutS=wait)
+                                 timeout=wait + 120, TimeoutS=wait, **extra)
     out.update({"ends_by": ends, "waited_up_to_s": wait,
                 "recorded_s": got.get("recorded_s"), "states": got.get("states"),
                 "pressed": got.get("pressed")})
@@ -4402,8 +4426,7 @@ def cmd_cleanup(args):
         for d in entry.get("created_dirs") or [entry.get("created_dir")]:
             if d:
                 dirs.append(Path(d))
-    if not args.dry_run:
-        deleted += _remove_empty_dirs(dirs)
+    deleted += _remove_empty_dirs(dirs, args.dry_run, gone=deleted)
     if not args.dry_run:
         ledger["files"] = remaining
         _write_json(ledger_path, ledger)

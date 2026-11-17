@@ -25,6 +25,12 @@
 - `evals/field-review-xae-acceptance.md`: the acceptance run of the XAE verbs and the pragma
   test. The acceptance brief is now round 2: A6 re-tested, A12 replaced by `xae record` checks.
 - `evals/field-review-xae-scope.md`: the field measurements these verbs are built on.
+- `evals/field-review-xae-acceptance-2.md`. From it, `xae record`: checks idle state,
+  active tab and dialogs after the ~2 s toolbar search, right before the press; finds a named
+  scope on disk instead of starting a separate `xae list` process; keeps watching on a
+  `ScopeState` it does not know (30 was seen) instead of leaving its own recording unsaved; says
+  when XAE is too narrow for the Scope toolbar's buttons. `cleanup --dry-run` also lists the
+  folders it would remove.
 - A Windows CI job runs `xae_scope.ps1` in Windows PowerShell 5.1 up to "no XAE".
 
 - `references/scope-configuration.md`: which pragmas keep a symbol from Scope, measured on
