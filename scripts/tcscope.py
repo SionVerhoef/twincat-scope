@@ -4442,7 +4442,22 @@ def cmd_cleanup(args):
         for d in entry.get("created_dirs") or [entry.get("created_dir")]:
             if d:
                 dirs.append(Path(d))
-    deleted += _remove_empty_dirs(dirs, args.dry_run, gone=deleted)
+    removed = _remove_empty_dirs(dirs, args.dry_run, gone=deleted)
+    deleted += removed
+    # A folder still holding another tracked recording (cleanup --scope) passes
+    # to that recording's entry, so the cleanup that deletes it removes the
+    # folder too - else it stays behind, forgotten (field round 4, A11).
+    left = {os.path.normcase(str(d)): d for d in dirs}
+    for r in removed:
+        left.pop(os.path.normcase(r), None)
+    for entry in remaining:
+        svdx = os.path.normcase(str(Path(entry.get("svdx", "")).resolve()))
+        for key, d in left.items():
+            if svdx.startswith(key + os.sep):
+                got = entry.setdefault("created_dirs",
+                                       [entry["created_dir"]] if entry.get("created_dir") else [])
+                if str(d) not in got:
+                    got.append(str(d))
     if not args.dry_run:
         ledger["files"] = remaining
         _write_json(ledger_path, ledger)

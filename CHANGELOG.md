@@ -21,7 +21,7 @@
   inside the *TwinCAT 3 Scope* toolbar only) on the active scope, waits for it to stop by itself,
   and saves like `xae save`, reporting each `ScopeState` it saw and every button it pressed. It
   refuses a scope that does not end on its own, needs `--timeout` with a Stop Record trigger, and
-  never presses *Stop Record*. Field-tested in rounds 2–3 (`evals/field-review-xae-acceptance-*.md`).
+  never presses *Stop Record*. Field-tested in rounds 2–4 (`evals/field-review-xae-acceptance-*.md`).
 - `evals/field-review-xae-acceptance.md`: the acceptance run of the XAE verbs and the pragma
   test. The acceptance brief is now round 2: A6 re-tested, A12 replaced by `xae record` checks.
 - `evals/field-review-xae-scope.md`: the field measurements these verbs are built on.
@@ -36,6 +36,11 @@
   stopped scope, so it can make a session's first recording; saves a recording the scope still
   holds as `<scope>_<stamp>_before-record.svdx` before pressing, so none is thrown away; and
   says that a disabled Start Record usually means the scope's tab is not in front.
+- `evals/field-review-xae-acceptance-4.md`: `xae record` accepted for release. From it, a refused
+  record no longer writes a `_before-record` copy (every check that can refuse runs before the
+  held recording is saved, and again before the press), and a recordings folder that
+  `cleanup --scope` cannot remove yet is removed by the cleanup that deletes the last recording
+  in it, instead of being forgotten.
 - A Windows CI job runs `xae_scope.ps1` in Windows PowerShell 5.1 up to "no XAE".
 
 - `references/scope-configuration.md`: which pragmas keep a symbol from Scope, measured on

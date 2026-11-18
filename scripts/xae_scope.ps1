@@ -444,11 +444,37 @@ try {
                 }
             }
             $sp = Get-ScopeProject $found
+            # Every check that can refuse, in one place: it runs once before a held recording is
+            # saved - so a refusal writes nothing (round 4) - and again right before the press.
+            $check = {
+                $st = Get-ScopeState $sp
+                if ($st -notin $Ready) {
+                    $what = if ($StateNames.ContainsKey($st)) { $StateNames[$st] } else { 'a state this tool does not know' }
+                    Fail "$Item is busy: ScopeState $st ($what)" 'Wait until Scope View has stopped, then run again.'
+                }
+                # The toolbar acts on the active document, not on a named scope. With a designer
+                # tab in front (the system project's), XAE reports the last document instead.
+                $active = ''
+                try { $active = [string] $xae.Dte.ActiveDocument.Name } catch { }
+                if ($active -ne $Item) {
+                    Fail "Start Record acts on the tab in front, and XAE does not report $Item as its active document (it reports '$active'; with a project designer in front it names the last text document instead)" `
+                        "Click into $Item's tab in XAE so it is the active document, then run again."
+                }
+                if (-not $button.Current.IsEnabled) {
+                    Fail "'Start Record' is disabled in XAE" `
+                        "XAE enables the Scope toolbar only while a scope's tab is in front: click into $Item's tab (not the system project's or another designer) and run again. If it is in front, the runtime may be stopped or the target not connected."
+                }
+                Assert-NoDialog $xae ' before Start Record'
+                $st
+            }
+            # The UI Automation search takes ~2 s, so it runs before every check: a check made
+            # before it was 2 s old at the press.
+            $button = Get-ScopeButton $xae.Pid 'Start Record'
+            $state = & $check
             # Start Record throws away the recording a stopped scope holds, which may be one the
-            # user made and never saved (round 2, R3a). So a held recording is saved first -
-            # before the toolbar search, to keep it out of the gap between check and press.
+            # user made and never saved (round 2, R3a), so a held recording is saved first.
             $heldSaved = $null
-            if ((Get-ScopeState $sp) -eq 60) {
+            if ($state -eq 60) {
                 if (-not $HeldOut) {
                     Fail "$Item holds a recording that pressing Start Record would throw away" `
                         'Save it first: tcscope.py xae save <scope> --solution <.sln>, then run again.'
@@ -457,31 +483,11 @@ try {
                 $heldSaved = $HeldOut
                 $script:Context.held_saved = $HeldOut
             }
-            # The UI Automation search takes ~2 s, so it runs first and every check after it,
-            # right before the press: a check made before the search was 2 s old at the press.
-            $button = Get-ScopeButton $xae.Pid 'Start Record'
-            $state = Get-ScopeState $sp
-            if ($state -notin $Ready) {
-                $what = if ($StateNames.ContainsKey($state)) { $StateNames[$state] } else { 'a state this tool does not know' }
-                Fail "$Item is busy: ScopeState $state ($what)" 'Wait until Scope View has stopped, then run again.'
-            }
+            $state = & $check
             if ($state -eq 60 -and -not $heldSaved) {
                 Fail "$Item stopped while this command started and now holds a recording that was not saved" `
                     'Run the command again: it saves the held recording before pressing.'
             }
-            # The toolbar acts on the active document, not on a named scope. With a designer tab
-            # in front (the system project's), XAE reports the last text document instead.
-            $active = ''
-            try { $active = [string] $xae.Dte.ActiveDocument.Name } catch { }
-            if ($active -ne $Item) {
-                Fail "Start Record acts on the tab in front, and XAE does not report $Item as its active document (it reports '$active'; with a project designer in front it names the last text document instead)" `
-                    "Click into $Item's tab in XAE so it is the active document, then run again."
-            }
-            if (-not $button.Current.IsEnabled) {
-                Fail "'Start Record' is disabled in XAE" `
-                    "XAE enables the Scope toolbar only while a scope's tab is in front: click into $Item's tab (not the system project's or another designer) and run again. If it is in front, the runtime may be stopped or the target not connected."
-            }
-            Assert-NoDialog $xae ' before Start Record'
 
             $states = New-Object System.Collections.ArrayList
             $pressed = New-Object System.Collections.ArrayList

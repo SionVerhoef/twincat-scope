@@ -2986,6 +2986,19 @@ def xae_checks():
 
         record_checks(x, tmp, work, sln, log)
 
+        # Field round 4: cleanup --scope of the scope whose save created the folder,
+        # while another scope's recording is still in it, left the folder forgotten.
+        x("recordings", "--solution", sln, "--set", "Fresh")
+        first = x("xae", "save", "ScopeF", "--solution", sln)
+        x("xae", "save", "ScopeG", "--solution", sln)
+        x("cleanup", "--solution", sln, "--scope", "ScopeF")
+        kept_dir = (work / "Fresh").is_dir()
+        x("cleanup", "--solution", sln)
+        check("a folder cleanup --scope could not remove yet goes with the last recording in it",
+              first.get("ok") is True and kept_dir and not (work / "Fresh").exists(),
+              str(list(work.iterdir())))
+        (work / "tcscope.json").unlink()
+
         gen = tmp / "ScopeC.tcscopex"
         gen.write_text("<x/>")
         out = x("xae", "add", gen, "--solution", sln)
