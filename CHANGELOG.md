@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 — 2026-11-18
 
 ### Added
 
@@ -21,28 +21,15 @@
   inside the *TwinCAT 3 Scope* toolbar only) on the active scope, waits for it to stop by itself,
   and saves like `xae save`, reporting each `ScopeState` it saw and every button it pressed. It
   refuses a scope that does not end on its own, needs `--timeout` with a Stop Record trigger, and
-  never presses *Stop Record*. Field-tested in rounds 2–4 (`evals/field-review-xae-acceptance-*.md`).
-- `evals/field-review-xae-acceptance.md`: the acceptance run of the XAE verbs and the pragma
-  test. The acceptance brief is now round 2: A6 re-tested, A12 replaced by `xae record` checks.
-- `evals/field-review-xae-scope.md`: the field measurements these verbs are built on.
-- `evals/field-review-xae-acceptance-2.md`. From it, `xae record`: checks idle state,
-  active tab and dialogs after the ~2 s toolbar search, right before the press; finds a named
-  scope on disk instead of starting a separate `xae list` process; keeps watching on a
-  `ScopeState` it does not know (30 was seen) instead of leaving its own recording unsaved; says
-  when XAE is too narrow for the Scope toolbar's buttons. `cleanup --dry-run` also lists the
-  folders it would remove.
-- `evals/field-review-xae-acceptance-3.md`. From it, `xae record` presses from Scope View's
-  *Config* state (ScopeState 20, what every scope reads after XAE opens) as well as from a
-  stopped scope, so it can make a session's first recording; saves a recording the scope still
-  holds as `<scope>_<stamp>_before-record.svdx` before pressing, so none is thrown away; and
-  says that a disabled Start Record usually means the scope's tab is not in front.
-- `evals/field-review-xae-acceptance-4.md`: `xae record` accepted for release. From it, a refused
-  record no longer writes a `_before-record` copy (every check that can refuse runs before the
-  held recording is saved, and again before the press), and a recordings folder that
-  `cleanup --scope` cannot remove yet is removed by the cleanup that deletes the last recording
-  in it, instead of being forgotten.
+  never presses *Stop Record*. It records from a freshly opened XAE as well as after a
+  recording, and first saves a recording the scope still holds as
+  `<scope>_<stamp>_before-record.svdx`, so none is thrown away — only once every check that can
+  refuse has passed. Its checks (state, tab in front, dialogs) run right before the press, about
+  2–3 s after the command starts. It refuses a recording in progress, a designer tab in front, and
+  an XAE too narrow to show the Scope toolbar's buttons, each saying why.
+- `evals/field-review-xae-scope.md`, `evals/field-review-xae-acceptance.md` and `-2` to `-4`:
+  the field measurements behind these verbs, and their acceptance on a real XAE over four rounds.
 - A Windows CI job runs `xae_scope.ps1` in Windows PowerShell 5.1 up to "no XAE".
-
 - `references/scope-configuration.md`: which pragmas keep a symbol from Scope, measured on
   TC3.1.4024: `hide`, `tc_no_symbol` and `TcNoSymbol` on a variable, and `hide` on a block's
   member, do; `symbol := 'none'`, `symbol := 'read'`, `OPC.UA.DA := '0'` and any of them on a
@@ -56,8 +43,9 @@
   that does not answer is reported as busy, not missing.
 - The dialog check saw only message boxes. It now also catches any modal window — Scope View's
   *Stop Record?*, XAE's New Project — by the disabled main window it leaves behind.
-- `cleanup` left the empty parent of a nested recordings folder (`Data\` of `Data\Scope`). It
-  now removes every folder `xae save` created, deepest first, while empty.
+- `cleanup` left the empty parent of a nested recordings folder (`Data\` of `Data\Scope`), and
+  forgot a folder that `cleanup --scope` could not remove yet. It now removes every folder
+  `xae save` created, deepest first, once empty; `--dry-run` lists those folders too.
 - `newscope` says when it writes the placeholder AmsNetId `0.0.0.0.0.0`: it did not reach the
   runtime even on the PC running it.
 
