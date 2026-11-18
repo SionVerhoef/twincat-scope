@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.1 — 2026-11-18
+
+### Changed
+
+- `SKILL.md`: the task-routing row for ST / PLC code now loads `twincat-st` if installed, as the
+  intro already said. When the data points to an NC axis's configuration (lag monitoring, Kv,
+  scaling, homing), the agent loads the companion skill `twincat-motion` if installed, and
+  otherwise hands off. The description still names no sibling skill, so this skill still ships
+  alone. `README.md` lists both companions.
+
 ## 1.3.0 — 2026-11-18
 
 ### Added
