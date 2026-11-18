@@ -13,7 +13,7 @@ non-elevated shell, and the other way round.
   xae_scope.ps1 list -Solution <.sln> [-Project <name>]
   xae_scope.ps1 add  -Solution <.sln> -Scope <file.tcscopex> [-Project <name>]
   xae_scope.ps1 save -Solution <.sln> -Item <name.tcscopex> -Out <file.svdx> [-Project <name>]
-  xae_scope.ps1 record -Solution <.sln> -Item <name.tcscopex> -Out <file.svdx> -TimeoutS <s> [-ScopePath <file>] [-Project <name>]
+  xae_scope.ps1 record -Solution <.sln> -Item <name.tcscopex> -Out <file.svdx> -TimeoutS <s> [-ScopePath <file>] [-HeldOut <file.svdx>] [-Project <name>]
 
 Prints one JSON object. Exit 0 done, 1 refused or failed, 2 bad arguments.
 
@@ -34,6 +34,7 @@ param(
     [string] $Item,
     [string] $Out,
     [string] $ScopePath,
+    [string] $HeldOut,
     [double] $TimeoutS = 0
 )
 $ErrorActionPreference = 'Stop'
@@ -80,6 +81,11 @@ if ($Verb -in @('save', 'record')) {
     $Out = Full $Out
     if (-not (Test-Path -LiteralPath (Split-Path $Out) -PathType Container)) { Fail "the folder of $Out does not exist" }
     if (Test-Path -LiteralPath $Out) { Fail "refusing to overwrite $Out" }
+}
+if ($Verb -eq 'record' -and $HeldOut) {
+    if ([IO.Path]::GetExtension($HeldOut) -ne '.svdx') { Usage "-HeldOut must be a .svdx, got '$HeldOut'" }
+    $HeldOut = Full $HeldOut
+    if (Test-Path -LiteralPath $HeldOut) { Fail "refusing to overwrite $HeldOut" }
 }
 if ($Verb -eq 'record' -and -not ($TimeoutS -gt 0)) {
     Usage 'record needs -TimeoutS <seconds>: how long to wait for the scope to stop by itself'
@@ -288,10 +294,16 @@ function Get-ScopeProject($item) {
     $node = [System.__ComObject].InvokeMember('Object', $GP, $null, $item.Obj, $null)
     , [System.__ComObject].InvokeMember('ScopeProject', $GP, $null, $node, $null)
 }
-# Measured on Scope View 3.4: 60 idle, 50 recording, 70 stopping (about 1 s at the end of a
-# full window). 30 was seen once, 0.7 s after Start Record, before a normal full window
-# (evals/field-review-xae-acceptance-2.md, R3a): any value but 60 counts as busy.
-$StateNames = @{ 60 = 'idle'; 50 = 'recording'; 70 = 'stopping' }
+# Measured on Scope View 3.4 (evals/field-review-xae-acceptance-2.md and -3.md):
+#   20  Config: holds no recording - every scope after XAE opens; SaveData throws
+#       'Invalid ScopeState! Reply requested, actual: Config', writes nothing, no dialog
+#   50  recording
+#   60  stopped, holding a recording that SaveData saves (and still holds after the save)
+#   70  stopping, about 1 s at the end of a full window
+# 30 was seen once, 0.7 s after Start Record, before a normal full window. Only 20 and 60 are
+# ready for Start Record; anything else counts as busy.
+$StateNames = @{ 20 = 'config, holds no recording'; 50 = 'recording'; 60 = 'stopped, holds a recording'; 70 = 'stopping' }
+$Ready = @(20, 60)
 function Get-ScopeState($sp) { [int][System.__ComObject].InvokeMember('ScopeState', $GP, $null, $sp, $null) }
 
 function Save-Recording($sp, [string] $out) {
@@ -432,13 +444,30 @@ try {
                 }
             }
             $sp = Get-ScopeProject $found
+            # Start Record throws away the recording a stopped scope holds, which may be one the
+            # user made and never saved (round 2, R3a). So a held recording is saved first -
+            # before the toolbar search, to keep it out of the gap between check and press.
+            $heldSaved = $null
+            if ((Get-ScopeState $sp) -eq 60) {
+                if (-not $HeldOut) {
+                    Fail "$Item holds a recording that pressing Start Record would throw away" `
+                        'Save it first: tcscope.py xae save <scope> --solution <.sln>, then run again.'
+                }
+                [void](Save-Recording $sp $HeldOut)
+                $heldSaved = $HeldOut
+                $script:Context.held_saved = $HeldOut
+            }
             # The UI Automation search takes ~2 s, so it runs first and every check after it,
             # right before the press: a check made before the search was 2 s old at the press.
             $button = Get-ScopeButton $xae.Pid 'Start Record'
             $state = Get-ScopeState $sp
-            if ($state -ne 60) {
+            if ($state -notin $Ready) {
                 $what = if ($StateNames.ContainsKey($state)) { $StateNames[$state] } else { 'a state this tool does not know' }
-                Fail "$Item is not idle: ScopeState $state ($what)" 'Wait until Scope View has stopped, save any recording it holds, then run again.'
+                Fail "$Item is busy: ScopeState $state ($what)" 'Wait until Scope View has stopped, then run again.'
+            }
+            if ($state -eq 60 -and -not $heldSaved) {
+                Fail "$Item stopped while this command started and now holds a recording that was not saved" `
+                    'Run the command again: it saves the held recording before pressing.'
             }
             # The toolbar acts on the active document, not on a named scope. With a designer tab
             # in front (the system project's), XAE reports the last text document instead.
@@ -448,7 +477,10 @@ try {
                 Fail "Start Record acts on the tab in front, and XAE does not report $Item as its active document (it reports '$active'; with a project designer in front it names the last text document instead)" `
                     "Click into $Item's tab in XAE so it is the active document, then run again."
             }
-            if (-not $button.Current.IsEnabled) { Fail "'Start Record' is not enabled in XAE" 'Is a recording already running, or the runtime stopped?' }
+            if (-not $button.Current.IsEnabled) {
+                Fail "'Start Record' is disabled in XAE" `
+                    "XAE enables the Scope toolbar only while a scope's tab is in front: click into $Item's tab (not the system project's or another designer) and run again. If it is in front, the runtime may be stopped or the target not connected."
+            }
             Assert-NoDialog $xae ' before Start Record'
 
             $states = New-Object System.Collections.ArrayList
@@ -472,10 +504,10 @@ try {
                 # An unknown value is watched like any other busy state: giving up on it left the
                 # recording this tool started running and unsaved (round 2, R3a). The timeout
                 # below still ends a wait on a state that never returns to idle.
-                if ($s -ne 60) { $started = $true }
+                if ($s -notin $Ready) { $started = $true }
                 elseif ($started) { break }
                 elseif ($t -ge 10) {
-                    Fail "Start Record was pressed but $Item never started recording (ScopeState stayed 60 for 10 s)" `
+                    Fail "Start Record was pressed but $Item never started recording (ScopeState stayed $s for 10 s)" `
                         "Scope View's Error List says why - often an unknown symbol, or a target that is not connected."
                 }
                 if ($t -ge $TimeoutS) {
@@ -486,7 +518,8 @@ try {
             $recorded = [math]::Round($sw.Elapsed.TotalSeconds, 1)
             $ms = Save-Recording $sp $Out
             Emit ([ordered]@{ ok = $true; path = $Out; bytes = (Get-Item -LiteralPath $Out).Length; item = $Item;
-                    project = $proj.Name; ms = $ms; recorded_s = $recorded; states = $states; pressed = $pressed }) 0
+                    project = $proj.Name; ms = $ms; recorded_s = $recorded; states = $states; pressed = $pressed;
+                    held_saved = $heldSaved }) 0
         }
     }
 } finally {

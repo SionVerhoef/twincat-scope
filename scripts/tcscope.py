@@ -4168,18 +4168,34 @@ def _save_through_xae(verb, sln, project, item, timeout=180, **opts):
     """save and record: write into the recordings folder, track what was
     written and created for cleanup, and report it."""
     folder, source, out, created = _new_recording(sln, item)
+    # record first saves a recording the scope already holds - possibly the
+    # user's, never saved - since Start Record throws it away. It is tracked
+    # like any other, also when record fails after saving it.
+    held = out.with_name(f"{out.stem}_before-record.svdx") if verb == "record" else None
+    if held:
+        opts["HeldOut"] = held
+
+    def track(paths):
+        ledger_path = config_dir() / LEDGER
+        ledger = _read_json(ledger_path)
+        for p in paths:
+            ledger.setdefault("files", []).append(
+                {"svdx": str(p), "solution": str(sln), "scope": item,
+                 "created_dirs": [str(d) for d in created]})
+        _write_json(ledger_path, ledger)
+
     try:
         got = run_xae(verb, sln, project, timeout=timeout, Item=item, Out=out, **opts)
     except SystemExit:
-        _remove_empty_dirs(created)
+        if held and held.is_file():
+            track([held])
+        else:
+            _remove_empty_dirs(created)
         raise
-    ledger_path = config_dir() / LEDGER
-    ledger = _read_json(ledger_path)
-    ledger.setdefault("files", []).append(
-        {"svdx": str(out), "solution": str(sln), "scope": item,
-         "created_dirs": [str(d) for d in created]})
-    _write_json(ledger_path, ledger)
-    return {"ok": True, "output": str(out), "bytes": got.get("bytes"), "scope": item,
+    held_saved = held if held and held.is_file() else None
+    track([p for p in (held_saved, out) if p])
+    extra = {"held_saved": str(held_saved)} if held_saved else {}
+    return {"ok": True, "output": str(out), "bytes": got.get("bytes"), "scope": item, **extra,
             "recordings_dir": str(folder), "recordings_dir_source": source,
             "next": f"tcscope.py ingest {out}",
             "note": "Kept, across sessions, until the user says they are finished with "

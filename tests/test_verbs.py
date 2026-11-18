@@ -2836,6 +2836,11 @@ def xae_checks():
             "opt = {a[i][1:]: a[i + 1] for i in range(1, len(a) - 1, 2)}\n"
             "states = [{'s': 0.0, 'state': 60}, {'s': 0.5, 'state': 50}, {'s': 10.5, 'state': 70},\n"
             "          {'s': 11.5, 'state': 60}]\n"
+            "if a[0] == 'record' and opt.get('Item', '').startswith('ScopeHeld'):\n"
+            "    open(opt['HeldOut'], 'wb').write(b'held')\n"
+            "    if opt['Item'] == 'ScopeHeldFail.tcscopex':\n"
+            "        print(json.dumps({'ok': False, 'error': 'busy', 'held_saved': opt['HeldOut']}))\n"
+            "        sys.exit(1)\n"
             "if a[0] == 'record' and opt.get('Item') == 'ScopeBusy.tcscopex':\n"
             "    print(json.dumps({'ok': False, 'error': 'XAE shows a dialog while recording',\n"
             "                      'fix': 'Answer it', 'pressed': ['Start Record'], 'states': states[:2]}))\n"
@@ -3024,7 +3029,7 @@ def record_checks(x, tmp, work, sln, log):
               scope("ScopeTrig", r"(<TriggerModule[^>]*>\s*)<SubMember />",
                     r"\1<SubMember><TriggerGroup><TriggerAction>STOP_RECORD</TriggerAction>"
                     r"</TriggerGroup></SubMember>"),
-              scope("ScopeBusy")]
+              scope("ScopeBusy"), scope("ScopeHeld"), scope("ScopeHeldFail")]
     (tmp / "scopes.json").write_text(json.dumps(scopes))
     calls = lambda: log.read_text().splitlines()
 
@@ -3075,6 +3080,25 @@ def record_checks(x, tmp, work, sln, log):
           out.get("ok") is False and out.get("error") == "XAE shows a dialog while recording"
           and out.get("fix") == "Answer it" and out.get("pressed") == ["Start Record"]
           and len(out.get("states") or []) == 2, str(out))
+
+    out = x("xae", "record", "ScopeR", "--solution", sln)
+    rec = calls()[-1]
+    check("xae record hands the helper a _before-record path for a recording the scope holds",
+          re.search(r"-HeldOut \S+ScopeR_\d{8}-\d{6}_before-record\.svdx", rec)
+          and "held_saved" not in out, rec + str(out))
+
+    out = x("xae", "record", "ScopeHeld", "--solution", sln)
+    held = Path(out.get("held_saved") or "")
+    dry = x("cleanup", "--solution", sln, "--dry-run").get("deleted") or []
+    check("a held recording saved before the press is reported and tracked for cleanup",
+          out.get("ok") is True and held.is_file() and held.name.endswith("_before-record.svdx")
+          and str(held) in dry and out.get("output") in dry, str(out))
+
+    out = x("xae", "record", "ScopeHeldFail", "--solution", sln)
+    held = Path(out.get("held_saved") or "")
+    dry = x("cleanup", "--solution", sln, "--dry-run").get("deleted") or []
+    check("a held recording saved before a refusal is still reported and tracked",
+          out.get("ok") is False and held.is_file() and str(held) in dry, str(out))
 
     out = x("xae", "record", "ScopeNope", "--solution", sln)
     check("xae record refuses a scope the project does not hold",
