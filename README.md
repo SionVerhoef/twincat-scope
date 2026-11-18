@@ -116,7 +116,7 @@ git submodule add https://github.com/SionVerhoef/twincat-scope .agents/skills/tw
 Pin a release rather than following `main`, and commit the pin:
 
 ```bash
-git -C .claude/skills/twincat-scope checkout v1.2.0
+git -C .claude/skills/twincat-scope checkout v1.3.0
 git add .claude/skills/twincat-scope
 ```
 
@@ -125,7 +125,7 @@ afterwards needs `git clone --recurse-submodules <your-repo>`, or `git submodule
 in an existing clone.
 
 If your team would rather not use submodules, `tools/update-skill.ps1` downloads a release zip
-instead (`-Version v1.2.0`, or the latest release by default). Its default target is the
+instead (`-Version v1.3.0`, or the latest release by default). Its default target is the
 Copilot folder, so for Claude Code pass `-Target .claude\skills\twincat-scope`. A copy of the
 script saved from a browser is blocked by the usual `RemoteSigned` policy until you unblock it:
 
