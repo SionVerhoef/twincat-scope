@@ -1,16 +1,27 @@
 # Field test — XAE verbs acceptance, and which pragmas hide a symbol from Scope
 
-**Round 2.** Round 1 ran against `631571e`; its report is
-`evals/field-review-xae-acceptance.md`. This round re-runs **Part A** — A6 (refusal while a
-dialog is open) and A12 (now the `xae record` checks R1–R4 below) changed, the rest must still
-pass. **Skip Part B**: round 1 settled it, and `references/scope-configuration.md` now carries
-the result.
+**Round 4 — the release check for `xae record`.** Earlier rounds: 1 against `631571e`
+(`evals/field-review-xae-acceptance.md`), 2 against `426d514` (`-2.md`), 3 against `565a329`
+(`-3.md`). Round 3 passed everything it ran except one blocker: `xae record` refused Scope
+View's *Config* state (ScopeState 20, what every scope reads after XAE opens), so it could not
+make a session's first recording. **Run only:** A1, A11, R1, R3 and probe P3, with the setup they
+need (A3, A7; R3a adds ScopeE). Run **A11 last**, after P3, so it also cleans up what R1 wrote. **Skip** everything else and Part B; write "not run: passed in
+round 2 or 3" for each.
+
+What changed, so you know what to look at:
+
+- `xae record` presses from ScopeState 20 (Config, holds nothing) as well as 60 (stopped,
+  holds a recording). Anything else is refused as busy.
+- At 60 it first saves the held recording as `<scope>_<stamp>_before-record.svdx` (output field
+  `held_saved`), because Start Record throws it away. At 20 it saves nothing.
+- A disabled Start Record is refused with a fix that names the usual cause: the scope's tab is
+  not in front.
 
 **Read this cold.** It assumes you have this repository, a Windows PC with TwinCAT XAE, and
 nothing else: no earlier conversation, no issue tracker, no other repository. Everything you
 need is here or in the files it names.
 
-**Your only output is one Markdown file:** `evals/field-review-xae-acceptance-2.md` (§7). Do not
+**Your only output is one Markdown file:** `evals/field-review-xae-acceptance-4.md` (§7). Do not
 commit, push or open a pull request, and do not change any code in this repository. If a check
 finds a bug, describe it in the report with the exact command and output; the maintainer fixes it.
 
@@ -51,7 +62,7 @@ Part B measures all three. **Measure and quote. Do not guess.**
   "a TwinCAT 3.1 engineering PC" with its exact build number. Never write a customer, site,
   machine or project name, an AMS NetId (write `1.2.3.4.1.1`), an IP address, a hostname or a
   user name. Redact paths to `C:\work\Scratch\…`. Before you hand the report over, run
-  `git add -N evals\field-review-xae-acceptance-2.md` (marks it for the checker, commits nothing),
+  `git add -N evals\field-review-xae-acceptance-4.md` (marks it for the checker, commits nothing),
   then `py -3 scripts\check_private.py`, which must print nothing. It only scans files git knows.
 - **Scratch solution only.** Never point any of this at a solution holding a machine project.
 - **Never activate, log in, download, or switch Run/Config mode yourself** (`SKILL.md` rule 2).
@@ -60,7 +71,7 @@ Part B measures all three. **Measure and quote. Do not guess.**
 - **Never press Record or start a recording yourself** (`SKILL.md` rule 4). The user records —
   except in R1 and R3, where the user asks you, in words, to run `xae record` and watches XAE
   while it runs. Never press Stop Record, never answer the *Stop Record?* popup. Keep every
-  recording to the scopes generated below: 10 ms, at most 10 s.
+  recording to the scopes generated below: 10 ms, at most 10 s (ScopeE: 60 s, for R3a only).
 - **Any dialog is a result.** Quote its title and text exactly, say which button you pressed.
 - **Building is allowed** (Build → Build Solution): it writes the `.tmc` and touches no target.
 
@@ -167,11 +178,14 @@ foreach ($n in 'A','B','C','D') {
   tc newscope templates\minimal-single-channel.tcscopex -o "C:\work\gen\Scope$n.tcscopex" `
      --channels "MAIN.nCounter:UDINT" --sample-time-ms 10 --record-time 10 --netid $netid
 }
+tc newscope templates\minimal-single-channel.tcscopex -o "C:\work\gen\ScopeE.tcscopex" `
+   --channels "MAIN.nCounter:UDINT" --sample-time-ms 10 --record-time 60 --netid $netid
 ```
 
 Pass `--netid` from the start: in round 1 the default `0.0.0.0.0.0` did not reach the runtime
 even on the same PC. That NetId stays on the PC; the report says `1.2.3.4.1.1`. ScopeD is used
-only in R2.
+only in R2. ScopeE has a **60 s** window, for R3(a): long enough to still be recording when the
+command starts after a chat round trip.
 
 ## 4. Part A — the XAE verbs
 
@@ -189,25 +203,36 @@ Quote every command with its full output. "Clean" means `git status` in `C:\work
 | A8 | **With the user, on the running runtime:** the user opens ScopeB in XAE, presses Record and lets the 10 s window stop. Then `tc xae save ScopeB --solution $sln` | no dialog; `C:\work\Scratch\Recordings\ScopeB_<yyyyMMdd-HHmmss>.svdx` exists; `git status` shows `?? Recordings/` | the output, file size |
 | A9 | `tc checkscope <that .svdx>`, then `ingest` it and run `manifest` on the Parquet path `ingest` prints | about 100 Hz, about 10 s, channel `nCounter`, no gaps | the key numbers |
 | A10 | `tc recordings --solution $sln --set Data\Scope`. Close XAE completely, reopen the solution by hand, have the user record ScopeB again, `tc xae save ScopeB --solution $sln`, then `tc recordings --solution $sln` | `tcscope.json` beside the `.sln` holds `Data/Scope`; the second recording lands in `C:\work\Scratch\Data\Scope\`; `recordings` names the project setting as its source | outputs; content of `tcscope.json` |
-| A11 | `tc cleanup --solution $sln --dry-run`, then `tc cleanup --solution $sln --scope ScopeB`, then `tc cleanup --solution $sln` | dry run lists both recordings and their cache files and deletes nothing; the real runs delete exactly those; the folders `xae save` created disappear once empty; XAE stays open and `xae list` still works | outputs; `git status` after (only `tcscope.json` may remain) |
+| A11 | `tc cleanup --solution $sln --dry-run`, then `tc cleanup --solution $sln --scope ScopeB`, then `tc cleanup --solution $sln` | dry run lists every recording `xae save` and `xae record` wrote (the `_before-record` ones too), their cache files **and the folders the real run removes**, and deletes nothing; the real runs delete exactly those; the folders `xae save` created disappear once empty; XAE stays open and `xae list` still works | outputs; `git status` after (only `tcscope.json` may remain) |
 | A12 | R1–R4 below | each passes | as listed there |
 | A13 | Close XAE. `subst S: C:\work`. Open `S:\Scratch\Scratch.sln` in XAE by hand. `tc xae list --solution S:\Scratch\Scratch.sln`, then `xae add C:\work\gen\ScopeC.tcscopex --solution S:\Scratch\Scratch.sln`. Afterwards close XAE and `subst S: /d` | XAE is found by the `S:` path; the add works | outputs; any path written as `C:\…` where `S:\…` was expected |
 | A14 | Throughout A2–A13 | no reload prompt except the one A6 provokes | every unexpected dialog, with the step it followed |
 
 ### A12 — `xae record` (R1–R4)
 
-Use ScopeB, the scope that recorded in A8 (generated with `--netid`; the default NetId does not
+Use ScopeB, added in A7 (generated with `--netid`; the default NetId does not
 connect). Before each recording, read `MAIN.nCounter` over ADS and note it.
 
 | # | Do | Pass when | Record |
 |---|---|---|---|
-| R1 | The user asks you to record. The user clicks into the scope's tab so it is the active document. `tc xae record <scope> --solution $sln` | no dialog; output `ok`, `pressed` is exactly `["Start Record"]`, `states` go 60 → 50 → (70) → 60; the `.svdx` lands in the recordings folder; `ingest` + `manifest` show ~100 Hz, ~10 s, `nCounter` starting above the value read before; the user confirms nothing else happened in XAE (no restart, no mode change) | the output; the key numbers; the time it took |
+| R1 | Four records of ScopeB, in this order. Each time the user asks you, in words, and has ScopeB's tab in front. **(a) First of a session:** close XAE completely, reopen the solution by hand, open ScopeB, record nothing, maximise XAE; `tc xae record ScopeB --solution $sln`. **(b) Half width:** the user snaps XAE to half the screen; run it again. **(c) Straight after (a):** XAE maximised again; run it again — ScopeB still holds (a)'s recording. **(d) After the user's own recording:** the user presses Record by hand and lets the 10 s window stop; then run it again | (a) `ok`, `pressed` exactly `["Start Record"]`, `states` start at 20 and end at 60, no `held_saved`; `ingest` + `manifest` ~100 Hz, ~10 s, `nCounter` above the value read before. (b) refused, too narrow, nothing pressed. (c) `ok`, with `held_saved` = `ScopeB_<stamp>_before-record.svdx`; `ingest` it — the same samples as (a)'s recording (first/last `nCounter`, rows). (d) `ok`, `held_saved` holds the user's recording — its `nCounter` range falls between the values read before the user's press and before the command. In all four no dialog, and the user confirms nothing else happened in XAE | the four outputs and times; key numbers of every `.svdx`; how long after the command started the press came |
 | R2 | The user presses Record **by hand** and, after ~3 s, Stop Record, so the *Stop Record?* popup opens. Leave it open. Run `tc xae list`, `tc xae add C:\work\gen\ScopeD.tcscopex`, `tc xae save <scope>` and `tc xae record <scope>` (each `--solution $sln`) | each refuses within a few seconds, quoting the popup's title; nothing changes in git. Then the user answers the popup | the four outputs and their times |
-| R3 | Three refusals, nothing pressed: (a) the user presses Record by hand and you run `tc xae record <scope>` straight away; (b) with a **different** document active; (c) on a scope with no end — in Scope View the user switches the scope to *Ringbuffer* and saves it | (a) refused, quoting `ScopeState 50`; (b) refused, naming the active document; (c) refused, naming the ring buffer; in all three no recording starts from the command | the three outputs |
+| R3 | Three refusals, nothing pressed: (a) add ScopeE (`tc xae add C:\work\gen\ScopeE.tcscopex`); the user opens it, presses Record by hand and asks you to record it while it runs; you run `tc xae record ScopeE` straight away; (b) the user clicks into **ScopeB's** tab, then into the system project's tab, so XAE still reports ScopeB as its active document while a designer is in front; `tc xae record ScopeB`; (c) on a scope with no end — in Scope View the user switches ScopeB to *Ringbuffer* and saves it | (a) refused as busy, quoting `ScopeState 50`; no `pressed` field and no `held_saved`; the user's recording runs on to its 60 s. (b) refused: "'Start Record' is disabled", with the fix naming the tab in front. (c) refused, naming the ring buffer. In all three no recording starts from the command | the three outputs |
 | R4 | With no dialog open, the user drags a tool window (Error List, Output) out so it **floats**. `tc xae list`. Then the user opens File → New → Project and leaves that window open. `tc xae list` again | first `ok` (a floating tool window is not a dialog); second refused, quoting the New Project window | both outputs |
 
-Finish Part A by removing ScopeA–C from the project by hand and `git checkout -- . ; git clean -fd`
-in Scratch, so it is clean again.
+### Round 4 probe — does saving one scope's configuration drop another's recording? (P3)
+
+In round 3 a held recording disappeared without anyone saving it; every scope read Config
+afterwards. The only change in between was the user saving another scope's configuration. A
+measurement, not pass/fail.
+
+| # | Do | Record |
+|---|---|---|
+| P3 | Do it before R3(c). The user records ScopeE by hand and lets it stop, then in Scope View changes something harmless in ScopeB (a channel colour) and saves ScopeB. Then `tc xae save ScopeE --solution $sln` | the output: a `.svdx` (recording still held) or "actual: Config" (dropped); any dialog |
+
+Finish Part A by removing only what it added: `tc cleanup --solution $sln`, ScopeA, ScopeB and ScopeE
+removed from the project by hand, the `.tcmproj` restored from git, `tcscope.json` deleted.
+Leave anything in Scratch that Part A did not make.
 
 ## 5. Part B — which pragmas hide a symbol
 
@@ -274,18 +299,20 @@ user; do those even if nothing else runs.
 
 ## 7. Report
 
-Write `evals/field-review-xae-acceptance-2.md` and nothing else. Open it with: the repository
+Write `evals/field-review-xae-acceptance-4.md` and nothing else. Open it with: the repository
 commit you tested; TwinCAT build, Windows version, Windows PowerShell version, elevated or not;
 Python version and whether `uv` was used; whether a runtime and a user were available.
 
 Then:
 
-- **Part A:** one section per check A1–A14 (A12 as R1–R4) with the command, its quoted output (redacted per §2),
+- **Part A:** one section per check A1–A14 (A12 as R1–R4), then P3, with the command, its quoted output (redacted per §2),
   and **pass**, **fail** or **not run, because…**. For a fail, say what you expected and what
   happened instead.
-- **Part B:** round 1 only — skip it in round 2 (and answers 2–3 below).
+- **Part B:** round 1 only — skip it in round 4 (and answers 2–3 below).
 - **Answers**, one short paragraph each:
   1. Are `xae add | save | list | record`, `recordings` and `cleanup` fit for use? Which fails block it?
+  4. (Round 4) Is `xae record` fit for release? Does saving one scope drop another's held
+     recording (P3)?
   2. Which pragmas keep a symbol from Scope, including `symbol := 'none'` and a pragma on a
      block's declaration?
   3. Does a hidden member still appear as a `SubItem` in the `.tmc`? If so, quote the XML that
@@ -293,6 +320,6 @@ Then:
      learn to flag it.
 - **Surprises:** anything unexpected, even off-question.
 
-Run `git add -N evals\field-review-xae-acceptance-2.md` and `py -3 scripts\check_private.py` once
+Run `git add -N evals\field-review-xae-acceptance-4.md` and `py -3 scripts\check_private.py` once
 more (it must print nothing), then tell the user the report is ready at
-`evals/field-review-xae-acceptance-2.md`. Do not commit it.
+`evals/field-review-xae-acceptance-4.md`. Do not commit it.

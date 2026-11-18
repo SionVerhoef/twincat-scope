@@ -2836,6 +2836,11 @@ def xae_checks():
             "opt = {a[i][1:]: a[i + 1] for i in range(1, len(a) - 1, 2)}\n"
             "states = [{'s': 0.0, 'state': 60}, {'s': 0.5, 'state': 50}, {'s': 10.5, 'state': 70},\n"
             "          {'s': 11.5, 'state': 60}]\n"
+            "if a[0] == 'record' and opt.get('Item', '').startswith('ScopeHeld'):\n"
+            "    open(opt['HeldOut'], 'wb').write(b'held')\n"
+            "    if opt['Item'] == 'ScopeHeldFail.tcscopex':\n"
+            "        print(json.dumps({'ok': False, 'error': 'busy', 'held_saved': opt['HeldOut']}))\n"
+            "        sys.exit(1)\n"
             "if a[0] == 'record' and opt.get('Item') == 'ScopeBusy.tcscopex':\n"
             "    print(json.dumps({'ok': False, 'error': 'XAE shows a dialog while recording',\n"
             "                      'fix': 'Answer it', 'pressed': ['Start Record'], 'states': states[:2]}))\n"
@@ -2906,8 +2911,10 @@ def xae_checks():
               str(ing.get("error")))
 
         dry = x("cleanup", "--solution", sln, "--dry-run")
-        check("cleanup --dry-run lists the recording and its cache files, deletes nothing",
-              sorted(dry.get("deleted") or []) == sorted(map(str, [svdx, *cache]))
+        check("cleanup --dry-run lists the recording, its cache files and the folder it "
+              "would remove, deletes nothing",
+              sorted(dry.get("deleted") or [])
+              == sorted(map(str, [svdx, *cache, (work / "Recordings").resolve()]))
               and svdx.is_file(), str(dry))
 
         stray = work / "Recordings" / "hand_saved.svdx"   # in the folder, not ours
@@ -2979,6 +2986,19 @@ def xae_checks():
 
         record_checks(x, tmp, work, sln, log)
 
+        # Field round 4: cleanup --scope of the scope whose save created the folder,
+        # while another scope's recording is still in it, left the folder forgotten.
+        x("recordings", "--solution", sln, "--set", "Fresh")
+        first = x("xae", "save", "ScopeF", "--solution", sln)
+        x("xae", "save", "ScopeG", "--solution", sln)
+        x("cleanup", "--solution", sln, "--scope", "ScopeF")
+        kept_dir = (work / "Fresh").is_dir()
+        x("cleanup", "--solution", sln)
+        check("a folder cleanup --scope could not remove yet goes with the last recording in it",
+              first.get("ok") is True and kept_dir and not (work / "Fresh").exists(),
+              str(list(work.iterdir())))
+        (work / "tcscope.json").unlink()
+
         gen = tmp / "ScopeC.tcscopex"
         gen.write_text("<x/>")
         out = x("xae", "add", gen, "--solution", sln)
@@ -3022,7 +3042,7 @@ def record_checks(x, tmp, work, sln, log):
               scope("ScopeTrig", r"(<TriggerModule[^>]*>\s*)<SubMember />",
                     r"\1<SubMember><TriggerGroup><TriggerAction>STOP_RECORD</TriggerAction>"
                     r"</TriggerGroup></SubMember>"),
-              scope("ScopeBusy")]
+              scope("ScopeBusy"), scope("ScopeHeld"), scope("ScopeHeldFail")]
     (tmp / "scopes.json").write_text(json.dumps(scopes))
     calls = lambda: log.read_text().splitlines()
 
@@ -3074,12 +3094,43 @@ def record_checks(x, tmp, work, sln, log):
           and out.get("fix") == "Answer it" and out.get("pressed") == ["Start Record"]
           and len(out.get("states") or []) == 2, str(out))
 
+    out = x("xae", "record", "ScopeR", "--solution", sln)
+    rec = calls()[-1]
+    check("xae record hands the helper a _before-record path for a recording the scope holds",
+          re.search(r"-HeldOut \S+ScopeR_\d{8}-\d{6}_before-record\.svdx", rec)
+          and "held_saved" not in out, rec + str(out))
+
+    out = x("xae", "record", "ScopeHeld", "--solution", sln)
+    held = Path(out.get("held_saved") or "")
+    dry = x("cleanup", "--solution", sln, "--dry-run").get("deleted") or []
+    check("a held recording saved before the press is reported and tracked for cleanup",
+          out.get("ok") is True and held.is_file() and held.name.endswith("_before-record.svdx")
+          and str(held) in dry and out.get("output") in dry, str(out))
+
+    out = x("xae", "record", "ScopeHeldFail", "--solution", sln)
+    held = Path(out.get("held_saved") or "")
+    dry = x("cleanup", "--solution", sln, "--dry-run").get("deleted") or []
+    check("a held recording saved before a refusal is still reported and tracked",
+          out.get("ok") is False and held.is_file() and str(held) in dry, str(out))
+
     out = x("xae", "record", "ScopeNope", "--solution", sln)
     check("xae record refuses a scope the project does not hold",
           out.get("ok") is False and "no scope named" in out.get("error", ""), str(out))
     out = x("xae", "record", "--solution", sln)
     check("xae record with several scopes and none named asks which",
           out.get("ok") is False and "say which to record" in out.get("error", ""), str(out))
+
+    # A named scope found in the Measurement folder on disk needs no `list` process
+    # before the press; the helper is told the path, to check XAE holds that file.
+    mproj = work / "Measurement"
+    shutil.copyfile(gen / "ScopeR.tcscopex", mproj / "ScopeM.tcscopex")
+    before = len(calls())
+    out = x("xae", "record", "ScopeM", "--solution", sln)
+    new = calls()[before:]
+    check("xae record of a scope on disk starts one helper process, handing it the path",
+          out.get("ok") is True and len(new) == 1 and new[0].startswith("record ")
+          and f"-ScopePath {(mproj / 'ScopeM.tcscopex').resolve()}" in new[0], str(new))
+    (mproj / "ScopeM.tcscopex").unlink()
     x("cleanup", "--solution", sln)
     (tmp / "scopes.json").unlink()
 

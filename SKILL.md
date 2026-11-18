@@ -216,6 +216,13 @@ py -3 scripts/tcscope.py cleanup --solution C:\work\Scratch\Scratch.sln
   buffer, auto-restart) and needs `--timeout` for one that stops on a trigger. It never presses
   *Stop Record*: stopping early raises a popup that blocks XAE until a person answers it. If the
   user wants it stopped early, they press Stop in XAE and answer the popup themselves.
+  If the user has just recorded, run `xae save`, not `xae record`. Pressing Start Record throws
+  away the recording a stopped scope holds, so `xae record` first saves any such recording as
+  `<scope>_<stamp>_before-record.svdx` (reported as `held_saved`, tracked for cleanup) — tell
+  the user it is there; it may be theirs. It works from a fresh XAE too, where the scope holds
+  nothing (Scope View's *Config* state). XAE must be wide
+  enough to show the *TwinCAT 3 Scope* toolbar's buttons — at half a screen they move into its
+  overflow (») and `xae record` refuses.
 - **`xae save`** writes `<scope>_<yyyyMMdd-HHmmss>.svdx` into the recordings folder: the
   project's own setting, else this PC's, else `<solution folder>\Recordings` — never the
   Desktop. `recordings --solution … --set <folder>` remembers the user's choice in
