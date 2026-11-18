@@ -3094,6 +3094,10 @@ def record_checks(x, tmp, work, sln, log):
           and out.get("fix") == "Answer it" and out.get("pressed") == ["Start Record"]
           and len(out.get("states") or []) == 2, str(out))
 
+    # The earlier ScopeR record named its file to the second; a second record in the
+    # same second is refused ("already exists"), so let the clock move on first.
+    import time
+    time.sleep(1.1)
     out = x("xae", "record", "ScopeR", "--solution", sln)
     rec = calls()[-1]
     check("xae record hands the helper a _before-record path for a recording the scope holds",
