@@ -16,7 +16,10 @@ and only returns real rows once a time range is known.
 
 **Not for authoring code.** This skill measures and diagnoses. Once the data has named a
 fault, writing the PLC fix is a different job. Load the companion skill `twincat-st` for it if
-it is installed; otherwise hand off to whatever covers ST authoring in this project.
+it is installed; otherwise hand off to whatever covers ST authoring in this project. When the
+data points to an NC axis's configuration instead — lag-monitoring limits, position-control
+gain (Kv), scaling, homing — load the companion skill `twincat-motion` the same way. A
+mechanical or drive fault the recording reveals goes to neither: report it with the evidence.
 
 ## The four rules
 
@@ -252,7 +255,8 @@ the unsaved recording.
 | Decide what to record, or size a scope | `references/recording-load.md` |
 | Build or edit a `.tcscopex` | `references/scope-configuration.md` + `newscope` |
 | A `.svdx` that will not convert, or a mangled CSV | `references/export-tool.md` |
-| Write or review ST / PLC code | Out of scope. Diagnose here, then hand the fix elsewhere |
+| Write or review ST / PLC code | Out of scope. Diagnose here, then load the companion skill `twincat-st` if installed; otherwise hand off |
+| The data points to an NC axis's configuration (lag monitoring, Kv, scaling, homing) | Diagnose here, then load the companion skill `twincat-motion` if installed; otherwise hand off |
 | Anything TwinSAFE, FSoE or safety-rated | Rule 1. Read and explain only |
 | Siemens or Rockwell trace tools | Out of scope. Say so rather than guessing |
 
